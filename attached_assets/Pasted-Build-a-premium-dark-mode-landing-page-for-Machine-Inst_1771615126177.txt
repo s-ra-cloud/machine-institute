@@ -1,0 +1,128 @@
+Build a premium dark-mode landing page for:
+
+Machine Institute
+Tagline: “A Research Center for AI Agents”
+
+Goal
+Create a credible academic + cybernetic aesthetic with a “deep research” vibe. Minimal, bold typography like weekendlabs.net, with a dynamic background. Make it feel like an institute lab site, not a startup brochure.
+
+Tech constraints
+Use React + TypeScript + Tailwind CSS. Single-page layout with clean section anchors. Use Framer Motion for subtle animations. No external UI kits required. Ensure fast load and excellent Lighthouse score. Fully responsive, mobile-first.
+
+Brand + visual direction
+- Theme: deep black / near-black base with purple research accents
+- Palette (Tailwind-friendly):
+  - Background: #07060B, #0B0A12
+  - Text: near-white #F4F2FF, muted #B9B3D6
+  - Accent purple: #7C3AED and #A78BFA
+  - Optional highlight: #22D3EE as a rare “signal” color for small details
+- Typography:
+  - Headings: modern grotesk (use a system font stack if no font import), heavy weight, large sizes
+  - Body: readable, slightly smaller, generous line-height
+- Layout: strong negative space, large hero text, restrained UI chrome
+- Imagery: avoid stock photos; use abstract shapes, gradients, grid, particles
+- Style cues:
+  - High contrast dark UI
+  - Subtle glow, soft purple bloom
+  - Cybernetic patterns (grid, nodes, connection lines) kept tasteful
+
+Dynamic background (key feature)
+Implement a lightweight animated background in the hero:
+Option A (preferred): HTML canvas particles with slow drift, subtle purple glow, occasional connecting lines when particles are near.
+Option B: CSS animated radial gradients + a faint moving grid overlay.
+Must respect prefers-reduced-motion and offer reduced animation accordingly.
+Keep performance smooth on mobile.
+
+Information architecture (sections)
+Top navigation (sticky, subtle, transparent with blur on scroll)
+- Projects
+- Research
+- Publications
+- People
+- Contact
+Right side CTA button: “Collaborate”
+
+Hero (full viewport)
+- Big headline:
+  “Machine Institute”
+- Subheadline:
+  “A Research Center for AI Agents”
+- Supporting copy (2 lines max):
+  “We design, evaluate, and deploy agentic systems with rigorous methods, reproducible benchmarks, and real-world constraints.”
+- CTAs:
+  Primary: “Explore Research”
+  Secondary: “View Projects”
+- Include 3 compact trust markers under CTAs (small caps):
+  “Reproducible” “Open Methods” “Safety-Aware”
+
+Section: Research Focus (3 cards)
+Cards with icon-like minimal glyphs (SVG)
+1) Agent Architectures
+   “Planning, tool-use, memory, and multi-agent coordination.”
+2) Evaluation and Benchmarks
+   “Robust metrics, failure taxonomies, and reproducible pipelines.”
+3) Deployment and Governance
+   “Monitoring, alignment practices, and operational safety.”
+
+Section: Featured Projects (3 to 5 items)
+Use a clean list or cards. Each item includes:
+- Project title
+- 1 sentence description
+- Tags (small pill badges)
+- Link button “Read more”
+Use placeholder project names that sound plausible:
+- “Atlas: Agent Reliability Suite”
+- “Cortex: Tool-Use Evaluation Harness”
+- “Helix: Multi-Agent Coordination Sandbox”
+
+Section: Publications (selected)
+Minimal academic list style:
+- Title
+- Authors (placeholder)
+- Year
+- Venue (placeholder)
+Add a small filter toggle UI: “All” “Preprints” “Workshop” (front-end only, no backend)
+
+Section: People
+Grid of 6 placeholder profiles with:
+- Name
+- Role (Research Lead, Applied Scientist, Engineer, Visiting Fellow)
+- One-line interest
+No photos required, use a subtle monogram avatar circle.
+
+Section: Collaborate
+Short paragraph + 3 collaboration modes:
+- Visiting Fellowship
+- Industry Research Partnership
+- Benchmark Contributions
+Add a simple contact form (front-end only) with:
+- Name, Email, Message
+- Consent checkbox
+- Button “Send”
+Include a note: “This demo form does not send emails.”
+
+Footer
+- Minimal links повтор: Terms, Privacy (placeholders)
+- Small line: “Machine Institute. Research Center for AI Agents.”
+
+Interaction and motion
+- Smooth scroll to anchors
+- Framer Motion: fade/slide in sections on view, very subtle
+- Button hover: slight glow and lift
+- Nav background transitions on scroll
+Respect prefers-reduced-motion for all animations.
+
+Accessibility
+- Color contrast compliant
+- Keyboard navigable
+- Focus rings visible
+- Semantic HTML
+
+Deliverables
+- Full working code in a standard React+TS structure
+- Tailwind configured
+- One main page component + small reusable components (Button, Section, Card)
+- Clear comments where I should replace placeholder content
+- Provide a short README with run instructions
+
+Make it look premium, academic, and cybernetic, with purple deep-research tone and a dynamic hero background inspired by weekendlabs.net minimalism.
