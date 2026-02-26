@@ -1,4 +1,4 @@
-import { ParticleBackground } from "./ParticleBackground";
+import heroVideo from "@assets/machine_hero_1772099751266.mp4";
 import { FadeIn } from "./ui/motion";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, FileText } from "lucide-react";
@@ -13,7 +13,17 @@ export function Hero() {
 
   return (
     <section className="relative min-h-screen flex items-center justify-center pt-20 overflow-hidden" id="hero">
-      <ParticleBackground />
+      <div className="absolute inset-0 z-0">
+        <video 
+          src={heroVideo}
+          autoPlay 
+          loop 
+          muted 
+          playsInline
+          className="w-full h-full object-cover opacity-40 mix-blend-screen"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-background/40 via-background/60 to-background"></div>
+      </div>
       
       <div className="container mx-auto px-6 relative z-10">
         <div className="max-w-4xl mx-auto text-center">
