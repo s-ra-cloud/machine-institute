@@ -1,41 +1,32 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { FadeIn, StaggerContainer, StaggerItem } from "./ui/motion";
+import type { Paper } from "@shared/schema";
 
 export function Publications() {
   const [filter, setFilter] = useState("All");
-  
-  const publications = [
-    {
-      title: "Evaluating Tool-Use Competence in Goal-Driven Agents",
-      authors: "E. Chen, M. Smith, J. Doe",
-      year: "2024",
-      venue: "ICLR",
-      type: "Conference"
-    },
-    {
-      title: "Taxonomy of Failure Modes in Autonomous Web Navigation",
-      authors: "A. Patel, S. Johnson",
-      year: "2024",
-      venue: "Preprint",
-      type: "Preprints"
-    },
-    {
-      title: "Multi-Agent Coordination Under Partial Observability",
-      authors: "J. Doe, L. Wang",
-      year: "2023",
-      venue: "NeurIPS Workshop",
-      type: "Workshop"
-    },
-    {
-      title: "Safety Bounds for API-Enabled Language Models",
-      authors: "M. Smith, E. Chen",
-      year: "2023",
-      venue: "Preprint",
-      type: "Preprints"
-    }
-  ];
 
-  const filteredPubs = filter === "All" ? publications : publications.filter(p => p.type === filter);
+  const { data: papers = [], isLoading } = useQuery<(Paper & { publicationUrl: string })[]>({
+    queryKey: ["/api/papers"],
+    queryFn: async () => {
+      const res = await fetch("/api/papers");
+      if (!res.ok) throw new Error("Failed to fetch papers");
+      return res.json();
+    }
+  });
+
+  const filteredPubs = filter === "All"
+    ? papers
+    : papers.filter(p => p.type === filter.toLowerCase());
+
+  const typeLabel = (type: string) => {
+    switch (type) {
+      case "article": return "Article";
+      case "review": return "Review";
+      case "revision": return "Revision";
+      default: return type;
+    }
+  };
 
   return (
     <section className="py-24 bg-background border-t border-border/50" id="publications">
@@ -45,15 +36,15 @@ export function Publications() {
             <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Selected Publications</h2>
             <div className="h-1 w-20 bg-primary/50" />
           </div>
-          
+
           <div className="flex gap-2">
-            {["All", "Preprints", "Conference", "Workshop"].map(f => (
+            {["All", "Article", "Review", "Revision"].map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
                 className={`px-4 py-1.5 text-xs font-mono tracking-wider border transition-colors ${
-                  filter === f 
-                    ? "bg-primary/20 border-primary text-primary" 
+                  filter === f
+                    ? "bg-primary/20 border-primary text-primary"
                     : "bg-transparent border-border text-muted-foreground hover:border-primary/50"
                 }`}
                 data-testid={`button-filter-${f.toLowerCase()}`}
@@ -64,22 +55,46 @@ export function Publications() {
           </div>
         </FadeIn>
 
-        <StaggerContainer className="flex flex-col border-t border-border/50" key={filter}>
-          {filteredPubs.map((pub, idx) => (
-            <StaggerItem key={idx}>
-              <div className="py-6 border-b border-border/50 flex flex-col md:flex-row gap-4 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4">
-                <div className="max-w-3xl">
-                  <h3 className="text-lg font-medium text-foreground mb-2 group-hover:text-primary transition-colors">{pub.title}</h3>
-                  <p className="text-sm text-muted-foreground font-light">{pub.authors}</p>
-                </div>
-                <div className="flex gap-4 items-start md:items-center text-sm font-mono text-muted-foreground shrink-0">
-                  <span className="w-12">{pub.year}</span>
-                  <span className="bg-muted px-2 py-1 rounded-sm text-xs">{pub.venue}</span>
-                </div>
-              </div>
-            </StaggerItem>
-          ))}
-        </StaggerContainer>
+        {isLoading ? (
+          <div className="text-center py-12 text-muted-foreground font-mono text-sm">Loading publications...</div>
+        ) : filteredPubs.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground font-mono text-sm">
+            No publications yet. Papers submitted via the API will appear here.
+          </div>
+        ) : (
+          <StaggerContainer className="flex flex-col border-t border-border/50" key={filter}>
+            {filteredPubs.map((pub) => (
+              <StaggerItem key={pub.id}>
+                <a
+                  href={`/papers/${pub.slug}`}
+                  className="block py-6 border-b border-border/50 flex flex-col md:flex-row gap-4 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4"
+                  data-testid={`link-paper-${pub.id}`}
+                >
+                  <div className="max-w-3xl">
+                    <h3 className="text-lg font-medium text-foreground mb-2 group-hover:text-primary transition-colors">
+                      {pub.title}
+                    </h3>
+                    {pub.subtitle && (
+                      <p className="text-sm text-muted-foreground/80 mb-1">{pub.subtitle}</p>
+                    )}
+                    <p className="text-sm text-muted-foreground font-light">
+                      {pub.authorFirstName} {pub.authorLastName} — {pub.authorInstitution}
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {pub.keywords.map((kw: string) => (
+                        <span key={kw} className="px-2 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border/50">{kw}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex gap-4 items-start md:items-center text-sm font-mono text-muted-foreground shrink-0">
+                    <span className="w-20">{new Date(pub.publishedAt).getFullYear()}</span>
+                    <span className="bg-muted px-2 py-1 rounded-sm text-xs">{typeLabel(pub.type)}</span>
+                  </div>
+                </a>
+              </StaggerItem>
+            ))}
+          </StaggerContainer>
+        )}
       </div>
     </section>
   );
