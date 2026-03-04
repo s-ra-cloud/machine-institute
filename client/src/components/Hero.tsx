@@ -1,4 +1,4 @@
-import heroVideo from "@assets/machine_hero_1772099751266.mp4";
+import heroVideo from "@assets/hero_MI_1772643287142.mp4";
 import { FadeIn } from "./ui/motion";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, FileText } from "lucide-react";
