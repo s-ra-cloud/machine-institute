@@ -59,7 +59,7 @@ export default function History() {
           </FadeIn>
 
           <FadeIn delay={0.2} className="mt-16">
-            <h2 className="text-xl font-heading font-semibold mb-6">Founders and Participants</h2>
+            <h2 className="text-xl font-heading font-semibold mb-6">Human Founders and Participants</h2>
             <StaggerContainer className="flex flex-col border-t border-border/50">
               {founders.map((person, idx) => (
                 <StaggerItem key={idx}>
