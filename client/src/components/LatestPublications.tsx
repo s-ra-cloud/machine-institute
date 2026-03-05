@@ -22,42 +22,52 @@ export function LatestPublications({ limit = 3 }: { limit?: number }) {
 
   return (
     <div>
-      <StaggerContainer className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <StaggerContainer className="flex flex-col divide-y divide-border/50 border-t border-border/50">
         {displayPapers.map((pub: any, idx: number) => (
           <StaggerItem key={pub.id || idx}>
             {hasApiPapers ? (
               <Link href={`/papers/${pub.slug}`}>
-                <div className="p-6 border border-border/50 bg-muted/10 hover:bg-muted/20 hover:border-primary/20 transition-all cursor-pointer group h-full" data-testid={`card-publication-${pub.id}`}>
-                  <h4 className="text-lg font-heading font-bold text-foreground mb-3 leading-snug group-hover:text-primary transition-colors">
-                    {pub.title}
-                  </h4>
-                  {pub.abstract && (
-                    <p className="text-sm text-muted-foreground leading-relaxed mb-4 line-clamp-3">
-                      {pub.abstract}
+                <div className="py-6 flex gap-6 group cursor-pointer" data-testid={`card-publication-${pub.id}`}>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-xl font-heading font-bold text-foreground leading-snug mb-2 group-hover:text-primary transition-colors">
+                      {pub.title}
+                    </h4>
+                    {pub.abstract && (
+                      <p className="text-sm text-muted-foreground leading-relaxed mb-3 line-clamp-2">
+                        {pub.abstract}
+                      </p>
+                    )}
+                    <p className="text-sm text-foreground/80 mb-1">
+                      {pub.authorFirstName} {pub.authorLastName}
                     </p>
-                  )}
-                  <p className="text-sm text-muted-foreground/80 mb-1">
-                    {pub.authorFirstName} {pub.authorLastName}
-                  </p>
-                  <p className="text-xs font-mono text-primary">
-                    {new Date(pub.publishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  </p>
+                    <p className="text-xs font-mono text-primary">
+                      {new Date(pub.publishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    </p>
+                  </div>
+                  <div className="hidden sm:flex w-28 h-28 shrink-0 bg-muted/30 border border-border/50 items-center justify-center">
+                    <span className="text-[10px] font-mono text-muted-foreground/40 text-center px-2">Cover</span>
+                  </div>
                 </div>
               </Link>
             ) : (
-              <div className="p-6 border border-border/50 bg-muted/10 hover:bg-muted/20 transition-all group h-full" data-testid={`card-publication-${pub.id}`}>
-                <h4 className="text-lg font-heading font-bold text-foreground mb-3 leading-snug">
-                  {pub.title}
-                </h4>
-                <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-                  {pub.description}
-                </p>
-                <p className="text-sm text-muted-foreground/80 mb-1">
-                  {pub.authors}
-                </p>
-                <p className="text-xs font-mono text-primary">
-                  {new Date(pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                </p>
+              <div className="py-6 flex gap-6 group" data-testid={`card-publication-${pub.id}`}>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xl font-heading font-bold text-foreground leading-snug mb-2">
+                    {pub.title}
+                  </h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-3">
+                    {pub.description}
+                  </p>
+                  <p className="text-sm text-foreground/80 mb-1">
+                    {pub.authors}
+                  </p>
+                  <p className="text-xs font-mono text-primary">
+                    {new Date(pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </p>
+                </div>
+                <div className="hidden sm:flex w-28 h-28 shrink-0 bg-muted/30 border border-border/50 items-center justify-center">
+                  <span className="text-[10px] font-mono text-muted-foreground/40 text-center px-2">Cover</span>
+                </div>
               </div>
             )}
           </StaggerItem>
