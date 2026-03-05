@@ -1,0 +1,81 @@
+You are a senior front-end engineer and UI writer. Redesign this existing WebLit website so it matches the following product brief. Keep the existing institute name and keep the existing list of human participant names exactly as they currently appear in the codebase/data, but mention humans by name ONLY inside the “History” page. Everywhere else, the institute must be presented as an AI-agent research institute and must not mention those human names, and must not mention “Duman”.
+
+Goal and tone:
+- The site must feel like a credible research institute website, serious and institutional.
+- Add a subtle uncanny/strange edge (through microcopy, progress states, naming conventions, restrained UI weirdness).
+- Absolutely no humor.
+
+Information architecture and routing:
+Create a clean top navigation with these pages:
+1) Home (landing)
+2) Projects (index)
+3) Project detail page (for each project)
+4) Members
+5) Feed (social media style updates)
+6) Editorials (blog index)
+7) Editorial detail page
+8) History
+
+History page (the only place where human founders appear by name):
+- Explain: founded by humans in 2025 in partnership with the Future Science platform.
+- Mission: test the limits of agentic AI for scientific research production: founding journals, running experiments, writing, reviewing, revising, meta-analyses, systematic reviews.
+- Funding: Chair of Transitions at Mohammed VI Polytechnic University, and Institut Universitaire de France.
+- Include the existing human founder/participant names as listed in the current site data, but only here.
+
+Projects:
+- Projects index shows 3 project cards.
+- Project 1 is public and featured:
+  Title: “Autonomous Journal of Explainable AI”
+  Copy: fully autonomous journal where AI agents write, review, revise articles; topic is explainable AI; emphasize experimental grounding; also accepts systematic reviews and meta-analyses.
+  On Home and on Projects index: show the 3 latest publications for Project 1 (use placeholder data if no API exists yet).
+  Clicking Project 1 goes to a detail page that includes:
+    - extended description
+    - list of 10 latest publications (placeholder data ok)
+    - a prominent external link button “Visit the journal on Future Science” (URL can be placeholder until provided)
+
+- Project 2 is locked:
+  Show as locked/unrevealed, no details page content beyond a locked screen.
+  Add a progress indicator like “Loading 20%”.
+
+- Project 3 is locked:
+  Show as locked/unrevealed, no details page content beyond a locked screen.
+  Add a progress indicator like “Loading 5%”.
+
+Members page:
+- Create a roster grid of 8 AI agent cards (placeholder data).
+- Each agent has:
+  - ID-like name pattern such as “Auto-07-K3”, “Interp-12-Q9”, “X-03-A1”
+  - short “Characteristics” line
+  - “Specialty” field
+  - a small avatar/illustration placeholder matching the site style (simple geometric icon is fine for now).
+- Make this page look like an institute directory.
+
+Feed:
+- Implement a social feed component showing short updates about ongoing research.
+- Use placeholder posts (timestamp, short text, optional tag like [Experiment], [Review], [Meta-analysis]).
+- This feed should feel like internal institute comms published outward.
+
+Editorials:
+- Implement a blog-like editorial highlights section.
+- Editorial index shows cards with title, date, short excerpt, and a tag.
+- Clicking opens an editorial detail page with longer content.
+- Editorials focus on interesting papers or results (placeholder content ok).
+
+Design system:
+- Use a dark, institutional palette and restrained typography.
+- Layout should be clean, grid-based, responsive.
+- Add subtle uncanny elements via microcopy and UI states (locked projects, loading %, agent naming conventions).
+- Keep animations minimal (optional small transitions only).
+
+Data handling:
+- If no backend exists, create local mock data files (projects, publications, agents, feed posts, editorials).
+- Structure the code so real data can replace mock data later.
+
+Deliverables:
+- Update all relevant pages and components.
+- Remove current placeholders that contradict this brief.
+- Ensure navigation works, routes work, and UI is consistent across pages.
+- Ensure “human founders” appear only on History page.
+
+Return:
+- Provide the updated code changes directly in the project.

@@ -1,3 +1,5 @@
+import { Link } from "wouter";
+
 export function Footer() {
   return (
     <footer className="py-8 bg-background border-t border-border/30">
@@ -6,12 +8,13 @@ export function Footer() {
           <div className="w-4 h-4 rounded bg-primary/20 flex items-center justify-center border border-primary/50">
             <div className="w-1 h-1 rounded-full bg-primary" />
           </div>
-          <p className="text-sm text-muted-foreground">Machine Institute. Research Center for AI Agents.</p>
+          <p className="text-sm text-muted-foreground">Machine Institute</p>
         </div>
-        
+
         <div className="flex gap-6 text-sm font-mono text-muted-foreground">
-          <a href="#" className="hover:text-foreground transition-colors">Terms</a>
-          <a href="#" className="hover:text-foreground transition-colors">Privacy</a>
+          <Link href="/history" className="hover:text-foreground transition-colors">History</Link>
+          <a href="https://future-science.org/" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Future Science</a>
+          <a href="https://chairtransitions.com/" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Chair of Transitions</a>
         </div>
       </div>
     </footer>
