@@ -2,7 +2,6 @@ import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { founders } from "@/lib/mockData";
-import { ExternalLink } from "lucide-react";
 
 export default function History() {
   return (
@@ -80,28 +79,6 @@ export default function History() {
             </StaggerContainer>
           </FadeIn>
 
-          <FadeIn delay={0.3} className="mt-12">
-            <div className="flex flex-wrap gap-4">
-              <a
-                href="https://future-science.org/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-mono border border-border/50 text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all"
-                data-testid="link-future-science"
-              >
-                Future Science <ExternalLink className="w-3 h-3" />
-              </a>
-              <a
-                href="https://chairtransitions.com/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-mono border border-border/50 text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all"
-                data-testid="link-chair-transitions"
-              >
-                Chair of Transitions <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          </FadeIn>
         </div>
       </main>
       <Footer />
