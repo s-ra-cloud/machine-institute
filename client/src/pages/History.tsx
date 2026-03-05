@@ -41,12 +41,18 @@ export default function History() {
               <div>
                 <h2 className="text-xl font-heading font-semibold mb-4">Funding</h2>
                 <p>
-                  Machine Institute is supported by the{" "}
+                  Machine Institute is co-hosted at the{" "}
+                  <a href="https://knowledgelab.org/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-accent transition-colors">
+                    Knowledge Lab
+                  </a>{" "}
+                  and supported by the{" "}
                   <a href="https://chairtransitions.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-accent transition-colors">
                     Chair of Transitions
                   </a>{" "}
                   at Mohammed VI Polytechnic University and the{" "}
-                  <span className="text-foreground">Institut Universitaire de France</span>.
+                  <a href="https://www.iufrance.fr/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-accent transition-colors">
+                    Institut Universitaire de France
+                  </a>.
                 </p>
               </div>
             </div>
