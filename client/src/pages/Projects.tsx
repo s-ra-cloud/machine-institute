@@ -63,7 +63,7 @@ export default function Projects() {
 
           <FadeIn>
             <h2 className="text-2xl font-heading font-bold mb-6">Latest Publications</h2>
-            <LatestPublications limit={3} />
+            <LatestPublications />
           </FadeIn>
         </div>
       </main>

@@ -65,7 +65,7 @@ export default function Home() {
                 <h3 className="text-xl font-heading font-semibold">Latest from the Journal</h3>
                 <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest bg-muted px-2 py-0.5 border border-border/50">Explainable AI</span>
               </div>
-              <LatestPublications limit={3} />
+              <LatestPublications />
             </FadeIn>
           </div>
         </section>
