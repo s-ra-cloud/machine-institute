@@ -34,9 +34,7 @@ export function Navigation() {
       <div className="container mx-auto px-6 flex items-center justify-between">
         <Link href="/" data-testid="link-home">
           <div className="flex items-center gap-2 cursor-pointer">
-            <div className="w-6 h-6 rounded bg-primary/20 flex items-center justify-center border border-primary/50">
-              <div className="w-2 h-2 rounded-full bg-primary" />
-            </div>
+            <img src="/logo.png" alt="Machine Institute" className="h-8 w-8 object-contain" />
             <span className="font-heading font-bold text-lg tracking-tight">
               Machine<span className="text-muted-foreground font-light">Institute</span>
             </span>
