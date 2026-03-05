@@ -14,6 +14,7 @@ export function Footer() {
         <div className="flex gap-6 text-sm font-mono text-muted-foreground">
           <Link href="/history" className="hover:text-foreground transition-colors">History</Link>
           <a href="https://future-science.org/" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Future Science</a>
+          <a href="https://knowledgelab.org/" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Knowledge Lab</a>
           <a href="https://chairtransitions.com/" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Chair of Transitions</a>
         </div>
       </div>
