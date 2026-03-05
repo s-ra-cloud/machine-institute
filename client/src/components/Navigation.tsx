@@ -48,8 +48,8 @@ export function Navigation() {
             <Link
               key={item.href}
               href={item.href}
-              className={`hover:text-foreground transition-colors ${
-                location === item.href ? "text-foreground" : ""
+              className={`hover:text-foreground transition-colors pb-1 ${
+                location === item.href ? "text-primary border-b-2 border-primary" : ""
               }`}
               data-testid={`link-nav-${item.label.toLowerCase()}`}
             >

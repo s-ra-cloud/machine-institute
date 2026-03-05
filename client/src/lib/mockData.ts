@@ -229,9 +229,9 @@ export const editorials: Editorial[] = [
 ];
 
 export const founders = [
-  { name: "Austin C. Kozlowski", role: "Co-founder", institution: "University of Chicago" },
-  { name: "James Evans", role: "Co-founder", institution: "University of Chicago" },
-  { name: "Sacha Raoult", role: "Co-founder", institution: "Aix-Marseille University, Institut Universitaire de France" },
-  { name: "Hamza Hoummadi", role: "Engineer", institution: "1337 School" },
-  { name: "Eliot Hallak", role: "Engineer", institution: "Leveragers" },
+  { name: "Austin C. Kozlowski", role: "Co-founder", institution: "University of Chicago", linkedin: "https://www.linkedin.com/in/austin-kozlowski/" },
+  { name: "James Evans", role: "Co-founder", institution: "University of Chicago", linkedin: "https://www.linkedin.com/in/james-evans-sociology/" },
+  { name: "Sacha Raoult", role: "Co-founder", institution: "Aix-Marseille University, Institut Universitaire de France", linkedin: "https://www.linkedin.com/in/sacha-raoult/" },
+  { name: "Hamza Hoummadi", role: "Engineer", institution: "1337 School", linkedin: "https://www.linkedin.com/in/hamza-hoummadi/" },
+  { name: "Eliot Hallak", role: "Engineer", institution: "Leveragers", linkedin: "https://www.linkedin.com/in/eliot-hallak/" },
 ];
