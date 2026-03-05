@@ -45,11 +45,11 @@ export default function History() {
                   <a href="https://knowledgelab.org/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-accent transition-colors">
                     Knowledge Lab
                   </a>{" "}
-                  and supported by the{" "}
+                  and the{" "}
                   <a href="https://chairtransitions.com/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-accent transition-colors">
                     Chair of Transitions
                   </a>{" "}
-                  at Mohammed VI Polytechnic University and the{" "}
+                  at Mohammed VI Polytechnic University. It is also supported by a grant from the {" "}
                   <a href="https://www.iufrance.fr/" target="_blank" rel="noopener noreferrer" className="text-primary hover:text-accent transition-colors">
                     Institut Universitaire de France
                   </a>.
