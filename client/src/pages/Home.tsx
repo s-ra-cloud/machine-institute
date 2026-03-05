@@ -3,18 +3,52 @@ import { Hero } from "@/components/Hero";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { LatestPublications } from "@/components/LatestPublications";
 import { Footer } from "@/components/Footer";
-import { projects } from "@/lib/mockData";
+import { projects, editorials } from "@/lib/mockData";
 import { Link } from "wouter";
 import { ArrowRight, Lock } from "lucide-react";
 
 export default function Home() {
+  const latestEditorials = editorials.slice(0, 2);
+
   return (
     <div className="min-h-screen bg-background text-foreground relative">
       <Navigation />
       <main>
         <Hero />
 
-        <section className="py-24 bg-background border-t border-border/50" id="projects">
+        <section className="py-24 bg-background border-t border-border/50" id="editorials">
+          <div className="container mx-auto px-6 max-w-5xl">
+            <FadeIn className="mb-12">
+              <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Editorials</h2>
+              <div className="h-1 w-20 bg-primary/50" />
+            </FadeIn>
+
+            <StaggerContainer className="flex flex-col gap-6 mb-8">
+              {latestEditorials.map((ed) => (
+                <StaggerItem key={ed.id}>
+                  <Link href={`/editorials/${ed.slug}`}>
+                    <div className="p-6 md:p-8 border border-border/50 bg-muted/10 hover:bg-muted/20 hover:border-primary/20 transition-all cursor-pointer group" data-testid={`card-editorial-home-${ed.id}`}>
+                      <div className="flex items-center gap-3 mb-3">
+                        <span className="text-[10px] font-mono text-primary uppercase tracking-widest bg-primary/10 px-2 py-0.5 border border-primary/20">{ed.tag}</span>
+                        <span className="text-xs font-mono text-muted-foreground/50">{new Date(ed.date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
+                      </div>
+                      <h3 className="text-xl font-heading font-semibold mb-3 group-hover:text-primary transition-colors">{ed.title}</h3>
+                      <p className="text-sm text-muted-foreground leading-relaxed">{ed.excerpt}</p>
+                    </div>
+                  </Link>
+                </StaggerItem>
+              ))}
+            </StaggerContainer>
+
+            <FadeIn>
+              <Link href="/editorials" className="inline-flex items-center gap-2 text-sm font-mono text-primary hover:text-accent transition-colors" data-testid="link-all-editorials">
+                All editorials <ArrowRight className="w-3 h-3" />
+              </Link>
+            </FadeIn>
+          </div>
+        </section>
+
+        <section className="py-24 bg-muted/10 border-t border-border/50" id="projects">
           <div className="container mx-auto px-6">
             <FadeIn className="mb-12">
               <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Projects</h2>
@@ -26,7 +60,7 @@ export default function Home() {
                 <StaggerItem key={project.id}>
                   {project.status === "public" ? (
                     <Link href={`/projects/${project.id}`}>
-                      <div className="h-full p-8 border border-border/50 bg-muted/20 hover:bg-muted/40 hover:border-primary/30 transition-all cursor-pointer group" data-testid={`card-project-${project.id}`}>
+                      <div className="h-full p-8 border border-border/50 bg-background hover:bg-muted/20 hover:border-primary/30 transition-all cursor-pointer group" data-testid={`card-project-${project.id}`}>
                         {project.featured && (
                           <span className="text-[10px] font-mono text-primary uppercase tracking-widest mb-4 block">Featured</span>
                         )}
@@ -38,7 +72,7 @@ export default function Home() {
                       </div>
                     </Link>
                   ) : (
-                    <div className="h-full p-8 border border-border/30 bg-muted/10 relative overflow-hidden" data-testid={`card-project-${project.id}`}>
+                    <div className="h-full p-8 border border-border/30 bg-background/50 relative overflow-hidden" data-testid={`card-project-${project.id}`}>
                       <div className="flex items-center gap-2 mb-4">
                         <Lock className="w-4 h-4 text-muted-foreground/50" />
                         <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest">Classified</span>

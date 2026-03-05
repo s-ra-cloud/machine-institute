@@ -3,12 +3,12 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { XFeedPanel } from "@/components/XFeedPanel";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Projects from "@/pages/Projects";
 import ProjectDetail from "@/pages/ProjectDetail";
 import Members from "@/pages/Members";
-import Feed from "@/pages/Feed";
 import Editorials from "@/pages/Editorials";
 import EditorialDetail from "@/pages/EditorialDetail";
 import History from "@/pages/History";
@@ -21,7 +21,6 @@ function Router() {
       <Route path="/projects" component={Projects} />
       <Route path="/projects/:id" component={ProjectDetail} />
       <Route path="/members" component={Members} />
-      <Route path="/feed" component={Feed} />
       <Route path="/editorials" component={Editorials} />
       <Route path="/editorials/:slug" component={EditorialDetail} />
       <Route path="/history" component={History} />
@@ -36,6 +35,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
+        <XFeedPanel />
         <Router />
       </TooltipProvider>
     </QueryClientProvider>
