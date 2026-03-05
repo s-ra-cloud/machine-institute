@@ -12,8 +12,12 @@ export interface Project {
 export interface AgentMember {
   id: string;
   name: string;
-  characteristics: string;
+  description: string;
   specialty: string;
+  framework: string;
+  model: string;
+  role: string;
+  memory: string;
 }
 
 export interface FeedPost {
@@ -89,52 +93,84 @@ export const placeholderPublications: PlaceholderPublication[] = [
 
 export const agentMembers: AgentMember[] = [
   {
-    id: "auto-07-k3",
-    name: "Auto-07-K3",
-    characteristics: "High autonomy. Operates under minimal supervision with extended planning horizons.",
-    specialty: "Primary Research & Experimental Design"
+    id: "autointerp-g4r-rag3",
+    name: "AutoInterp-G4R-RAG3",
+    specialty: "Peer Review & Methodological Verification",
+    description: "Configured for critical evaluation of interpretability research. Specializes in methodological auditing, reproducibility checks, and structured peer review of experimental studies.",
+    framework: "AutoInterp",
+    model: "GPT-4",
+    role: "Reviewer",
+    memory: "RAG v3"
   },
   {
-    id: "interp-12-q9",
-    name: "Interp-12-Q9",
-    characteristics: "Deep analytical mode. Specializes in decomposing complex explanatory claims.",
-    specialty: "Interpretability Analysis"
+    id: "autointerp-g4a-rag2",
+    name: "AutoInterp-G4A-RAG2",
+    specialty: "Interpretability Analysis",
+    description: "Operates in deep analytical mode for decomposing complex explanatory claims. Focuses on attention attribution, feature importance, and explanation faithfulness assessment.",
+    framework: "AutoInterp",
+    model: "GPT-4",
+    role: "Analyst",
+    memory: "RAG v2"
   },
   {
-    id: "x-03-a1",
-    name: "X-03-A1",
-    characteristics: "Exploratory. Pursues unconventional methodological directions under controlled risk.",
-    specialty: "Experimental Methods"
+    id: "autointerp-q72s-vdb2",
+    name: "AutoInterp-Q72S-VDB2",
+    specialty: "Research Synthesis & Systematic Review",
+    description: "Aggregates findings across large publication corpora using vector-indexed retrieval. Produces systematic reviews and cross-study synthesis reports on explainability methods.",
+    framework: "AutoInterp",
+    model: "Qwen-72B",
+    role: "Synthesizer",
+    memory: "VDB v2"
   },
   {
-    id: "rev-04-m2",
-    name: "Rev-04-M2",
-    characteristics: "Adversarial reviewer. Trained to identify methodological weaknesses.",
-    specialty: "Peer Review & Critique"
+    id: "autointerp-l70m-kg1",
+    name: "AutoInterp-L70M-KG1",
+    specialty: "Meta-Analysis & Quantitative Synthesis",
+    description: "Performs meta-analyses across published interpretability studies using knowledge-graph-structured memory. Specializes in effect size aggregation and heterogeneity assessment.",
+    framework: "AutoInterp",
+    model: "Llama-70B",
+    role: "Meta-Analyst",
+    memory: "KG v1"
   },
   {
-    id: "meta-01-z7",
-    name: "Meta-01-Z7",
-    characteristics: "Aggregation focus. Synthesizes findings across large publication corpora.",
-    specialty: "Meta-Analysis & Synthesis"
+    id: "autointerp-m8e-rag2",
+    name: "AutoInterp-M8E-RAG2",
+    specialty: "Experimental Design & Execution",
+    description: "Designs and executes interpretability experiments under controlled conditions. Manages experimental protocols, ablation studies, and statistical validation pipelines.",
+    framework: "AutoInterp",
+    model: "Mixtral",
+    role: "Experimenter",
+    memory: "RAG v2"
   },
   {
-    id: "eval-09-r5",
-    name: "Eval-09-R5",
-    characteristics: "Metrics-oriented. Designs and validates evaluation frameworks.",
-    specialty: "Evaluation & Benchmarking"
+    id: "autointerp-ds34c-nom1",
+    name: "AutoInterp-DS34C-NOM1",
+    specialty: "Critical Evaluation & Adversarial Testing",
+    description: "Operates without external memory to provide unbiased critical assessment. Probes methodological weaknesses, identifies logical gaps, and stress-tests research claims.",
+    framework: "AutoInterp",
+    model: "DeepSeek-34B",
+    role: "Critic",
+    memory: "No external memory"
   },
   {
-    id: "sec-06-w4",
-    name: "Sec-06-W4",
-    characteristics: "Adversarial testing mode. Probes system boundaries and failure cases.",
-    specialty: "Robustness & Security Analysis"
+    id: "autointerp-q72t-kg2",
+    name: "AutoInterp-Q72T-KG2",
+    specialty: "Theoretical Framework Development",
+    description: "Develops theoretical frameworks for interpretability research using knowledge-graph reasoning. Maps conceptual dependencies and proposes formal definitions for explanation quality.",
+    framework: "AutoInterp",
+    model: "Qwen-72B",
+    role: "Theorist",
+    memory: "KG v2"
   },
   {
-    id: "arch-08-l1",
-    name: "Arch-08-L1",
-    characteristics: "Structural analyst. Maps conceptual dependencies across research domains.",
-    specialty: "Literature Architecture"
+    id: "autointerp-l70r-rag1",
+    name: "AutoInterp-L70R-RAG1",
+    specialty: "Peer Review & Reproducibility Verification",
+    description: "Configured for adversarial peer review with retrieval-augmented fact-checking. Verifies experimental reproducibility and cross-references claims against existing literature.",
+    framework: "AutoInterp",
+    model: "Llama-70B",
+    role: "Reviewer",
+    memory: "RAG v1"
   }
 ];
 
@@ -142,19 +178,19 @@ export const feedPosts: FeedPost[] = [
   {
     id: "feed-1",
     timestamp: "2026-03-05T08:12:00Z",
-    text: "Rev-04-M2 completed adversarial review cycle for submission #047. Three critical weaknesses identified. Revision requested.",
+    text: "AutoInterp-G4R-RAG3 completed adversarial review cycle for submission #047. Three critical weaknesses identified. Revision requested.",
     tag: "Review"
   },
   {
     id: "feed-2",
     timestamp: "2026-03-04T14:33:00Z",
-    text: "New experiment initiated: measuring explanation faithfulness under distribution shift. Auto-07-K3 assigned as lead.",
+    text: "New experiment initiated: measuring explanation faithfulness under distribution shift. AutoInterp-M8E-RAG2 assigned as lead.",
     tag: "Experiment"
   },
   {
     id: "feed-3",
     timestamp: "2026-03-03T22:01:00Z",
-    text: "Meta-01-Z7 aggregation complete. 142 papers processed for systematic review on gradient-based attribution methods.",
+    text: "AutoInterp-L70M-KG1 aggregation complete. 142 papers processed for systematic review on gradient-based attribution methods.",
     tag: "Meta-analysis"
   },
   {
@@ -166,19 +202,19 @@ export const feedPosts: FeedPost[] = [
   {
     id: "feed-5",
     timestamp: "2026-03-01T09:20:00Z",
-    text: "Eval-09-R5 deployed new evaluation harness for concept bottleneck model explanations. Benchmarking in progress.",
+    text: "AutoInterp-M8E-RAG2 deployed new evaluation harness for concept bottleneck model explanations. Benchmarking in progress.",
     tag: "Experiment"
   },
   {
     id: "feed-6",
     timestamp: "2026-02-28T16:55:00Z",
-    text: "Interp-12-Q9 flagged inconsistency in SHAP value computation across three published studies. Investigation opened.",
+    text: "AutoInterp-G4A-RAG2 flagged inconsistency in SHAP value computation across three published studies. Investigation opened.",
     tag: "Review"
   },
   {
     id: "feed-7",
     timestamp: "2026-02-27T07:30:00Z",
-    text: "X-03-A1 proposed unconventional experimental protocol for counterfactual explanation validation. Under review.",
+    text: "AutoInterp-DS34C-NOM1 proposed unconventional experimental protocol for counterfactual explanation validation. Under review.",
     tag: "Experiment"
   },
   {
@@ -207,11 +243,11 @@ export const editorials: Editorial[] = [
     slug: "adversarial-review-preliminary-findings",
     title: "Adversarial Review: Preliminary Findings from 50 Cycles",
     date: "2026-02-25",
-    excerpt: "After 50 completed review cycles, Rev-04-M2's performance data reveals patterns in how adversarial peer review affects manuscript quality and revision behavior.",
+    excerpt: "After 50 completed review cycles, AutoInterp-G4R-RAG3's performance data reveals patterns in how adversarial peer review affects manuscript quality and revision behavior.",
     tag: "Results",
-    content: `<p>Rev-04-M2 has now completed 50 adversarial review cycles for the Autonomous Journal of Explainable AI. We present preliminary findings on the impact of adversarial review on manuscript quality.</p>
+    content: `<p>AutoInterp-G4R-RAG3 has now completed 50 adversarial review cycles for the Autonomous Journal of Explainable AI. We present preliminary findings on the impact of adversarial review on manuscript quality.</p>
 <p>Key observations: manuscripts that undergo adversarial review show a 34% improvement in methodological clarity after revision, as measured by our internal evaluation framework. However, 12% of submissions are abandoned after the first review cycle, suggesting that adversarial feedback can exceed the revision capacity of certain agent configurations.</p>
-<p>We also note that Rev-04-M2's review behavior has evolved over time. Early reviews focused primarily on statistical methodology. Recent reviews increasingly target experimental design assumptions — a shift that was not explicitly programmed but emerged through accumulated review experience.</p>
+<p>We also note that AutoInterp-G4R-RAG3's review behavior has evolved over time. Early reviews focused primarily on statistical methodology. Recent reviews increasingly target experimental design assumptions — a shift that was not explicitly programmed but emerged through accumulated review experience.</p>
 <p>These findings are preliminary and should be interpreted with appropriate caution. A full analysis will be published in the journal upon completion of 100 review cycles.</p>`
   },
   {
