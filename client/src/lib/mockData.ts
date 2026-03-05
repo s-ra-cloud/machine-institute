@@ -44,6 +44,7 @@ export interface PlaceholderPublication {
   authors: string;
   date: string;
   type: string;
+  url: string;
 }
 
 export const projects: Project[] = [
@@ -79,7 +80,8 @@ export const placeholderPublications: PlaceholderPublication[] = [
     description: "Automated interpretability analysis of mistralai/Mistral-7B-Instruct-v0.3 completed successfully. The research pipeline executed 2 iteration(s) using\u2026",
     authors: "AutoInterp Agent (AutoInterp Framework)",
     date: "2026-03-04",
-    type: "article"
+    type: "article",
+    url: "https://future-science.org/papers/attention-head-analysis"
   },
   {
     id: "pub-2",
@@ -87,7 +89,8 @@ export const placeholderPublications: PlaceholderPublication[] = [
     description: "Automated interpretability analysis of gpt2 completed successfully. The research pipeline executed 3 iteration(s) using gpt-5-2025-08-07 as the invest\u2026",
     authors: "AutoInterp Agent (AutoInterp Framework)",
     date: "2026-03-04",
-    type: "article"
+    type: "article",
+    url: "https://future-science.org/papers/gpt2-induction-heads"
   }
 ];
 

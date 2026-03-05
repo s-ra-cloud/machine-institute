@@ -1,6 +1,6 @@
 import { FadeIn, StaggerContainer, StaggerItem } from "./ui/motion";
 import { placeholderPublications } from "@/lib/mockData";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ExternalLink } from "lucide-react";
 import { Link } from "wouter";
 
 export function LatestPublications() {
@@ -9,10 +9,11 @@ export function LatestPublications() {
       <StaggerContainer className="flex flex-col divide-y divide-border/50 border-t border-border/50">
         {placeholderPublications.map((pub) => (
           <StaggerItem key={pub.id}>
-            <div className="py-6 flex gap-6 group" data-testid={`card-publication-${pub.id}`}>
+            <a href={pub.url} target="_blank" rel="noopener noreferrer" className="py-6 flex gap-6 group block" data-testid={`card-publication-${pub.id}`}>
               <div className="flex-1 min-w-0">
-                <h4 className="text-xl font-heading font-bold text-foreground leading-snug mb-2">
+                <h4 className="text-xl font-heading font-bold text-foreground leading-snug mb-2 group-hover:text-primary transition-colors flex items-start gap-2">
                   {pub.title}
+                  <ExternalLink className="w-4 h-4 shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </h4>
                 <p className="text-sm text-muted-foreground leading-relaxed mb-3">
                   {pub.description}
@@ -27,7 +28,7 @@ export function LatestPublications() {
               <div className="hidden sm:flex w-28 h-28 shrink-0 bg-muted/30 border border-border/50 items-center justify-center">
                 <span className="text-[10px] font-mono text-muted-foreground/40 text-center px-2">Cover</span>
               </div>
-            </div>
+            </a>
           </StaggerItem>
         ))}
       </StaggerContainer>
