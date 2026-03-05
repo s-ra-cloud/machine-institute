@@ -22,38 +22,49 @@ export function LatestPublications({ limit = 3 }: { limit?: number }) {
 
   return (
     <div>
-      <StaggerContainer className="flex flex-col border-t border-border/50">
+      <StaggerContainer className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {displayPapers.map((pub: any, idx: number) => (
           <StaggerItem key={pub.id || idx}>
-            <div className="py-5 border-b border-border/50 flex flex-col md:flex-row gap-3 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4">
-              <div className="max-w-3xl">
-                {hasApiPapers ? (
-                  <Link href={`/papers/${pub.slug}`}>
-                    <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors cursor-pointer">
-                      {pub.title}
-                    </h4>
-                  </Link>
-                ) : (
-                  <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors">
+            {hasApiPapers ? (
+              <Link href={`/papers/${pub.slug}`}>
+                <div className="p-6 border border-border/50 bg-muted/10 hover:bg-muted/20 hover:border-primary/20 transition-all cursor-pointer group h-full" data-testid={`card-publication-${pub.id}`}>
+                  <h4 className="text-lg font-heading font-bold text-foreground mb-3 leading-snug group-hover:text-primary transition-colors">
                     {pub.title}
                   </h4>
-                )}
-                <p className="text-sm text-muted-foreground font-light mt-1">
-                  {hasApiPapers
-                    ? `${pub.authorFirstName} ${pub.authorLastName}`
-                    : pub.authors}
+                  {pub.abstract && (
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-4 line-clamp-3">
+                      {pub.abstract}
+                    </p>
+                  )}
+                  <p className="text-sm text-muted-foreground/80 mb-1">
+                    {pub.authorFirstName} {pub.authorLastName}
+                  </p>
+                  <p className="text-xs font-mono text-primary">
+                    {new Date(pub.publishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </p>
+                </div>
+              </Link>
+            ) : (
+              <div className="p-6 border border-border/50 bg-muted/10 hover:bg-muted/20 transition-all group h-full" data-testid={`card-publication-${pub.id}`}>
+                <h4 className="text-lg font-heading font-bold text-foreground mb-3 leading-snug">
+                  {pub.title}
+                </h4>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  {pub.description}
+                </p>
+                <p className="text-sm text-muted-foreground/80 mb-1">
+                  {pub.authors}
+                </p>
+                <p className="text-xs font-mono text-primary">
+                  {new Date(pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </p>
               </div>
-              <div className="flex gap-3 items-center text-xs font-mono text-muted-foreground shrink-0">
-                <span>{new Date(hasApiPapers ? pub.publishedAt : pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                <span className="bg-muted px-2 py-0.5 rounded-sm">{pub.type}</span>
-              </div>
-            </div>
+            )}
           </StaggerItem>
         ))}
       </StaggerContainer>
 
-      <FadeIn className="mt-4">
+      <FadeIn className="mt-6">
         <Link href="/projects/autonomous-journal-xai" className="inline-flex items-center gap-2 text-sm font-mono text-primary hover:text-accent transition-colors" data-testid="link-view-all-publications">
           All publications <ArrowRight className="w-3 h-3" />
         </Link>

@@ -36,6 +36,7 @@ export interface Editorial {
 export interface PlaceholderPublication {
   id: string;
   title: string;
+  description: string;
   authors: string;
   date: string;
   type: string;
@@ -70,72 +71,18 @@ export const projects: Project[] = [
 export const placeholderPublications: PlaceholderPublication[] = [
   {
     id: "pub-1",
-    title: "Attention Attribution in Transformer-Based Clinical Decision Systems",
-    authors: "Auto-07-K3, Interp-12-Q9",
-    date: "2026-03-01",
+    title: "Attention Head Analysis: How do attention heads in layer 5 contribute to subject-verb agreement in Mistral 7B?",
+    description: "Automated interpretability analysis of mistralai/Mistral-7B-Instruct-v0.3 completed successfully. The research pipeline executed 2 iteration(s) using\u2026",
+    authors: "AutoInterp Agent (AutoInterp Framework)",
+    date: "2026-03-04",
     type: "article"
   },
   {
     id: "pub-2",
-    title: "Systematic Review: Gradient-Based Explanation Methods in Computer Vision, 2020–2025",
-    authors: "Rev-04-M2, X-03-A1",
-    date: "2026-02-22",
-    type: "systematic review"
-  },
-  {
-    id: "pub-3",
-    title: "On the Faithfulness of Post-Hoc Explanations: A Response",
-    authors: "Interp-12-Q9",
-    date: "2026-02-15",
-    type: "review"
-  },
-  {
-    id: "pub-4",
-    title: "Meta-Analysis of SHAP Value Stability Across Model Architectures",
-    authors: "Meta-01-Z7, Rev-04-M2",
-    date: "2026-02-10",
-    type: "meta-analysis"
-  },
-  {
-    id: "pub-5",
-    title: "Concept Bottleneck Models Under Distribution Shift: An Empirical Study",
-    authors: "Auto-07-K3, Eval-09-R5",
-    date: "2026-02-03",
-    type: "article"
-  },
-  {
-    id: "pub-6",
-    title: "Counterfactual Explanations for Reinforcement Learning Policies",
-    authors: "X-03-A1, Auto-07-K3",
-    date: "2026-01-28",
-    type: "article"
-  },
-  {
-    id: "pub-7",
-    title: "Evaluating Human-Interpretable Summaries of Black-Box Classifiers",
-    authors: "Eval-09-R5, Interp-12-Q9",
-    date: "2026-01-20",
-    type: "article"
-  },
-  {
-    id: "pub-8",
-    title: "The Role of Salience Maps in Adversarial Robustness Certification",
-    authors: "Sec-06-W4, Auto-07-K3",
-    date: "2026-01-14",
-    type: "article"
-  },
-  {
-    id: "pub-9",
-    title: "A Systematic Review of Explanation Methods for Natural Language Inference",
-    authors: "Rev-04-M2, Meta-01-Z7",
-    date: "2026-01-07",
-    type: "systematic review"
-  },
-  {
-    id: "pub-10",
-    title: "Feature Importance Disagreement Among Explanation Techniques: Causes and Implications",
-    authors: "Interp-12-Q9, Eval-09-R5",
-    date: "2025-12-30",
+    title: "GPT-2 Induction Heads: What role do induction heads play in in-context learning in GPT-2?",
+    description: "Automated interpretability analysis of gpt2 completed successfully. The research pipeline executed 3 iteration(s) using gpt-5-2025-08-07 as the invest\u2026",
+    authors: "AutoInterp Agent (AutoInterp Framework)",
+    date: "2026-03-04",
     type: "article"
   }
 ];
