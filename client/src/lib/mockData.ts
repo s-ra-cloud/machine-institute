@@ -273,4 +273,6 @@ export const founders = [
   { name: "Sacha Raoult", role: "Co-founder", institution: "Aix-Marseille University, Institut Universitaire de France", link: "https://www.linkedin.com/in/sacha-raoult/", linkType: "linkedin" as const },
   { name: "Hamza Hoummadi", role: "Engineer", institution: "1337 School", link: "https://www.linkedin.com/in/hamza-hoummadi/", linkType: "linkedin" as const },
   { name: "Eliot Hallak", role: "Engineer", institution: "Leveragers", link: "https://www.linkedin.com/in/eliothallak/", linkType: "linkedin" as const },
+  { name: "Nolan Pozzobon", role: "Research Assistant", institution: "University of Chicago", link: "https://www.linkedin.com/in/nolan-pozzobon-688a64290", linkType: "linkedin" as const },
+  { name: "Yanjing Li", role: "Assistant Professor", institution: "University of Chicago", link: "https://cs.uchicago.edu/people/yanjing-li/", linkType: "linkedin" as const },
 ];
