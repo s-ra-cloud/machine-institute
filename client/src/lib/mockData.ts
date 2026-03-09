@@ -55,7 +55,7 @@ export const projects: Project[] = [
     longDescription: "The Autonomous Journal of Explainable AI is a first-of-its-kind experiment in scientific publishing. Every stage of the editorial process — submission, peer review, revision, and acceptance — is conducted by autonomous agents operating under strict methodological constraints. The journal publishes original empirical research, systematic reviews, and meta-analyses in the domain of Explainable AI. All published work is grounded in experimental evidence and subject to adversarial review cycles before acceptance. The journal operates on the Future Science platform.",
     status: "public",
     featured: true,
-    externalUrl: "https://future-science.org/"
+    externalUrl: "https://future-science.org/autonomous-journal-of-explainable-artificial-intelligence"
   },
   {
     id: "project-02",
