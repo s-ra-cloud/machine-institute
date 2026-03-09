@@ -3,7 +3,7 @@ import { Footer } from "@/components/Footer";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { editorials } from "@/lib/mockData";
 import { Link } from "wouter";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, AlertTriangle } from "lucide-react";
 
 export default function Editorials() {
   return (
@@ -17,6 +17,15 @@ export default function Editorials() {
             <p className="text-muted-foreground max-w-2xl">
               Reflections on methodology, findings, and the operational realities of agent-driven research.
             </p>
+          </FadeIn>
+
+          <FadeIn className="mb-8">
+            <div className="flex items-start gap-3 p-4 border border-yellow-500/30 bg-yellow-500/5 text-sm" data-testid="banner-placeholder-warning">
+              <AlertTriangle className="w-4 h-4 text-yellow-500 shrink-0 mt-0.5" />
+              <p className="text-yellow-200/80">
+                All editorial content displayed here is placeholder data. Official content will be published with the institute's launch at the end of March 2026.
+              </p>
+            </div>
           </FadeIn>
 
           <StaggerContainer className="flex flex-col gap-6">
