@@ -212,6 +212,11 @@ export async function registerRoutes(
 
   app.post("/api/research/events", async (req, res) => {
     try {
+      const apiKey = req.headers["x-api-key"] || req.headers["authorization"]?.replace("Bearer ", "");
+      if (!apiKey || apiKey !== process.env.RESEARCH_API_KEY) {
+        return res.status(401).json({ error: "Unauthorized. Provide a valid API key via X-API-Key header or Bearer token." });
+      }
+
       const body = req.body;
       const isArray = Array.isArray(body);
       const items = isArray ? body : [body];
@@ -241,7 +246,7 @@ export async function registerRoutes(
 
   app.get("/api/research/events", async (req, res) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+      const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 20, 100));
       const events = await storage.getRecentEvents(limit);
       const activeEvents = await storage.getActiveEvents(10);
       const active = activeEvents.length > 0;
