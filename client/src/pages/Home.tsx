@@ -2,6 +2,7 @@ import { Navigation } from "@/components/Navigation";
 import { Hero } from "@/components/Hero";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { LatestPublications } from "@/components/LatestPublications";
+import { LiveResearchFeed } from "@/components/LiveResearchFeed";
 import { Footer } from "@/components/Footer";
 import { projects, editorials } from "@/lib/mockData";
 import { Link } from "wouter";
@@ -48,7 +49,22 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="py-24 bg-muted/10 border-t border-border/50" id="projects">
+        <section className="py-24 bg-muted/10 border-t border-border/50" id="live-research">
+          <div className="container mx-auto px-6 max-w-5xl">
+            <FadeIn className="mb-8">
+              <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Live Research</h2>
+              <div className="h-1 w-20 bg-primary/50 mb-4" />
+              <p className="text-muted-foreground max-w-2xl text-sm">
+                Real-time execution logs from active research sessions across the institute's agent infrastructure.
+              </p>
+            </FadeIn>
+            <FadeIn>
+              <LiveResearchFeed />
+            </FadeIn>
+          </div>
+        </section>
+
+        <section className="py-24 bg-background border-t border-border/50" id="projects">
           <div className="container mx-auto px-6">
             <FadeIn className="mb-12">
               <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Projects</h2>

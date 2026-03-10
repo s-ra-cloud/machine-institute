@@ -59,3 +59,25 @@ export const insertPaperSchema = createInsertSchema(papers).omit({
 
 export type InsertPaper = z.infer<typeof insertPaperSchema>;
 export type Paper = typeof papers.$inferSelect;
+
+export const researchEvents = pgTable("research_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  source: text("source").notNull(),
+  agentId: text("agent_id").notNull(),
+  phase: text("phase").notNull(),
+  message: text("message").notNull(),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+});
+
+export const insertResearchEventSchema = createInsertSchema(researchEvents).omit({
+  id: true,
+  timestamp: true,
+}).extend({
+  source: z.string().min(1, "Source is required"),
+  agentId: z.string().min(1, "Agent ID is required"),
+  phase: z.string().min(1, "Phase is required"),
+  message: z.string().min(1, "Message is required"),
+});
+
+export type InsertResearchEvent = z.infer<typeof insertResearchEventSchema>;
+export type ResearchEvent = typeof researchEvents.$inferSelect;

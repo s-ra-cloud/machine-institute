@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -206,6 +206,52 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       console.error("Error fetching paper:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/research/events", async (req, res) => {
+    try {
+      const body = req.body;
+      const isArray = Array.isArray(body);
+      const items = isArray ? body : [body];
+
+      const validated = [];
+      for (const item of items) {
+        const result = insertResearchEventSchema.safeParse(item);
+        if (!result.success) {
+          const message = fromZodError(result.error).message;
+          return res.status(400).json({ error: message });
+        }
+        validated.push(result.data);
+      }
+
+      if (validated.length === 1) {
+        const event = await storage.createResearchEvent(validated[0]);
+        return res.status(201).json(event);
+      }
+
+      const events = await storage.createResearchEvents(validated);
+      return res.status(201).json(events);
+    } catch (err: any) {
+      console.error("Error creating research event:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/research/events", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+      const events = await storage.getRecentEvents(limit);
+      const activeEvents = await storage.getActiveEvents(10);
+      const active = activeEvents.length > 0;
+
+      return res.json({
+        active,
+        events: events.reverse(),
+      });
+    } catch (err: any) {
+      console.error("Error fetching research events:", err);
       return res.status(500).json({ error: "Internal server error" });
     }
   });
