@@ -78,8 +78,11 @@ export default function ProjectDetail() {
     );
   }
 
+  const projectPlaceholders = placeholderPublications.filter(p => p.projectId === id);
   const hasApiPapers = apiPapers.length > 0;
-  const publications = hasApiPapers ? apiPapers.slice(0, 10) : placeholderPublications;
+  const allPublications = hasApiPapers
+    ? [...apiPapers.slice(0, 10).map(p => ({ ...p, _source: "api" as const })), ...projectPlaceholders.map(p => ({ ...p, _source: "placeholder" as const }))]
+    : projectPlaceholders.map(p => ({ ...p, _source: "placeholder" as const }));
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -118,34 +121,44 @@ export default function ProjectDetail() {
 
           <FadeIn delay={0.2} className="mt-16">
             <h2 className="text-2xl font-heading font-bold mb-6">Publications</h2>
-            <StaggerContainer className="flex flex-col border-t border-border/50">
-              {publications.map((pub: any, idx: number) => (
-                <StaggerItem key={pub.id || idx}>
-                  <div className="py-5 border-b border-border/50 flex flex-col md:flex-row gap-3 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4">
-                    <div className="max-w-3xl">
-                      {hasApiPapers && pub.slug ? (
-                        <Link href={`/papers/${pub.slug}`}>
-                          <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors cursor-pointer">
+            {allPublications.length === 0 ? (
+              <p className="text-sm text-muted-foreground/50 font-mono">No publications yet.</p>
+            ) : (
+              <StaggerContainer className="flex flex-col border-t border-border/50">
+                {allPublications.map((pub: any, idx: number) => (
+                  <StaggerItem key={pub.id || idx}>
+                    <div className="py-5 border-b border-border/50 flex flex-col md:flex-row gap-3 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4">
+                      <div className="max-w-3xl">
+                        {pub._source === "api" && pub.slug ? (
+                          <Link href={`/papers/${pub.slug}`}>
+                            <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors cursor-pointer">
+                              {pub.title}
+                            </h4>
+                          </Link>
+                        ) : pub._source === "placeholder" && pub.url ? (
+                          <a href={pub.url} target="_blank" rel="noopener noreferrer">
+                            <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors cursor-pointer">
+                              {pub.title}
+                            </h4>
+                          </a>
+                        ) : (
+                          <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors">
                             {pub.title}
                           </h4>
-                        </Link>
-                      ) : (
-                        <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors">
-                          {pub.title}
-                        </h4>
-                      )}
-                      <p className="text-sm text-muted-foreground font-light mt-1">
-                        {hasApiPapers ? `${pub.authorFirstName} ${pub.authorLastName}` : pub.authors}
-                      </p>
+                        )}
+                        <p className="text-sm text-muted-foreground font-light mt-1">
+                          {pub._source === "api" ? `${pub.authorFirstName} ${pub.authorLastName}` : pub.authors}
+                        </p>
+                      </div>
+                      <div className="flex gap-3 items-center text-xs font-mono text-muted-foreground shrink-0">
+                        <span>{new Date(pub._source === "api" ? pub.publishedAt : pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                        <span className="bg-muted px-2 py-0.5 rounded-sm">{pub.type}</span>
+                      </div>
                     </div>
-                    <div className="flex gap-3 items-center text-xs font-mono text-muted-foreground shrink-0">
-                      <span>{new Date(hasApiPapers ? pub.publishedAt : pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                      <span className="bg-muted px-2 py-0.5 rounded-sm">{pub.type}</span>
-                    </div>
-                  </div>
-                </StaggerItem>
-              ))}
-            </StaggerContainer>
+                  </StaggerItem>
+                ))}
+              </StaggerContainer>
+            )}
           </FadeIn>
         </div>
       </main>

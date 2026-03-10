@@ -3,11 +3,12 @@ import { placeholderPublications } from "@/lib/mockData";
 import { ArrowRight, ExternalLink } from "lucide-react";
 import { Link } from "wouter";
 
-export function LatestPublications() {
+export function LatestPublications({ projectId = "autonomous-journal-xai" }: { projectId?: string }) {
+  const filtered = placeholderPublications.filter(p => p.projectId === projectId);
   return (
     <div>
       <StaggerContainer className="flex flex-col divide-y divide-border/50 border-t border-border/50">
-        {placeholderPublications.map((pub) => (
+        {filtered.map((pub) => (
           <StaggerItem key={pub.id}>
             <a href={pub.url} target="_blank" rel="noopener noreferrer" className="py-6 flex gap-6 group block" data-testid={`card-publication-${pub.id}`}>
               <div className="flex-1 min-w-0">

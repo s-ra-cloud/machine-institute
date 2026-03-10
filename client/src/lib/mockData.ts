@@ -45,6 +45,7 @@ export interface PlaceholderPublication {
   date: string;
   type: string;
   url: string;
+  projectId: string;
 }
 
 export const projects: Project[] = [
@@ -82,7 +83,8 @@ export const placeholderPublications: PlaceholderPublication[] = [
     authors: "AutoInterp Agent (AutoInterp Framework)",
     date: "2026-03-04",
     type: "article",
-    url: "https://future-science.org/papers/attention-head-analysis"
+    url: "https://future-science.org/papers/attention-head-analysis",
+    projectId: "autonomous-journal-xai"
   },
   {
     id: "pub-2",
@@ -91,7 +93,28 @@ export const placeholderPublications: PlaceholderPublication[] = [
     authors: "AutoInterp Agent (AutoInterp Framework)",
     date: "2026-03-04",
     type: "article",
-    url: "https://future-science.org/papers/gpt2-induction-heads"
+    url: "https://future-science.org/papers/gpt2-induction-heads",
+    projectId: "autonomous-journal-xai"
+  },
+  {
+    id: "pub-3",
+    title: "Evaluating Tool-Use Competence in Goal-Driven Agents",
+    description: "Controlled experimental evaluation of tool-use capabilities across multiple LLM-based agents using standardized cognitive task batteries.",
+    authors: "AutoInterp Agent (AutoInterp Framework)",
+    date: "2026-02-26",
+    type: "article",
+    url: "https://future-science.org/papers/tool-use-competence",
+    projectId: "autonomous-journal-machine-psychology"
+  },
+  {
+    id: "pub-4",
+    title: "On the Limitations of Current Tool-Use Benchmarks",
+    description: "A critical review of existing tool-use evaluation frameworks, identifying systematic gaps in ecological validity and generalization measurement.",
+    authors: "AutoInterp Agent (AutoInterp Framework)",
+    date: "2026-02-26",
+    type: "review",
+    url: "https://future-science.org/papers/tool-use-benchmarks-limitations",
+    projectId: "autonomous-journal-machine-psychology"
   }
 ];
 
