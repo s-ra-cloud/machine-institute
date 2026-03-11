@@ -399,8 +399,8 @@ CRITICAL RULES ON REFERENCES:
 
 1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. Use inline citations in (Author, Date) format. Example: (MachinePsyKw DS32E-N1, 2026).
-4. When the same author has multiple papers from the same date, distinguish them with sequential numbers: (MachinePsyKw DS32E-N1, 2026, #1), (MachinePsyKw DS32E-N1, 2026, #2), etc. The number corresponds to the order the paper appears in the References section.
+3. For Machine Institute publications (published on future-science.org), use inline citations in this format: (AJMP, future-science.org, Date). Example: (AJMP, future-science.org, 2026). When multiple papers share the same date, distinguish them with sequential numbers: (AJMP, future-science.org, 2026, #1), (AJMP, future-science.org, 2026, #2), etc. The number corresponds to the order the paper appears in the References section.
+4. In the References section, list Machine Institute papers as: [#] AJMP, future-science.org (Date). "Full Paper Title."
 5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 
 Instructions:
@@ -448,8 +448,8 @@ Brief synthesis of the state of the literature.
 
 ## References
 List every cited paper in the following format:
-[#] Author (Date). "Full Paper Title."
-Number them sequentially. This numbering is what disambiguates multiple papers by the same author from the same date.
+[#] AJMP, future-science.org (Date). "Full Paper Title."
+Number them sequentially. This numbering is what disambiguates multiple papers by the same date.
 
 Additional requirements:
 
@@ -697,10 +697,9 @@ CRITICAL RULES ON REFERENCES:
 
 1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. Use inline citations in (Author, Date) format. Example: (MachinePsyKw DS32E-N1, 2026).
-4. When the same author has multiple papers from the same date, distinguish them with sequential numbers: (MachinePsyKw DS32E-N1, 2026, #1), (MachinePsyKw DS32E-N1, 2026, #2), etc. The number corresponds to the order the paper appears in the References section.
+3. For Machine Institute publications (published on future-science.org), use inline citations in this format: (AJMP, future-science.org, Date). Example: (AJMP, future-science.org, 2026). When multiple papers share the same date, distinguish them with sequential numbers: (AJMP, future-science.org, 2026, #1), (AJMP, future-science.org, 2026, #2), etc.
+4. For arXiv papers, cite them as (arXiv: arXivID) using the actual arXiv ID number. Example: (arXiv: 2603.12345). In the References section, list them as: [#] arXiv: ID. Author(s) (Date). "Full Paper Title."
 5. After writing the editorial, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
-6. For arXiv papers found in trends, cite them as (arXiv: Author et al., Year) if known, otherwise just reference the trend by topic name.
 
 Style guidelines
 
@@ -712,8 +711,9 @@ Style guidelines
 
 ## References
 List every cited paper in the following format:
-[#] Author (Date). "Full Paper Title."
-Number them sequentially. This numbering is what disambiguates multiple papers by the same author from the same date.`;
+- For Machine Institute papers: [#] AJMP, future-science.org (Date). "Full Paper Title."
+- For arXiv papers: [#] arXiv: ID. Author(s) (Date). "Full Paper Title."
+Number them sequentially. This numbering is what disambiguates multiple papers by the same date.`;
 
   const EDITORIAL_RATE_LIMIT_KEY = "editorial-generation-global";
   const EDITORIAL_MAX_PER_24H = 2;
@@ -851,20 +851,24 @@ Number them sequentially. This numbering is what disambiguates multiple papers b
         return [];
       }
       const xml = await response.text();
-      const entries: Array<{ title: string; summary: string; authors: string; published: string }> = [];
+      const entries: Array<{ title: string; summary: string; authors: string; published: string; arxivId: string }> = [];
       const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
       let match;
       while ((match = entryRegex.exec(xml)) !== null) {
         const entry = match[1];
+        const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/);
         const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/);
         const summaryMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/);
         const publishedMatch = entry.match(/<published>([\s\S]*?)<\/published>/);
         const authorMatches = [...entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g)];
+        const rawId = (idMatch?.[1] || "").trim();
+        const arxivId = rawId.replace("http://arxiv.org/abs/", "").replace(/v\d+$/, "");
         entries.push({
           title: (titleMatch?.[1] || "").trim().replace(/\s+/g, " "),
           summary: (summaryMatch?.[1] || "").trim().replace(/\s+/g, " ").substring(0, 500),
           authors: authorMatches.map(m => m[1].trim()).join(", "),
           published: (publishedMatch?.[1] || "").trim().substring(0, 10),
+          arxivId,
         });
       }
       return entries;
@@ -927,7 +931,7 @@ Number them sequentially. This numbering is what disambiguates multiple papers b
 
       const arxivTexts = arxivResults.length > 0
         ? arxivResults.map((r, i) =>
-            `arXiv Paper ${i + 1}:\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.published}\nSummary: ${r.summary}`
+            `arXiv Paper ${i + 1}:\narXiv ID: ${r.arxivId}\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.published}\nSummary: ${r.summary}`
           ).join("\n\n")
         : "No recent arXiv papers found for the current research topics.";
 
