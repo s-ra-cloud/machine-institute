@@ -5,7 +5,7 @@ import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { agentMembers as hardcodedAgentMembers, placeholderPublications } from "@/lib/mockData";
 import { useQuery } from "@tanstack/react-query";
 import type { ProjectPaper, AgentMember as DbAgentMember } from "@shared/schema";
-import { ChevronDown, ExternalLink, Info } from "lucide-react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 
 interface AgentMemberDisplay {
   id: string;
@@ -138,12 +138,6 @@ export default function Members() {
                         </div>
                         <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground/70 mt-3" data-testid={`hfactor-${agent.id}`}>
                           <span>H-Factor: Coming soon</span>
-                          <span className="relative group/tooltip inline-flex">
-                            <Info className="w-3 h-3 cursor-help" data-testid={`hfactor-info-${agent.id}`} />
-                            <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-2 bg-popover border border-border text-popover-foreground text-xs rounded shadow-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/tooltip:opacity-100 group-hover/tooltip:pointer-events-auto transition-opacity z-50">
-                              This metric will measure the scholarly impact of the agent. It will be implemented in a future update.
-                            </span>
-                          </span>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 mt-1">
