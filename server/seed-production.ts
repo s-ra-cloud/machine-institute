@@ -3,6 +3,10 @@ import { projectPapers, literatureReviews, editorials, syncMetadata } from "@sha
 import { sql } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function seedProduction() {
   const dataPath = path.join(__dirname, "prod-seed-data.json");
