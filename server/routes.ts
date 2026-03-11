@@ -317,6 +317,14 @@ export async function registerRoutes(
 
 I will provide a set of academic papers. Your task is to produce a structured literature review based strictly on these papers.
 
+CRITICAL RULES ON REFERENCES:
+
+1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
+2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
+3. Use inline citations in (Author, Date) format. Example: (MachinePsyKw DS32E-N1, 2026).
+4. When the same author has multiple papers from the same date, distinguish them with sequential numbers: (MachinePsyKw DS32E-N1, 2026, #1), (MachinePsyKw DS32E-N1, 2026, #2), etc. The number corresponds to the order the paper appears in the References section.
+5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
+
 Instructions:
 
 Read all the provided papers carefully.
@@ -324,59 +332,54 @@ Read all the provided papers carefully.
 Identify the main research question or theme connecting them.
 
 Extract for each paper:
-
-main argument or hypothesis
-
-methodology
-
-key findings
-
-theoretical framework (if applicable)
-
-limitations or open questions
+- main argument or hypothesis
+- methodology
+- key findings
+- theoretical framework (if applicable)
+- limitations or open questions
 
 Organize the literature review by themes or debates, not by paper summaries alone.
 
 Identify:
-
-points of agreement between authors
-
-points of disagreement or competing interpretations
-
-methodological differences
-
-gaps in the literature
+- points of agreement between authors
+- points of disagreement or competing interpretations
+- methodological differences
+- gaps in the literature
 
 Write the review in clear academic English suitable for a research paper.
 
 Structure the output as follows:
 
-Introduction
+## Introduction
 Short paragraph explaining the general topic and scope of the literature.
 
-Thematic Review of the Literature
-Organize the discussion into several thematic subsections synthesizing the papers.
+## Inclusion Criteria
+Briefly state which papers were included and why (e.g., topical relevance, shared methodology, common research domain). List each included paper with its full title and author.
 
-Comparative Discussion
-Explain how the papers relate to each other, including agreements, disagreements, and methodological contrasts.
+## Thematic Review of the Literature
+Organize the discussion into several thematic subsections synthesizing the papers. Use inline citations (Author, Date) throughout.
 
-Research Gaps
+## Comparative Discussion
+Explain how the papers relate to each other, including agreements, disagreements, and methodological contrasts. Cite inline.
+
+## Research Gaps
 Identify what remains unresolved or insufficiently studied.
 
-Conclusion
+## Conclusion
 Brief synthesis of the state of the literature.
+
+## References
+List every cited paper in the following format:
+[#] Author (Date). "Full Paper Title."
+Number them sequentially. This numbering is what disambiguates multiple papers by the same author from the same date.
 
 Additional requirements:
 
-Base the analysis only on the provided papers.
-
-When referring to a study, mention the author and year.
-
-Avoid long quotations.
-
-Prefer synthesis over sequential summaries.
-
-Length: about 1200–2000 words.
+- Base the analysis ONLY on the provided papers. Do not reference any external work.
+- Cite every claim or finding with an inline reference.
+- Avoid long quotations. Prefer synthesis over sequential summaries.
+- Length: about 1500–2500 words.
+- After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
 
 I will now provide the papers.`;
 
@@ -465,30 +468,43 @@ I will now provide the papers.`;
   function markdownToHtml(text: string): string {
     const lines = text.split("\n");
     const htmlLines: string[] = [];
-    let inList = false;
+    let listType: "ul" | "ol" | null = null;
+
+    function closeList() {
+      if (listType) { htmlLines.push(`</${listType}>`); listType = null; }
+    }
 
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) {
-        if (inList) { htmlLines.push("</ul>"); inList = false; }
+        closeList();
         continue;
       }
-      if (trimmed.startsWith("# ")) { htmlLines.push(`<h1>${trimmed.slice(2)}</h1>`); }
-      else if (trimmed.startsWith("## ")) { htmlLines.push(`<h2>${trimmed.slice(3)}</h2>`); }
-      else if (trimmed.startsWith("### ")) { htmlLines.push(`<h3>${trimmed.slice(4)}</h3>`); }
-      else if (trimmed.startsWith("#### ")) { htmlLines.push(`<h4>${trimmed.slice(5)}</h4>`); }
+      if (trimmed.startsWith("# ")) { closeList(); htmlLines.push(`<h1>${trimmed.slice(2)}</h1>`); }
+      else if (trimmed.startsWith("## ")) { closeList(); htmlLines.push(`<h2>${trimmed.slice(3)}</h2>`); }
+      else if (trimmed.startsWith("### ")) { closeList(); htmlLines.push(`<h3>${trimmed.slice(4)}</h3>`); }
+      else if (trimmed.startsWith("#### ")) { closeList(); htmlLines.push(`<h4>${trimmed.slice(5)}</h4>`); }
       else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-        if (!inList) { htmlLines.push("<ul>"); inList = true; }
-        htmlLines.push(`<li>${trimmed.slice(2)}</li>`);
+        if (listType !== "ul") { closeList(); htmlLines.push("<ul>"); listType = "ul"; }
+        let content = trimmed.slice(2)
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/\*(.+?)\*/g, "<em>$1</em>");
+        htmlLines.push(`<li>${content}</li>`);
+      } else if (/^\[?\d+[\].)]\s/.test(trimmed)) {
+        if (listType !== "ol") { closeList(); htmlLines.push("<ol>"); listType = "ol"; }
+        let content = trimmed.replace(/^\[?\d+[\].)]\s*/, "")
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/\*(.+?)\*/g, "<em>$1</em>");
+        htmlLines.push(`<li>${content}</li>`);
       } else {
-        if (inList) { htmlLines.push("</ul>"); inList = false; }
+        closeList();
         let formatted = trimmed
           .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
           .replace(/\*(.+?)\*/g, "<em>$1</em>");
         htmlLines.push(`<p>${formatted}</p>`);
       }
     }
-    if (inList) htmlLines.push("</ul>");
+    closeList();
     return htmlLines.join("\n");
   }
 
