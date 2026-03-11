@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Paper } from "@shared/schema";
 import { ArrowLeft, ExternalLink, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LiteratureReviewRequest } from "@/components/LiteratureReviewRequest";
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -159,6 +160,10 @@ export default function ProjectDetail() {
                 ))}
               </StaggerContainer>
             )}
+          </FadeIn>
+
+          <FadeIn delay={0.4} className="mt-16">
+            <LiteratureReviewRequest journalName={project.title} />
           </FadeIn>
         </div>
       </main>
