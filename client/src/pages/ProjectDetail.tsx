@@ -15,6 +15,7 @@ export default function ProjectDetail() {
   const project = projects.find((p) => p.id === id);
   const queryClient = useQueryClient();
   const syncTriggered = useRef(false);
+  const pubLogRef = useRef<HTMLDivElement>(null);
   const [syncStatus, setSyncStatus] = useState<{ message: string; type: "info" | "success" | "idle" }>(
     { message: "", type: "idle" }
   );
@@ -213,7 +214,7 @@ export default function ProjectDetail() {
           )}
 
           <FadeIn delay={0.3} className="mt-16">
-            <div className="flex items-center gap-3 mb-6">
+            <div ref={pubLogRef} className="flex items-center gap-3 mb-6">
               <h2 className="text-2xl font-heading font-bold">Publication Log</h2>
               {syncStatus.type === "info" && (
                 <span className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground" data-testid="text-sync-status">
@@ -255,14 +256,27 @@ export default function ProjectDetail() {
                     </div>
                   ))}
                 </div>
-                {hiddenCount > 0 && (
+                {hiddenCount > 0 && !showAllPubs && (
                   <button
-                    onClick={() => setShowAllPubs(!showAllPubs)}
+                    onClick={() => setShowAllPubs(true)}
                     className="mt-4 flex items-center gap-2 text-sm font-mono text-primary hover:text-accent transition-colors"
                     data-testid="button-show-all-publications"
                   >
-                    <ChevronDown className={`w-4 h-4 transition-transform ${showAllPubs ? "rotate-180" : ""}`} />
-                    {showAllPubs ? "Show fewer" : `Show all ${allPublications.length} publications`}
+                    <ChevronDown className="w-4 h-4" />
+                    Show all {allPublications.length} publications
+                  </button>
+                )}
+                {showAllPubs && (
+                  <button
+                    onClick={() => {
+                      setShowAllPubs(false);
+                      pubLogRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                    className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-5 py-2.5 text-sm font-mono bg-primary text-white rounded-full shadow-lg shadow-primary/30 hover:bg-primary/90 transition-all"
+                    data-testid="button-collapse-publications"
+                  >
+                    <ChevronDown className="w-4 h-4 rotate-180" />
+                    Show fewer
                   </button>
                 )}
               </>
