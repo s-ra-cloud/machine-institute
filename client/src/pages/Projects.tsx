@@ -25,7 +25,7 @@ export default function Projects() {
                 {project.status === "public" ? (
                   <Link href={`/projects/${project.id}`}>
                     <div className="h-full p-8 border border-border/50 bg-muted/20 hover:bg-muted/40 hover:border-primary/30 transition-all cursor-pointer group" data-testid={`card-project-${project.id}`}>
-                      {project.featured && (
+                      {false && project.featured && (
                         <span className="text-[10px] font-mono text-primary uppercase tracking-widest mb-4 block">Featured</span>
                       )}
                       <h3 className="text-xl font-heading font-semibold mb-3 group-hover:text-primary transition-colors">{project.title}</h3>
