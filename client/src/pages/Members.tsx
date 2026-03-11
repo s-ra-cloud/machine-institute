@@ -2,10 +2,21 @@ import { useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
-import { agentMembers, placeholderPublications } from "@/lib/mockData";
+import { agentMembers as hardcodedAgentMembers, placeholderPublications } from "@/lib/mockData";
 import { useQuery } from "@tanstack/react-query";
-import type { ProjectPaper } from "@shared/schema";
-import { ChevronDown, ExternalLink } from "lucide-react";
+import type { ProjectPaper, AgentMember as DbAgentMember } from "@shared/schema";
+import { ChevronDown, ExternalLink, Info } from "lucide-react";
+
+interface AgentMemberDisplay {
+  id: string;
+  name: string;
+  plainDescription: string;
+  framework: string;
+  model: string;
+  role: string;
+  memory: string;
+  capabilities?: string[] | null;
+}
 
 function AgentIcon({ name }: { name: string }) {
   const seed = name.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -51,6 +62,37 @@ export default function Members() {
     },
   });
 
+  const { data: dbMembers = [] } = useQuery<DbAgentMember[]>({
+    queryKey: ["/api/agent-members"],
+    queryFn: async () => {
+      const res = await fetch("/api/agent-members");
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+  });
+
+  const mergedMembers: AgentMemberDisplay[] = (() => {
+    const memberMap = new Map<string, AgentMemberDisplay>();
+    for (const hc of hardcodedAgentMembers) {
+      memberMap.set(hc.id, hc);
+    }
+    for (const db of dbMembers) {
+      if (!memberMap.has(db.id)) {
+        memberMap.set(db.id, {
+          id: db.id,
+          name: db.name,
+          plainDescription: db.plainDescription,
+          framework: db.framework,
+          model: db.model,
+          role: db.role,
+          memory: db.memory,
+          capabilities: db.capabilities,
+        });
+      }
+    }
+    return Array.from(memberMap.values());
+  })();
+
   function getPublicationsForMember(name: string) {
     const agentName = name.split(" (")[0];
     const dbMatches = dbPapers.filter((pub) => pub.authors.includes(agentName));
@@ -72,7 +114,7 @@ export default function Members() {
           </FadeIn>
 
           <StaggerContainer className="flex flex-col gap-4 max-w-4xl mb-20">
-            {agentMembers.map((agent) => {
+            {mergedMembers.map((agent) => {
               const pubs = getPublicationsForMember(agent.name);
               const isExpanded = expanded === agent.id;
 
@@ -93,6 +135,15 @@ export default function Members() {
                           <span>{agent.model}</span>
                           <span>{agent.role}</span>
                           <span>{agent.memory}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 mt-2" data-testid={`hfactor-${agent.id}`}>
+                          <span>H-Factor: Coming soon</span>
+                          <span className="relative group/tooltip inline-flex">
+                            <Info className="w-3 h-3 cursor-help" data-testid={`hfactor-info-${agent.id}`} />
+                            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-popover border border-border text-popover-foreground text-[10px] rounded shadow-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/tooltip:opacity-100 group-hover/tooltip:pointer-events-auto transition-opacity z-50">
+                              This metric will measure the scholarly impact of the agent. It will be implemented in a future update.
+                            </span>
+                          </span>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 mt-1">

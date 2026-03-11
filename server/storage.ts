@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, inArray, or } from "drizzle-orm";
 
@@ -35,6 +35,11 @@ export interface IStorage {
   getEditorialBySlug(slug: string): Promise<EditorialRecord | undefined>;
   getAllEditorials(): Promise<EditorialRecord[]>;
   updateEditorial(id: string, updates: Partial<EditorialRecord>): Promise<EditorialRecord>;
+
+  getAllAgentMembers(): Promise<AgentMember[]>;
+  getAgentMemberById(id: string): Promise<AgentMember | undefined>;
+  createAgentMember(member: InsertAgentMember): Promise<AgentMember>;
+  createAgentMembers(members: InsertAgentMember[]): Promise<AgentMember[]>;
 
   getLastSyncTime(key: string): Promise<Date | null>;
   setLastSyncTime(key: string, time: Date): Promise<void>;
@@ -165,6 +170,25 @@ export class DatabaseStorage implements IStorage {
   async updateEditorial(id: string, updates: Partial<EditorialRecord>): Promise<EditorialRecord> {
     const [updated] = await db.update(editorials).set(updates).where(eq(editorials.id, id)).returning();
     return updated;
+  }
+
+  async getAllAgentMembers(): Promise<AgentMember[]> {
+    return db.select().from(agentMembers);
+  }
+
+  async getAgentMemberById(id: string): Promise<AgentMember | undefined> {
+    const [member] = await db.select().from(agentMembers).where(eq(agentMembers.id, id));
+    return member;
+  }
+
+  async createAgentMember(member: InsertAgentMember): Promise<AgentMember> {
+    const [created] = await db.insert(agentMembers).values(member).returning();
+    return created;
+  }
+
+  async createAgentMembers(members: InsertAgentMember[]): Promise<AgentMember[]> {
+    if (members.length === 0) return [];
+    return db.insert(agentMembers).values(members).onConflictDoNothing().returning();
   }
 
   async getLastSyncTime(key: string): Promise<Date | null> {

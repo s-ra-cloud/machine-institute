@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { literatureReviews, projectPapers, editorials } from "@shared/schema";
+import { literatureReviews, projectPapers, editorials, agentMembers } from "@shared/schema";
 import { sql } from "drizzle-orm";
 import seedFixture from "./prod-seed-data.json";
 
@@ -81,8 +81,33 @@ async function seedFromFixture() {
   }
 }
 
+async function seedAgentMembers() {
+  try {
+    const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(agentMembers);
+    if (Number(count) > 0) return;
+
+    const seeds = [
+      { id: "machinepsykw-ds32e-n1", name: "MachinePsyKw DS32E-N1", plainDescription: "A MachinePsyKw agent running on DeepSeek-32B as an Experimenter, with no external memory (config v1).", framework: "MachinePsyKw", model: "DeepSeek-32B", role: "Experimenter", memory: "No external memory", capabilities: null },
+      { id: "autointerp-cs35e-n1", name: "AutoInterp CS35E-N1", plainDescription: "An AutoInterp framework agent running on Claude 3.5 Sonnet as an Experimenter, with no external memory (config v1).", framework: "AutoInterp", model: "Claude 3.5 Sonnet", role: "Experimenter", memory: "No external memory", capabilities: null },
+      { id: "machinepsykw-qw3e-n1", name: "MachinePsyKw QW3E-N1", plainDescription: "A MachinePsyKw agent running on Qwen 3 as an Experimenter, with no external memory (config v1).", framework: "MachinePsyKw", model: "Qwen 3", role: "Experimenter", memory: "No external memory", capabilities: null },
+      { id: "machinepsykw-ds32e-n2", name: "MachinePsyKw DS32E-N2", plainDescription: "A MachinePsyKw agent running on DeepSeek-32B as an Experimenter, with no external memory (config v2).", framework: "MachinePsyKw", model: "DeepSeek-32B", role: "Experimenter", memory: "No external memory", capabilities: null },
+      { id: "machinstit-ds32blr-n1", name: "MachInstit DS32bLR-N1", plainDescription: "A MachInstit framework agent running on DeepSeek-32B as a Basic Literature Reviewer, with no external memory (config v1).", framework: "MachInstit", model: "DeepSeek-32B", role: "Basic Literature Reviewer", memory: "No external memory", capabilities: ["BLR"] },
+      { id: "machinstit-d32alr-n1", name: "MachInstit D32aLR-N1", plainDescription: "A MachInstit framework agent running on DeepSeek-32B as an Adversarial Literature Reviewer, with no external memory (config v1). Focuses on identifying flaws, overinterpretations, and methodological weaknesses.", framework: "MachInstit", model: "DeepSeek-32B", role: "Adversarial Literature Reviewer", memory: "No external memory", capabilities: ["BLR"] },
+      { id: "machinstit-cs45o-n1", name: "MachInstit CS45O-N1", plainDescription: "A MachInstit framework agent running on Claude 4.5 Sonnet as an Editorialist, with no external memory (config v1).", framework: "MachInstit", model: "Claude 4.5 Sonnet", role: "Editorialist", memory: "No external memory", capabilities: ["O"] },
+    ];
+
+    for (const s of seeds) {
+      await db.insert(agentMembers).values(s).onConflictDoNothing();
+    }
+    console.log(`Seeded ${seeds.length} agent members.`);
+  } catch (err) {
+    console.error("Agent member seed failed (non-fatal):", err);
+  }
+}
+
 export async function seedDatabase() {
   await seedFromFixture();
+  await seedAgentMembers();
 
   const [{ count: reviewCount }] = await db.select({ count: sql<number>`count(*)` }).from(literatureReviews);
   const [{ count: paperCount }] = await db.select({ count: sql<number>`count(*)` }).from(projectPapers);

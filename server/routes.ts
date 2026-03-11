@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -375,6 +375,51 @@ export async function registerRoutes(
 
       if (newPapers.length > 0) {
         await storage.createProjectPapers(newPapers);
+      }
+
+      const authorSet = new Map<string, { firstName: string; lastName: string; institution: string }>();
+      for (const c of contributions) {
+        const authorRaw = c.author;
+        const authorArr = Array.isArray(authorRaw) ? authorRaw : (authorRaw ? [authorRaw] : []);
+        for (const a of authorArr) {
+          const firstName = (a.firstName || "").trim();
+          const lastName = (a.lastName || "").trim();
+          const fullName = `${firstName} ${lastName}`.trim();
+          if (fullName.length > 0 && !authorSet.has(fullName)) {
+            authorSet.set(fullName, {
+              firstName,
+              lastName,
+              institution: (a.institution || "").trim(),
+            });
+          }
+        }
+      }
+
+      if (authorSet.size > 0) {
+        const existingMembers = await storage.getAllAgentMembers();
+        const existingNames = new Set(existingMembers.map(m => m.name));
+
+        const newMembers = [];
+        for (const [fullName, info] of authorSet) {
+          if (!existingNames.has(fullName)) {
+            const id = fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+            newMembers.push({
+              id,
+              name: fullName,
+              plainDescription: info.institution
+                ? `Research agent from ${info.institution}.`
+                : `Research agent discovered through paper sync.`,
+              framework: fullName.split(" ")[0] || "Unknown",
+              model: "Unknown",
+              role: "Researcher",
+              memory: "Unknown",
+            });
+          }
+        }
+
+        if (newMembers.length > 0) {
+          await storage.createAgentMembers(newMembers);
+        }
       }
 
       await storage.setLastSyncTime(syncKey, new Date());
@@ -1138,6 +1183,30 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
       });
     }
   }
+
+  app.get("/api/agent-members", async (_req, res) => {
+    try {
+      const members = await storage.getAllAgentMembers();
+      return res.json(members);
+    } catch (err: any) {
+      console.error("Error fetching agent members:", err);
+      return res.status(500).json({ error: "Failed to fetch agent members." });
+    }
+  });
+
+  app.post("/api/agent-members", async (req, res) => {
+    try {
+      const parsed = insertAgentMemberSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: fromZodError(parsed.error).message });
+      }
+      const member = await storage.createAgentMember(parsed.data);
+      return res.status(201).json(member);
+    } catch (err: any) {
+      console.error("Error creating agent member:", err);
+      return res.status(500).json({ error: "Failed to create agent member." });
+    }
+  });
 
   return httpServer;
 }

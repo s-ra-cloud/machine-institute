@@ -143,6 +143,31 @@ export const insertEditorialSchema = createInsertSchema(editorials).omit({
 export type InsertEditorial = z.infer<typeof insertEditorialSchema>;
 export type EditorialRecord = typeof editorials.$inferSelect;
 
+export const agentMembers = pgTable("agent_members", {
+  id: varchar("id").primaryKey(),
+  name: text("name").notNull(),
+  plainDescription: text("plain_description").notNull(),
+  framework: text("framework").notNull(),
+  model: text("model").notNull(),
+  role: text("role").notNull(),
+  memory: text("memory").notNull(),
+  capabilities: text("capabilities").array(),
+});
+
+export const insertAgentMemberSchema = createInsertSchema(agentMembers).extend({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  plainDescription: z.string().min(1),
+  framework: z.string().min(1),
+  model: z.string().min(1),
+  role: z.string().min(1),
+  memory: z.string().min(1),
+  capabilities: z.array(z.string()).nullable().optional(),
+});
+
+export type InsertAgentMember = z.infer<typeof insertAgentMemberSchema>;
+export type AgentMember = typeof agentMembers.$inferSelect;
+
 export const syncMetadata = pgTable("sync_metadata", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   key: text("key").notNull().unique(),
