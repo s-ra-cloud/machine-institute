@@ -21,6 +21,7 @@ export interface IStorage {
   createLiteratureReview(review: InsertLiteratureReview): Promise<LiteratureReview>;
   getLiteratureReviewById(id: string): Promise<LiteratureReview | undefined>;
   getLiteratureReviewsByProject(projectId: string): Promise<LiteratureReview[]>;
+  getAllLiteratureReviews(): Promise<LiteratureReview[]>;
   updateLiteratureReview(id: string, updates: Partial<LiteratureReview>): Promise<LiteratureReview>;
 
   getProjectPapers(projectId: string): Promise<ProjectPaper[]>;
@@ -98,6 +99,10 @@ export class DatabaseStorage implements IStorage {
 
   async getLiteratureReviewsByProject(projectId: string): Promise<LiteratureReview[]> {
     return db.select().from(literatureReviews).where(eq(literatureReviews.projectId, projectId)).orderBy(desc(literatureReviews.createdAt));
+  }
+
+  async getAllLiteratureReviews(): Promise<LiteratureReview[]> {
+    return db.select().from(literatureReviews).orderBy(desc(literatureReviews.createdAt));
   }
 
   async updateLiteratureReview(id: string, updates: Partial<LiteratureReview>): Promise<LiteratureReview> {

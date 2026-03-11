@@ -431,11 +431,10 @@ I will now provide the papers.`;
 
   app.get("/api/literature-reviews", async (req, res) => {
     try {
-      const projectId = req.query.projectId as string;
-      if (!projectId) {
-        return res.status(400).json({ error: "projectId query parameter is required" });
-      }
-      const reviews = await storage.getLiteratureReviewsByProject(projectId);
+      const projectId = req.query.projectId as string | undefined;
+      const reviews = projectId
+        ? await storage.getLiteratureReviewsByProject(projectId)
+        : await storage.getAllLiteratureReviews();
       return res.json(reviews);
     } catch (err: any) {
       console.error("Error fetching literature reviews:", err);
