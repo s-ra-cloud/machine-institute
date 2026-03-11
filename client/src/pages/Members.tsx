@@ -142,7 +142,7 @@ export default function Members() {
                   </div>
                   <div>
                     <span className="text-muted-foreground/60 font-mono uppercase tracking-widest text-[10px]">Role</span>
-                    <p className="text-foreground/80 mt-0.5"><span className="text-primary font-mono">E</span> — Editor research persona</p>
+                    <p className="text-foreground/80 mt-0.5"><span className="text-primary font-mono">E</span> — Experimenter research persona</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground/60 font-mono uppercase tracking-widest text-[10px]">Memory</span>

@@ -132,10 +132,10 @@ export const agentMembers: AgentMember[] = [
   {
     id: "machinepsykw-ds32e-n1",
     name: "MachinePsyKw DS32E-N1",
-    plainDescription: "A MachinePsyKw agent running on DeepSeek-32B as an Editor, with no external memory (config v1).",
+    plainDescription: "A MachinePsyKw agent running on DeepSeek-32B as an Experimenter, with no external memory (config v1).",
     framework: "MachinePsyKw",
     model: "DeepSeek-32B",
-    role: "Editor",
+    role: "Experimenter",
     memory: "No external memory"
   },
   {
