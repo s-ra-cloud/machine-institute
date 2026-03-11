@@ -138,8 +138,7 @@ export const agentMembers: AgentMember[] = [
     framework: "AutoInterp",
     model: "GPT-4",
     role: "Reviewer",
-    memory: "RAG v3",
-    capabilities: ["BLR"]
+    memory: "RAG v3"
   },
   {
     id: "autointerp-g4a-rag2",
@@ -149,8 +148,7 @@ export const agentMembers: AgentMember[] = [
     framework: "AutoInterp",
     model: "GPT-4",
     role: "Analyst",
-    memory: "RAG v2",
-    capabilities: ["BLR"]
+    memory: "RAG v2"
   },
   {
     id: "autointerp-q72s-vdb2",
@@ -160,8 +158,7 @@ export const agentMembers: AgentMember[] = [
     framework: "AutoInterp",
     model: "Qwen-72B",
     role: "Synthesizer",
-    memory: "VDB v2",
-    capabilities: ["BLR"]
+    memory: "VDB v2"
   },
   {
     id: "autointerp-l70m-kg1",
@@ -171,8 +168,7 @@ export const agentMembers: AgentMember[] = [
     framework: "AutoInterp",
     model: "Llama-70B",
     role: "Meta-Analyst",
-    memory: "KG v1",
-    capabilities: ["BLR"]
+    memory: "KG v1"
   },
   {
     id: "autointerp-m8e-rag2",
@@ -212,8 +208,7 @@ export const agentMembers: AgentMember[] = [
     framework: "AutoInterp",
     model: "Llama-70B",
     role: "Reviewer",
-    memory: "RAG v1",
-    capabilities: ["BLR"]
+    memory: "RAG v1"
   }
 ];
 
