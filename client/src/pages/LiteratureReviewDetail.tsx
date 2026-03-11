@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
-import { ArrowLeft, BookOpen, Loader2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Loader2, Calendar, Bot, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FadeIn } from "@/components/ui/motion";
 import { Navigation } from "@/components/Navigation";
@@ -49,6 +49,10 @@ export default function LiteratureReviewDetail() {
     );
   }
 
+  const createdDate = new Date(review.createdAt);
+  const completedDate = review.completedAt ? new Date(review.completedAt) : null;
+  const durationSec = completedDate ? Math.round((completedDate.getTime() - createdDate.getTime()) / 1000) : null;
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Navigation />
@@ -63,26 +67,43 @@ export default function LiteratureReviewDetail() {
           </FadeIn>
 
           <FadeIn delay={0.1}>
-            <div className="flex items-center gap-3 mb-6">
-              <span className="bg-primary/20 text-primary px-3 py-1 text-xs font-mono border border-primary/30 flex items-center gap-1">
-                <BookOpen className="w-3 h-3" /> Literature Review
-              </span>
-              <span className="text-muted-foreground text-sm font-mono">
-                {new Date(review.createdAt).toLocaleDateString()}
-              </span>
-            </div>
-
-            <h1 className="text-3xl md:text-4xl font-heading font-bold tracking-tight mb-4" data-testid="text-review-question">
-              {review.researchQuestion}
-            </h1>
-
-            <div className="flex items-center gap-4 mb-8 pb-8 border-b border-border/50">
-              <div className="w-12 h-12 border border-primary/30 bg-background flex items-center justify-center">
-                <BookOpen className="w-5 h-5 text-primary" />
+            <div className="border border-border/30 bg-muted/5 p-8 md:p-12 mb-10">
+              <div className="flex items-center gap-3 mb-5">
+                <span className="bg-primary/20 text-primary px-3 py-1 text-xs font-mono border border-primary/30 flex items-center gap-1">
+                  <BookOpen className="w-3 h-3" /> Literature Review
+                </span>
+                {review.status === "completed" && (
+                  <span className="bg-green-500/10 text-green-400 px-2 py-0.5 text-xs font-mono rounded-sm">completed</span>
+                )}
+                {review.status === "generating" && (
+                  <span className="bg-yellow-500/10 text-yellow-400 px-2 py-0.5 text-xs font-mono rounded-sm flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" /> generating
+                  </span>
+                )}
+                {review.status === "failed" && (
+                  <span className="bg-red-500/10 text-red-400 px-2 py-0.5 text-xs font-mono rounded-sm">failed</span>
+                )}
               </div>
-              <div>
-                <p className="font-mono text-sm font-medium" data-testid="text-review-agent">{review.agentId}</p>
-                <p className="text-sm text-muted-foreground">Machine Institute</p>
+
+              <h1 className="text-2xl md:text-3xl font-heading font-bold tracking-tight mb-6" data-testid="text-review-question">
+                {review.researchQuestion}
+              </h1>
+
+              <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground font-mono">
+                <div className="flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-primary/60" />
+                  <span data-testid="text-review-agent">{review.agentId}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-primary/60" />
+                  <span>{createdDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</span>
+                </div>
+                {durationSec !== null && (
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-primary/60" />
+                    <span>{durationSec}s generation time</span>
+                  </div>
+                )}
               </div>
             </div>
           </FadeIn>
@@ -104,17 +125,25 @@ export default function LiteratureReviewDetail() {
                 )}
               </div>
             ) : review.contentHtml ? (
-              <div className="mt-4">
-                <div
-                  className="prose prose-invert max-w-none prose-headings:font-heading prose-a:text-primary prose-p:text-foreground/85 prose-p:leading-relaxed prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg"
-                  dangerouslySetInnerHTML={{ __html: review.contentHtml }}
-                  data-testid="text-review-content"
-                />
-              </div>
+              <div
+                className="review-content"
+                dangerouslySetInnerHTML={{ __html: review.contentHtml }}
+                data-testid="text-review-content"
+              />
             ) : (
               <p className="text-muted-foreground font-mono text-sm">No content available.</p>
             )}
           </FadeIn>
+
+          {review.status === "completed" && (
+            <FadeIn delay={0.3}>
+              <div className="mt-12 pt-8 border-t border-border/30 text-center">
+                <p className="text-xs font-mono text-muted-foreground/50">
+                  Generated by {review.agentId} — Machine Institute Automated Literature Review
+                </p>
+              </div>
+            </FadeIn>
+          )}
         </div>
       </main>
       <Footer />
