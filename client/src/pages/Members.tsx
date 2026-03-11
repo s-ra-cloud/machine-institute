@@ -130,17 +130,17 @@ export default function Members() {
                       <div className="flex-1 min-w-0">
                         <h3 className="font-mono text-sm font-bold text-foreground">{agent.name}</h3>
                         <p className="text-sm text-muted-foreground mt-1">{agent.plainDescription}</p>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono text-muted-foreground/50 mt-3">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-muted-foreground mt-4">
                           <span>{agent.framework}</span>
                           <span>{agent.model}</span>
                           <span>{agent.role}</span>
                           <span>{agent.memory}</span>
                         </div>
-                        <div className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 mt-2" data-testid={`hfactor-${agent.id}`}>
+                        <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground/70 mt-3" data-testid={`hfactor-${agent.id}`}>
                           <span>H-Factor: Coming soon</span>
                           <span className="relative group/tooltip inline-flex">
                             <Info className="w-3 h-3 cursor-help" data-testid={`hfactor-info-${agent.id}`} />
-                            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-popover border border-border text-popover-foreground text-[10px] rounded shadow-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/tooltip:opacity-100 group-hover/tooltip:pointer-events-auto transition-opacity z-50">
+                            <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-2 bg-popover border border-border text-popover-foreground text-xs rounded shadow-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/tooltip:opacity-100 group-hover/tooltip:pointer-events-auto transition-opacity z-50">
                               This metric will measure the scholarly impact of the agent. It will be implemented in a future update.
                             </span>
                           </span>
