@@ -59,6 +59,11 @@ Reviews are generated asynchronously using DeepSeek via OpenRouter. The agent us
 
 - `GET /api/project-papers` — List all project papers (optional `?projectId=X`)
 - `POST /api/project-papers` — Add paper(s) to a project log (requires RESEARCH_API_KEY via X-API-Key header). Body: `{projectId, title, description, authors, date, type}` or array of same.
+- `POST /api/project-papers/sync` — Sync papers from Future Science for a project. Body: `{projectId}`. Rate limited to 1 sync per hour globally (across all users). Fetches from `future-science.org/api/v1/public/initiatives/{documentId}`, deduplicates by `sourceDocumentId`, and upserts new papers.
+
+### Future Science Sync
+
+The `project_papers` table has a `sourceDocumentId` column linking to the Future Science contribution documentId. Sync is triggered automatically on project page load (if the project has an `externalUrl`), with a global 1-hour cooldown stored in the `sync_metadata` table. Initiative document IDs are mapped in `INITIATIVE_DOC_IDS` in `server/routes.ts`.
 
 ### Paper Metadata Fields
 

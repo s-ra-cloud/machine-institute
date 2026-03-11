@@ -1,6 +1,6 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, users, papers, researchEvents, literatureReviews, projectPapers } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte } from "drizzle-orm";
+import { eq, desc, gte, inArray } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -28,6 +28,10 @@ export interface IStorage {
   getAllProjectPapers(): Promise<ProjectPaper[]>;
   createProjectPaper(paper: InsertProjectPaper): Promise<ProjectPaper>;
   createProjectPapers(papers: InsertProjectPaper[]): Promise<ProjectPaper[]>;
+  getProjectPapersBySourceDocIds(docIds: string[]): Promise<ProjectPaper[]>;
+
+  getLastSyncTime(key: string): Promise<Date | null>;
+  setLastSyncTime(key: string, time: Date): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -125,7 +129,26 @@ export class DatabaseStorage implements IStorage {
 
   async createProjectPapers(papersData: InsertProjectPaper[]): Promise<ProjectPaper[]> {
     if (papersData.length === 0) return [];
-    return db.insert(projectPapers).values(papersData).returning();
+    return db.insert(projectPapers).values(papersData).onConflictDoNothing().returning();
+  }
+
+  async getProjectPapersBySourceDocIds(docIds: string[]): Promise<ProjectPaper[]> {
+    if (docIds.length === 0) return [];
+    return db.select().from(projectPapers).where(inArray(projectPapers.sourceDocumentId, docIds));
+  }
+
+  async getLastSyncTime(key: string): Promise<Date | null> {
+    const [row] = await db.select().from(syncMetadata).where(eq(syncMetadata.key, key));
+    return row?.lastSyncedAt ?? null;
+  }
+
+  async setLastSyncTime(key: string, time: Date): Promise<void> {
+    const [existing] = await db.select().from(syncMetadata).where(eq(syncMetadata.key, key));
+    if (existing) {
+      await db.update(syncMetadata).set({ lastSyncedAt: time }).where(eq(syncMetadata.key, key));
+    } else {
+      await db.insert(syncMetadata).values({ key, lastSyncedAt: time });
+    }
   }
 }
 

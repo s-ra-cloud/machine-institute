@@ -3,16 +3,21 @@ import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { projects, placeholderPublications } from "@/lib/mockData";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Paper, LiteratureReview, ProjectPaper } from "@shared/schema";
-import { useState } from "react";
-import { ArrowLeft, ExternalLink, Lock, BookOpen, Loader2, CheckCircle, AlertCircle, ChevronDown } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { ArrowLeft, ExternalLink, Lock, BookOpen, Loader2, CheckCircle, AlertCircle, ChevronDown, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LiteratureReviewRequest } from "@/components/LiteratureReviewRequest";
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const project = projects.find((p) => p.id === id);
+  const queryClient = useQueryClient();
+  const syncTriggered = useRef(false);
+  const [syncStatus, setSyncStatus] = useState<{ message: string; type: "info" | "success" | "idle" }>(
+    { message: "", type: "idle" }
+  );
 
   const { data: projectPapersData = [] } = useQuery<ProjectPaper[]>({
     queryKey: ["/api/project-papers", id],
@@ -34,6 +39,36 @@ export default function ProjectDetail() {
     enabled: project?.status === "public",
     refetchInterval: 10000,
   });
+
+  useEffect(() => {
+    if (!id || !project?.externalUrl || project?.status !== "public" || syncTriggered.current) return;
+    syncTriggered.current = true;
+
+    setSyncStatus({ message: "Checking for new publications…", type: "info" });
+    fetch("/api/project-papers/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: id }),
+    })
+      .then(res => {
+        if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        if (data.newPapers > 0) {
+          setSyncStatus({ message: `${data.newPapers} new paper(s) synced from Future Science.`, type: "success" });
+          queryClient.invalidateQueries({ queryKey: ["/api/project-papers", id] });
+        } else if (data.synced === false) {
+          setSyncStatus({ message: "", type: "idle" });
+        } else {
+          setSyncStatus({ message: "", type: "idle" });
+        }
+        setTimeout(() => setSyncStatus({ message: "", type: "idle" }), 5000);
+      })
+      .catch(() => {
+        setSyncStatus({ message: "", type: "idle" });
+      });
+  }, [id, project]);
 
   if (!project) {
     return (
@@ -178,7 +213,19 @@ export default function ProjectDetail() {
           )}
 
           <FadeIn delay={0.3} className="mt-16">
-            <h2 className="text-2xl font-heading font-bold mb-6">Publication Log</h2>
+            <div className="flex items-center gap-3 mb-6">
+              <h2 className="text-2xl font-heading font-bold">Publication Log</h2>
+              {syncStatus.type === "info" && (
+                <span className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground" data-testid="text-sync-status">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> {syncStatus.message}
+                </span>
+              )}
+              {syncStatus.type === "success" && (
+                <span className="flex items-center gap-1.5 text-xs font-mono text-green-400" data-testid="text-sync-status">
+                  <CheckCircle className="w-3 h-3" /> {syncStatus.message}
+                </span>
+              )}
+            </div>
             {allPublications.length === 0 ? (
               <p className="text-sm text-muted-foreground/50 font-mono">No publications yet.</p>
             ) : (

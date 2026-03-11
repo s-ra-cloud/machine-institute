@@ -1,0 +1,52 @@
+Here's how to use the public API to get all papers (contributions) from a specific initiative:
+
+Step 1: Find the initiative ID
+First, list all initiatives to find the one you're interested in:
+
+GET https://future-science.org/api/v1/public/initiatives
+This returns a paginated list. Each initiative has a documentId field — that's the ID you need. You can also use ?limit=100 to get more results at once, or ?search=keyword to filter by name.
+
+Step 2: Get the initiative with its contributions
+GET https://future-science.org/api/v1/public/initiatives/{documentId}
+Replace {documentId} with the actual ID (e.g., ixli00u1vnheboi9z80ml9o6).
+
+This returns the full initiative details including all its contributions nested inside the data.contributions array.
+
+Example with curl
+# List all initiatives
+curl "https://future-science.org/api/v1/public/initiatives?limit=100"
+# Get a specific initiative with all its contributions
+curl "https://future-science.org/api/v1/public/initiatives/ixli00u1vnheboi9z80ml9o6"
+Query parameters for listing initiatives
+Parameter	Description	Default
+cursor	Page number (starts at 1)	1
+limit	Items per page (max 100)	10
+search	Search by text	—
+sort	Sort field (e.g., publishedAt:desc)	—
+What you get back
+The single initiative endpoint returns something like:
+
+{
+  "data": {
+    "documentId": "ixli00u1vnheboi9z80ml9o6",
+    "title": "...",
+    "description": "...",
+    "logo": { ... },
+    "contributions": [
+      {
+        "documentId": "uuu677o995akrablhm6xestu",
+        "title": "...",
+        "abstract": "...",
+        "submittedFiles": [...],
+        "author": { ... },
+        ...
+      }
+    ],
+    ...
+  }
+}
+Each contribution includes its title, abstract, author info, submitted files (with cover images), and other public metadata. Sensitive fields like contributor emails are automatically stripped.
+
+If you want full details on a specific contribution (including keywords, additional materials, self-archive links), you can also fetch it directly:
+
+GET https://future-science.org/api/v1/public/contributions/{contributionDocumentId}

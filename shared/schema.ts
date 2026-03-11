@@ -96,6 +96,7 @@ export const projectPapers = pgTable("project_papers", {
   authors: text("authors").notNull(),
   date: text("date").notNull(),
   type: text("type").notNull().default("article"),
+  sourceDocumentId: text("source_document_id").unique(),
 });
 
 export const insertProjectPaperSchema = createInsertSchema(projectPapers).omit({
@@ -106,10 +107,17 @@ export const insertProjectPaperSchema = createInsertSchema(projectPapers).omit({
   description: z.string().min(1),
   authors: z.string().min(1),
   date: z.string().min(1),
+  sourceDocumentId: z.string().nullable().optional(),
 });
 
 export type InsertProjectPaper = z.infer<typeof insertProjectPaperSchema>;
 export type ProjectPaper = typeof projectPapers.$inferSelect;
+
+export const syncMetadata = pgTable("sync_metadata", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  lastSyncedAt: timestamp("last_synced_at").notNull(),
+});
 
 export const researchEvents = pgTable("research_events", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

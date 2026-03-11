@@ -313,6 +313,84 @@ export async function registerRoutes(
     }
   });
 
+  const INITIATIVE_DOC_IDS: Record<string, string> = {
+    "autonomous-journal-machine-psychology": "ixli00u1vnheboi9z80ml9o6",
+  };
+
+  const SYNC_COOLDOWN_MS = 60 * 60 * 1000;
+
+  app.post("/api/project-papers/sync", async (req, res) => {
+    try {
+      const { projectId } = req.body;
+      if (!projectId || !INITIATIVE_DOC_IDS[projectId]) {
+        return res.status(400).json({ error: "Unknown or unsupported project for sync." });
+      }
+
+      const syncKey = `future-science-sync-global`;
+      const lastSync = await storage.getLastSyncTime(syncKey);
+      if (lastSync && Date.now() - lastSync.getTime() < SYNC_COOLDOWN_MS) {
+        const nextSyncIn = Math.ceil((SYNC_COOLDOWN_MS - (Date.now() - lastSync.getTime())) / 60000);
+        return res.json({ synced: false, message: `Sync available in ${nextSyncIn} minutes.`, newPapers: 0 });
+      }
+
+      const docId = INITIATIVE_DOC_IDS[projectId];
+      const apiUrl = `https://future-science.org/api/v1/public/initiatives/${docId}`;
+      const response = await fetch(apiUrl);
+      if (!response.ok) {
+        console.error(`Future Science API returned ${response.status}`);
+        return res.status(502).json({ error: "Failed to fetch from Future Science." });
+      }
+
+      const data = await response.json() as any;
+      const contributions = data?.data?.contributions || [];
+
+      if (contributions.length === 0) {
+        await storage.setLastSyncTime(syncKey, new Date());
+        return res.json({ synced: true, message: "No contributions found.", newPapers: 0 });
+      }
+
+      const sourceDocIds = contributions.map((c: any) => c.documentId);
+      const existing = await storage.getProjectPapersBySourceDocIds(sourceDocIds);
+      const existingDocIds = new Set(existing.map(p => p.sourceDocumentId));
+
+      const newPapers = contributions
+        .filter((c: any) => !existingDocIds.has(c.documentId))
+        .map((c: any) => {
+          const authorRaw = c.author;
+          const authorArr = Array.isArray(authorRaw) ? authorRaw : (authorRaw ? [authorRaw] : []);
+          const authorList = authorArr
+            .map((a: any) => `${a.firstName || ""} ${a.lastName || ""}`.trim() + (a.institution ? ` (${a.institution})` : ""))
+            .filter((s: string) => s.length > 0)
+            .join(", ");
+          return {
+            projectId,
+            title: c.subtitle ? `${c.title}: ${c.subtitle}` : c.title,
+            description: c.abstract || "No abstract available.",
+            authors: authorList || "Unknown",
+            date: c.publishedAt ? c.publishedAt.split("T")[0] : new Date().toISOString().split("T")[0],
+            type: (c.type || "article").toLowerCase(),
+            sourceDocumentId: c.documentId,
+          };
+        });
+
+      if (newPapers.length > 0) {
+        await storage.createProjectPapers(newPapers);
+      }
+
+      await storage.setLastSyncTime(syncKey, new Date());
+
+      return res.json({
+        synced: true,
+        message: `Synced ${newPapers.length} new paper(s) from Future Science.`,
+        newPapers: newPapers.length,
+        total: contributions.length,
+      });
+    } catch (err: any) {
+      console.error("Error syncing project papers:", err);
+      return res.status(500).json({ error: "Internal server error during sync." });
+    }
+  });
+
   const DEFAULT_BLR_PROMPT = `You are assisting with an academic literature review.
 
 I will provide a set of academic papers. Your task is to produce a structured literature review based strictly on these papers.

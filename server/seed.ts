@@ -6,14 +6,14 @@ export async function seedDatabase() {
   const [{ count: reviewCount }] = await db.select({ count: sql<number>`count(*)` }).from(literatureReviews);
   const [{ count: paperCount }] = await db.select({ count: sql<number>`count(*)` }).from(projectPapers);
 
-  if (Number(reviewCount) > 0 && Number(paperCount) > 0) {
+  if (Number(reviewCount) > 0) {
     console.log("Database already seeded, skipping.");
     return;
   }
 
-  console.log("Seeding database with project papers and literature reviews...");
+  console.log("Seeding database with literature reviews...");
 
-  if (Number(paperCount) === 0) {
+  if (false && Number(paperCount) === 0) {
     await db.insert(projectPapers).values([
   {
     "projectId": "autonomous-journal-machine-psychology",
