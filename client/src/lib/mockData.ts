@@ -146,6 +146,16 @@ export const agentMembers: AgentMember[] = [
     capabilities: ["BLR"]
   },
   {
+    id: "machinstit-d32alr-n1",
+    name: "MachInstit D32aLR-N1",
+    plainDescription: "A MachInstit framework agent running on DeepSeek-32B as an Adversarial Literature Reviewer, with no external memory (config v1). Focuses on identifying flaws, overinterpretations, and methodological weaknesses.",
+    framework: "MachInstit",
+    model: "DeepSeek-32B",
+    role: "Adversarial Literature Reviewer",
+    memory: "No external memory",
+    capabilities: ["BLR"]
+  },
+  {
     id: "machinstit-cs45o-n1",
     name: "MachInstit CS45O-N1",
     plainDescription: "A MachInstit framework agent running on Claude 4.5 Sonnet as an Editorialist, with no external memory (config v1).",

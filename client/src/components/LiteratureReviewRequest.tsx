@@ -15,23 +15,31 @@ export function LiteratureReviewRequest({ journalName, projectId }: Props) {
   const [question, setQuestion] = useState("");
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [customPrompt, setCustomPrompt] = useState("");
+  const [promptManuallyEdited, setPromptManuallyEdited] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
+  const currentAgentId = blrAgents[selectedAgent]?.name || "";
+
   const { data: defaultPromptData } = useQuery<{ prompt: string }>({
-    queryKey: ["/api/literature-reviews/default-prompt"],
+    queryKey: ["/api/literature-reviews/default-prompt", currentAgentId],
     queryFn: async () => {
-      const res = await fetch("/api/literature-reviews/default-prompt");
+      const res = await fetch(`/api/literature-reviews/default-prompt?agentId=${encodeURIComponent(currentAgentId)}`);
       return res.json();
     },
     enabled: blrAgents.length > 0,
   });
 
   useEffect(() => {
-    if (defaultPromptData?.prompt && !customPrompt) {
+    if (defaultPromptData?.prompt && !promptManuallyEdited) {
       setCustomPrompt(defaultPromptData.prompt);
     }
-  }, [defaultPromptData]);
+  }, [defaultPromptData, currentAgentId]);
+
+  const handleAgentChange = (idx: number) => {
+    setSelectedAgent(idx);
+    setPromptManuallyEdited(false);
+  };
 
   const submitMutation = useMutation({
     mutationFn: async () => {
@@ -74,7 +82,7 @@ export function LiteratureReviewRequest({ journalName, projectId }: Props) {
           <h3 className="font-heading text-lg font-semibold">Request a Literature Review</h3>
         </div>
         <p className="text-sm text-muted-foreground leading-relaxed mt-2">
-          Ask a BLR-type agent to conduct a literature review on the papers published in the{" "}
+          Ask a reviewer agent to conduct a literature review on the papers published in the{" "}
           <span className="text-foreground font-medium">{journalName}</span>.
           The review will be performed on the journal's corpus and, once completed, published as a new contribution below.
         </p>
@@ -83,7 +91,7 @@ export function LiteratureReviewRequest({ journalName, projectId }: Props) {
       <div className="px-6 py-5 space-y-5">
         <div>
           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
-            Select Agent (BLR)
+            Select Agent
           </label>
 
           {blrAgents.length === 0 ? (
@@ -109,7 +117,7 @@ export function LiteratureReviewRequest({ journalName, projectId }: Props) {
                 {blrAgents.map((agent, idx) => (
                   <button
                     key={agent.id}
-                    onClick={() => setSelectedAgent(idx)}
+                    onClick={() => handleAgentChange(idx)}
                     className={`shrink-0 px-4 py-3 border transition-all text-left ${
                       selectedAgent === idx
                         ? "border-primary bg-primary/5 shadow-[0_0_12px_rgba(124,58,237,0.15)]"
@@ -119,7 +127,7 @@ export function LiteratureReviewRequest({ journalName, projectId }: Props) {
                   >
                     <span className="font-mono text-xs font-semibold text-foreground block">{agent.name}</span>
                     <span className="text-[10px] text-muted-foreground block mt-0.5">{agent.role} · {agent.model}</span>
-                    <span className="text-[10px] font-mono text-primary/60 block mt-1">BLR</span>
+                    <span className="text-[10px] font-mono text-primary/60 block mt-1">{agent.role.includes("Adversarial") ? "aLR" : "BLR"}</span>
                   </button>
                 ))}
               </div>
@@ -161,7 +169,7 @@ export function LiteratureReviewRequest({ journalName, projectId }: Props) {
               {promptExpanded && (
                 <textarea
                   value={customPrompt}
-                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  onChange={(e) => { setCustomPrompt(e.target.value); setPromptManuallyEdited(true); }}
                   className="w-full h-64 bg-background border border-border/50 px-4 py-3 text-xs text-foreground/70 resize-none focus:outline-none focus:border-primary/50 transition-colors font-mono mt-2"
                   data-testid="input-custom-prompt"
                 />
