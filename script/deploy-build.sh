@@ -2,5 +2,5 @@
 set -e
 npm install
 npm run build
-npx drizzle-kit push --force
+echo "y" | npx drizzle-kit push
 npx tsx server/seed-production.ts

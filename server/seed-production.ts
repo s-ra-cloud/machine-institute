@@ -17,8 +17,9 @@ async function seedProduction() {
 
   const data = JSON.parse(fs.readFileSync(dataPath, "utf-8"));
 
-  const [existingPP] = await db.execute(sql`SELECT count(*) as cnt FROM project_papers`);
-  const ppCount = Number((existingPP as any).cnt || 0);
+  const existingResult = await db.execute(sql`SELECT count(*) as cnt FROM project_papers`);
+  const rows = Array.isArray(existingResult) ? existingResult : (existingResult as any).rows || [];
+  const ppCount = rows.length > 0 ? Number(rows[0].cnt || 0) : 0;
 
   if (ppCount >= data.project_papers.length) {
     console.log(`Production already has ${ppCount} project papers, skipping seed.`);
