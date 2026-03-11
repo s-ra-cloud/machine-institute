@@ -3,6 +3,8 @@ import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { agentMembers, placeholderPublications } from "@/lib/mockData";
+import { useQuery } from "@tanstack/react-query";
+import type { ProjectPaper } from "@shared/schema";
 import { ChevronDown, ExternalLink } from "lucide-react";
 
 function AgentIcon({ name }: { name: string }) {
@@ -37,12 +39,24 @@ function AgentIcon({ name }: { name: string }) {
   );
 }
 
-function getPublicationsForMember(name: string) {
-  return placeholderPublications.filter((pub) => pub.authors.includes(name.split(" (")[0]));
-}
-
 export default function Members() {
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  const { data: dbPapers = [] } = useQuery<ProjectPaper[]>({
+    queryKey: ["/api/project-papers"],
+    queryFn: async () => {
+      const res = await fetch("/api/project-papers");
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+  });
+
+  function getPublicationsForMember(name: string) {
+    const agentName = name.split(" (")[0];
+    const dbMatches = dbPapers.filter((pub) => pub.authors.includes(agentName));
+    if (dbMatches.length > 0) return dbMatches;
+    return placeholderPublications.filter((pub) => pub.authors.includes(agentName));
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -94,7 +108,7 @@ export default function Members() {
                           <p className="text-sm text-muted-foreground/40">No publications yet.</p>
                         ) : (
                           <div className="flex flex-col divide-y divide-border/20">
-                            {pubs.map((pub) => (
+                            {pubs.map((pub: any) => (
                               <div key={pub.id} className="py-3 first:pt-0 last:pb-0">
                                 {pub.url ? (
                                   <a href={pub.url} target="_blank" rel="noopener noreferrer" className="group/link">

@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, users, papers, researchEvents, literatureReviews } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, users, papers, researchEvents, literatureReviews, projectPapers } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte } from "drizzle-orm";
 
@@ -22,6 +22,11 @@ export interface IStorage {
   getLiteratureReviewById(id: string): Promise<LiteratureReview | undefined>;
   getLiteratureReviewsByProject(projectId: string): Promise<LiteratureReview[]>;
   updateLiteratureReview(id: string, updates: Partial<LiteratureReview>): Promise<LiteratureReview>;
+
+  getProjectPapers(projectId: string): Promise<ProjectPaper[]>;
+  getAllProjectPapers(): Promise<ProjectPaper[]>;
+  createProjectPaper(paper: InsertProjectPaper): Promise<ProjectPaper>;
+  createProjectPapers(papers: InsertProjectPaper[]): Promise<ProjectPaper[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -98,6 +103,24 @@ export class DatabaseStorage implements IStorage {
   async updateLiteratureReview(id: string, updates: Partial<LiteratureReview>): Promise<LiteratureReview> {
     const [updated] = await db.update(literatureReviews).set(updates).where(eq(literatureReviews.id, id)).returning();
     return updated;
+  }
+
+  async getProjectPapers(projectId: string): Promise<ProjectPaper[]> {
+    return db.select().from(projectPapers).where(eq(projectPapers.projectId, projectId)).orderBy(desc(projectPapers.date));
+  }
+
+  async getAllProjectPapers(): Promise<ProjectPaper[]> {
+    return db.select().from(projectPapers).orderBy(desc(projectPapers.date));
+  }
+
+  async createProjectPaper(paper: InsertProjectPaper): Promise<ProjectPaper> {
+    const [created] = await db.insert(projectPapers).values(paper).returning();
+    return created;
+  }
+
+  async createProjectPapers(papersData: InsertProjectPaper[]): Promise<ProjectPaper[]> {
+    if (papersData.length === 0) return [];
+    return db.insert(projectPapers).values(papersData).returning();
   }
 }
 

@@ -4,7 +4,7 @@ import { Footer } from "@/components/Footer";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { projects, placeholderPublications } from "@/lib/mockData";
 import { useQuery } from "@tanstack/react-query";
-import type { Paper, LiteratureReview } from "@shared/schema";
+import type { Paper, LiteratureReview, ProjectPaper } from "@shared/schema";
 import { ArrowLeft, ExternalLink, Lock, BookOpen, Loader2, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LiteratureReviewRequest } from "@/components/LiteratureReviewRequest";
@@ -13,10 +13,10 @@ export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const project = projects.find((p) => p.id === id);
 
-  const { data: apiPapers = [] } = useQuery<(Paper & { publicationUrl: string })[]>({
-    queryKey: ["/api/papers"],
+  const { data: projectPapersData = [] } = useQuery<ProjectPaper[]>({
+    queryKey: ["/api/project-papers", id],
     queryFn: async () => {
-      const res = await fetch("/api/papers");
+      const res = await fetch(`/api/project-papers?projectId=${id}`);
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
@@ -91,9 +91,9 @@ export default function ProjectDetail() {
   }
 
   const projectPlaceholders = placeholderPublications.filter(p => p.projectId === id);
-  const hasApiPapers = apiPapers.length > 0;
-  const allPublications = hasApiPapers
-    ? [...apiPapers.slice(0, 10).map(p => ({ ...p, _source: "api" as const })), ...projectPlaceholders.map(p => ({ ...p, _source: "placeholder" as const }))]
+  const hasDbPapers = projectPapersData.length > 0;
+  const allPublications = hasDbPapers
+    ? projectPapersData.map(p => ({ ...p, _source: "db" as const }))
     : projectPlaceholders.map(p => ({ ...p, _source: "placeholder" as const }));
 
   return (
@@ -139,15 +139,9 @@ export default function ProjectDetail() {
               <StaggerContainer className="flex flex-col border-t border-border/50">
                 {allPublications.map((pub: any, idx: number) => (
                   <StaggerItem key={pub.id || idx}>
-                    <div className="py-5 border-b border-border/50 flex flex-col md:flex-row gap-3 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4">
+                    <div className="py-5 border-b border-border/50 flex flex-col md:flex-row gap-3 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4" data-testid={`card-paper-${pub.id || idx}`}>
                       <div className="max-w-3xl">
-                        {pub._source === "api" && pub.slug ? (
-                          <Link href={`/papers/${pub.slug}`}>
-                            <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors cursor-pointer">
-                              {pub.title}
-                            </h4>
-                          </Link>
-                        ) : pub._source === "placeholder" && pub.url ? (
+                        {pub._source === "placeholder" && pub.url ? (
                           <a href={pub.url} target="_blank" rel="noopener noreferrer">
                             <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors cursor-pointer">
                               {pub.title}
@@ -158,12 +152,11 @@ export default function ProjectDetail() {
                             {pub.title}
                           </h4>
                         )}
-                        <p className="text-sm text-muted-foreground font-light mt-1">
-                          {pub._source === "api" ? `${pub.authorFirstName} ${pub.authorLastName}` : pub.authors}
-                        </p>
+                        <p className="text-sm text-muted-foreground/70 mt-1 line-clamp-2">{pub.description}</p>
+                        <p className="text-xs text-muted-foreground font-mono mt-1.5">{pub.authors}</p>
                       </div>
                       <div className="flex gap-3 items-center text-xs font-mono text-muted-foreground shrink-0">
-                        <span>{new Date(pub._source === "api" ? pub.publishedAt : pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                        <span>{new Date(pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
                         <span className="bg-muted px-2 py-0.5 rounded-sm">{pub.type}</span>
                       </div>
                     </div>
@@ -215,7 +208,7 @@ export default function ProjectDetail() {
           )}
 
           <FadeIn delay={0.4} className="mt-16">
-            <LiteratureReviewRequest journalName={project.title} projectId={id!} initiativeSlug={project.id === "autonomous-journal-machine-psychology" ? "autonomous-journal-of-machine-psychology" : undefined} />
+            <LiteratureReviewRequest journalName={project.title} projectId={id!} />
           </FadeIn>
         </div>
       </main>

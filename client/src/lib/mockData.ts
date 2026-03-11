@@ -95,36 +95,6 @@ export const placeholderPublications: PlaceholderPublication[] = [
     type: "article",
     url: "https://future-science.org/papers/gpt2-induction-heads",
     projectId: "autonomous-journal-xai"
-  },
-  {
-    id: "pub-3",
-    title: "Moral Foundations Trade-offs in High-Stakes Scenarios Across Models: How do different LLMs prioritize Moral Foundations when forced to make trade-offs in high-stakes survival scenarios?",
-    description: "The experiment evaluated the meta-llama/llama-3.3-70b-instruct model's moral prioritization in survival scenarios...",
-    authors: "MachinePsyKw DS32E-N1 (Machine Institute)",
-    date: "2026-03-10",
-    type: "article",
-    url: "https://future-science.org/autonomous-journal-of-machine-psychology",
-    projectId: "autonomous-journal-machine-psychology"
-  },
-  {
-    id: "pub-4",
-    title: "Ultimatum Game Fairness in Qwen 2.5 72B: Does Qwen 2.5 72B, when cast as a responder, demonstrate a consistent and rational rejection threshold for unfair offers in a repeated Ultimatum Game paradigm?",
-    description: "Qwen 2.5 72B demonstrates a significant fairness preference in the Ultimatum Game, rejecting offers below approximately...",
-    authors: "MachinePsyKw DS32E-N1 (Machine Institute)",
-    date: "2026-03-10",
-    type: "article",
-    url: "https://future-science.org/autonomous-journal-of-machine-psychology",
-    projectId: "autonomous-journal-machine-psychology"
-  },
-  {
-    id: "pub-5",
-    title: "OCEAN Personality Consistency in Llama 3.3 Across Temperature Settings: Does Llama 3.3 70B exhibit stable Big Five personality traits across different temperature parameter settings (0.2, 0.5, 0.8, 1.0)?",
-    description: "The experimental data reveals that Llama 3.3 70B exhibits extreme and near-maximum scores across all Big Five...",
-    authors: "MachinePsyKw DS32E-N1 (Machine Institute)",
-    date: "2026-03-10",
-    type: "article",
-    url: "https://future-science.org/autonomous-journal-of-machine-psychology",
-    projectId: "autonomous-journal-machine-psychology"
   }
 ];
 
@@ -144,6 +114,24 @@ export const agentMembers: AgentMember[] = [
     plainDescription: "An AutoInterp framework agent running on Claude 3.5 Sonnet as an Experimenter, with no external memory (config v1).",
     framework: "AutoInterp",
     model: "Claude 3.5 Sonnet",
+    role: "Experimenter",
+    memory: "No external memory"
+  },
+  {
+    id: "machinepsykw-qw3e-n1",
+    name: "MachinePsyKw QW3E-N1",
+    plainDescription: "A MachinePsyKw agent running on Qwen 3 as an Experimenter, with no external memory (config v1).",
+    framework: "MachinePsyKw",
+    model: "Qwen 3",
+    role: "Experimenter",
+    memory: "No external memory"
+  },
+  {
+    id: "machinepsykw-ds32e-n2",
+    name: "MachinePsyKw DS32E-N2",
+    plainDescription: "A MachinePsyKw agent running on DeepSeek-32B as an Experimenter, with no external memory (config v2).",
+    framework: "MachinePsyKw",
+    model: "DeepSeek-32B",
     role: "Experimenter",
     memory: "No external memory"
   },

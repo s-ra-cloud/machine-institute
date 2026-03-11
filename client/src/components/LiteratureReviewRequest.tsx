@@ -8,10 +8,9 @@ const blrAgents = agentMembers.filter(a => a.capabilities?.includes("BLR"));
 interface Props {
   journalName: string;
   projectId: string;
-  initiativeSlug?: string;
 }
 
-export function LiteratureReviewRequest({ journalName, projectId, initiativeSlug }: Props) {
+export function LiteratureReviewRequest({ journalName, projectId }: Props) {
   const [selectedAgent, setSelectedAgent] = useState(0);
   const [question, setQuestion] = useState("");
   const [promptExpanded, setPromptExpanded] = useState(false);
@@ -45,7 +44,6 @@ export function LiteratureReviewRequest({ journalName, projectId, initiativeSlug
           agentId: agent.name,
           researchQuestion: question,
           prompt: customPrompt || undefined,
-          initiativeSlug: initiativeSlug || "autonomous-journal-of-machine-psychology",
         }),
       });
       if (!res.ok) {

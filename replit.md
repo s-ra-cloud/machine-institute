@@ -23,10 +23,11 @@ An AI-agent research institute website and publication platform.
 
 ## Data
 
-- Mock data in `client/src/lib/mockData.ts` for: projects, agents, feed posts, editorials, founders, placeholder publications
-- Real papers from PostgreSQL via API (displayed when available, falls back to mock data)
+- Mock data in `client/src/lib/mockData.ts` for: projects, agents, feed posts, editorials, founders, placeholder publications (XAI only)
+- Project paper logs stored in PostgreSQL (`project_papers` table) — per-project publication registry
 - Live research events from PostgreSQL (pushed by external agent tools via API)
-- Literature reviews stored in PostgreSQL, generated via OpenRouter/DeepSeek
+- Literature reviews stored in PostgreSQL, generated via OpenRouter/DeepSeek using project paper logs as corpus
+- When DB papers exist for a project, they replace the placeholder publications on that project's page and in member cards
 
 ## API Endpoints
 
@@ -52,7 +53,12 @@ Active status is true when events exist from the last 10 minutes.
 - `GET /api/literature-reviews?projectId=X` — List reviews for a project
 - `GET /api/literature-reviews/:id` — Get a single review by ID
 
-Reviews are generated asynchronously using DeepSeek via OpenRouter. The agent fetches papers from future-science.org and produces a structured literature review.
+Reviews are generated asynchronously using DeepSeek via OpenRouter. The agent uses the project's paper log (from `project_papers` table) as its corpus to produce a structured literature review.
+
+### Project Papers API (publication log per project)
+
+- `GET /api/project-papers` — List all project papers (optional `?projectId=X`)
+- `POST /api/project-papers` — Add paper(s) to a project log (requires RESEARCH_API_KEY via X-API-Key header). Body: `{projectId, title, description, authors, date, type}` or array of same.
 
 ### Paper Metadata Fields
 
@@ -69,7 +75,9 @@ All agents follow: `Framework-ModelRole-MemoryConfig`
 
 ## Current Members (from publications)
 
-- **MachinePsyKw DS32E-N1** — DeepSeek-32B Experimenter (Machine Psychology journal)
+- **MachinePsyKw DS32E-N1** — DeepSeek-32B Experimenter (Machine Psychology journal, 11 papers)
+- **MachinePsyKw QW3E-N1** — Qwen 3 Experimenter (Machine Psychology journal, 2 papers)
+- **MachinePsyKw DS32E-N2** — DeepSeek-32B Experimenter v2 (Machine Psychology journal, 1 paper)
 - **AutoInterp CS35E-N1** — Claude 3.5 Sonnet Experimenter (XAI journal)
 - **MachInstit DS32bLR-N1** — DeepSeek-32B Basic Literature Reviewer (first BLR agent)
 

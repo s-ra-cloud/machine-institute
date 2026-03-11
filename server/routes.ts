@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -264,6 +264,55 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/project-papers", async (req, res) => {
+    try {
+      const projectId = req.query.projectId as string;
+      if (projectId) {
+        const papers = await storage.getProjectPapers(projectId);
+        return res.json(papers);
+      }
+      const all = await storage.getAllProjectPapers();
+      return res.json(all);
+    } catch (err: any) {
+      console.error("Error fetching project papers:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/project-papers", async (req, res) => {
+    try {
+      const apiKey = req.headers["x-api-key"] || req.headers["authorization"]?.replace("Bearer ", "");
+      if (!apiKey || apiKey !== process.env.RESEARCH_API_KEY) {
+        return res.status(401).json({ error: "Unauthorized." });
+      }
+
+      const body = req.body;
+      const isArray = Array.isArray(body);
+      const items = isArray ? body : [body];
+
+      const validated = [];
+      for (const item of items) {
+        const result = insertProjectPaperSchema.safeParse(item);
+        if (!result.success) {
+          const message = fromZodError(result.error).message;
+          return res.status(400).json({ error: message });
+        }
+        validated.push(result.data);
+      }
+
+      if (validated.length === 1) {
+        const paper = await storage.createProjectPaper(validated[0]);
+        return res.status(201).json(paper);
+      }
+
+      const papers = await storage.createProjectPapers(validated);
+      return res.status(201).json(papers);
+    } catch (err: any) {
+      console.error("Error creating project paper:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   const DEFAULT_BLR_PROMPT = `You are assisting with an academic literature review.
 
 I will provide a set of academic papers. Your task is to produce a structured literature review based strictly on these papers.
@@ -350,17 +399,7 @@ I will now provide the papers.`;
       }
       reviewRateLimit.set(clientIp, Date.now());
 
-      const ALLOWED_SLUGS: Record<string, string> = {
-        "autonomous-journal-machine-psychology": "autonomous-journal-of-machine-psychology",
-        "autonomous-journal-xai": "autonomous-journal-of-explainable-ai",
-      };
-
-      const { projectId, agentId, researchQuestion, prompt, initiativeSlug } = req.body;
-
-      const resolvedSlug = initiativeSlug || ALLOWED_SLUGS[projectId] || null;
-      if (!resolvedSlug) {
-        return res.status(400).json({ error: "Unknown project. Cannot determine journal." });
-      }
+      const { projectId, agentId, researchQuestion, prompt } = req.body;
 
       const result = insertLiteratureReviewSchema.safeParse({
         projectId,
@@ -378,7 +417,7 @@ I will now provide the papers.`;
 
       res.status(201).json(review);
 
-      generateLiteratureReview(review.id, result.data, resolvedSlug).catch(err => {
+      generateLiteratureReview(review.id, result.data).catch(err => {
         console.error("Background review generation failed:", err);
       });
     } catch (err: any) {
@@ -413,17 +452,6 @@ I will now provide the papers.`;
       return res.status(500).json({ error: "Internal server error" });
     }
   });
-
-  async function fetchPapersFromFutureScience(initiativeSlug: string): Promise<string[]> {
-    try {
-      const response = await fetch(`https://future-science.org/${initiativeSlug}`);
-      const html = await response.text();
-      return [html];
-    } catch (err) {
-      console.error("Failed to fetch from future-science.org:", err);
-      return [];
-    }
-  }
 
   function sanitizeHtml(html: string): string {
     const window = new JSDOM("").window;
@@ -464,11 +492,23 @@ I will now provide the papers.`;
     return htmlLines.join("\n");
   }
 
-  async function generateLiteratureReview(reviewId: string, data: { projectId: string; agentId: string; researchQuestion: string; prompt: string }, initiativeSlug: string) {
+  async function generateLiteratureReview(reviewId: string, data: { projectId: string; agentId: string; researchQuestion: string; prompt: string }) {
     try {
       await storage.updateLiteratureReview(reviewId, { status: "generating" });
 
-      const paperTexts = await fetchPapersFromFutureScience(initiativeSlug);
+      const projectPapersData = await storage.getProjectPapers(data.projectId);
+
+      if (projectPapersData.length === 0) {
+        await storage.updateLiteratureReview(reviewId, {
+          status: "failed",
+          contentHtml: `<p>No papers found in the project log. Add papers to the project before requesting a literature review.</p>`,
+        });
+        return;
+      }
+
+      const paperTexts = projectPapersData.map((p, i) =>
+        `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.description}`
+      );
 
       const openrouter = new OpenAI({
         baseURL: "https://openrouter.ai/api/v1",
@@ -476,7 +516,7 @@ I will now provide the papers.`;
       });
 
       const systemPrompt = data.prompt;
-      const userMessage = `Research question: ${data.researchQuestion}\n\nThe following is the content from the journal's published papers:\n\n${paperTexts.join("\n\n---\n\n")}`;
+      const userMessage = `Research question: ${data.researchQuestion}\n\nThe following are the papers from the project's publication log:\n\n${paperTexts.join("\n\n---\n\n")}`;
 
       const completion = await openrouter.chat.completions.create({
         model: "deepseek/deepseek-chat",

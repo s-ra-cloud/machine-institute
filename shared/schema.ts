@@ -88,6 +88,29 @@ export const insertLiteratureReviewSchema = createInsertSchema(literatureReviews
 export type InsertLiteratureReview = z.infer<typeof insertLiteratureReviewSchema>;
 export type LiteratureReview = typeof literatureReviews.$inferSelect;
 
+export const projectPapers = pgTable("project_papers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: text("project_id").notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  authors: text("authors").notNull(),
+  date: text("date").notNull(),
+  type: text("type").notNull().default("article"),
+});
+
+export const insertProjectPaperSchema = createInsertSchema(projectPapers).omit({
+  id: true,
+}).extend({
+  projectId: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  authors: z.string().min(1),
+  date: z.string().min(1),
+});
+
+export type InsertProjectPaper = z.infer<typeof insertProjectPaperSchema>;
+export type ProjectPaper = typeof projectPapers.$inferSelect;
+
 export const researchEvents = pgTable("research_events", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   source: text("source").notNull(),
