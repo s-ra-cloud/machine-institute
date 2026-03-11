@@ -1,8 +1,89 @@
 import { db } from "./db";
-import { literatureReviews, projectPapers } from "@shared/schema";
+import { literatureReviews, projectPapers, editorials } from "@shared/schema";
 import { sql } from "drizzle-orm";
+import seedFixture from "./prod-seed-data.json";
+
+async function seedFromFixture() {
+  try {
+    const data = seedFixture as any;
+
+    const [{ count: ppCount }] = await db.select({ count: sql<number>`count(*)` }).from(projectPapers);
+    if (Number(ppCount) >= (data.project_papers?.length || 0)) return;
+
+    console.log("Seeding from fixture data...");
+
+    if (data.project_papers?.length > 0) {
+      for (const pp of data.project_papers) {
+        try {
+          await db.insert(projectPapers).values({
+            id: pp.id,
+            projectId: pp.projectId,
+            title: pp.title,
+            description: pp.description,
+            authors: pp.authors,
+            date: pp.date,
+            type: pp.type,
+            sourceDocumentId: pp.sourceDocumentId || null,
+          }).onConflictDoNothing();
+        } catch (e) {}
+      }
+      console.log(`Seeded ${data.project_papers.length} project papers.`);
+    }
+
+    if (data.editorials?.length > 0) {
+      const [{ count: edCount }] = await db.select({ count: sql<number>`count(*)` }).from(editorials);
+      if (Number(edCount) === 0) {
+        for (const ed of data.editorials) {
+          try {
+            await db.insert(editorials).values({
+              id: ed.id,
+              title: ed.title,
+              slug: ed.slug,
+              tag: ed.tag,
+              excerpt: ed.excerpt,
+              contentHtml: ed.contentHtml,
+              agentId: ed.agentId,
+              status: ed.status,
+              createdAt: ed.createdAt ? new Date(ed.createdAt) : new Date(),
+              completedAt: ed.completedAt ? new Date(ed.completedAt) : null,
+            }).onConflictDoNothing();
+          } catch (e) {}
+        }
+        console.log(`Seeded ${data.editorials.length} editorials.`);
+      }
+    }
+
+    if (data.literature_reviews?.length > 0) {
+      const [{ count: lrCount }] = await db.select({ count: sql<number>`count(*)` }).from(literatureReviews);
+      if (Number(lrCount) === 0) {
+        for (const lr of data.literature_reviews) {
+          try {
+            await db.insert(literatureReviews).values({
+              id: lr.id,
+              projectId: lr.projectId,
+              agentId: lr.agentId,
+              researchQuestion: lr.researchQuestion,
+              prompt: lr.prompt,
+              contentHtml: lr.contentHtml,
+              status: lr.status,
+              createdAt: lr.createdAt ? new Date(lr.createdAt) : new Date(),
+              completedAt: lr.completedAt ? new Date(lr.completedAt) : null,
+            }).onConflictDoNothing();
+          } catch (e) {}
+        }
+        console.log(`Seeded ${data.literature_reviews.length} literature reviews.`);
+      }
+    }
+
+    console.log("Fixture seed complete.");
+  } catch (err) {
+    console.error("Fixture seed failed (non-fatal):", err);
+  }
+}
 
 export async function seedDatabase() {
+  await seedFromFixture();
+
   const [{ count: reviewCount }] = await db.select({ count: sql<number>`count(*)` }).from(literatureReviews);
   const [{ count: paperCount }] = await db.select({ count: sql<number>`count(*)` }).from(projectPapers);
 
