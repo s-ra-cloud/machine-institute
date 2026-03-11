@@ -230,33 +230,31 @@ export default function ProjectDetail() {
               <p className="text-sm text-muted-foreground/50 font-mono">No publications yet.</p>
             ) : (
               <>
-                <StaggerContainer className="flex flex-col border-t border-border/50">
+                <div className="flex flex-col border-t border-border/50">
                   {visiblePublications.map((pub: any, idx: number) => (
-                    <StaggerItem key={pub.id || idx}>
-                      <div className="py-5 border-b border-border/50 flex flex-col md:flex-row gap-3 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4" data-testid={`card-paper-${pub.id || idx}`}>
-                        <div className="max-w-3xl">
-                          {pub._source === "placeholder" && pub.url ? (
-                            <a href={pub.url} target="_blank" rel="noopener noreferrer">
-                              <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors cursor-pointer">
-                                {pub.title}
-                              </h4>
-                            </a>
-                          ) : (
-                            <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors">
+                    <div key={pub.id || idx} className="py-5 border-b border-border/50 flex flex-col md:flex-row gap-3 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4" data-testid={`card-paper-${pub.id || idx}`}>
+                      <div className="max-w-3xl">
+                        {pub._source === "placeholder" && pub.url ? (
+                          <a href={pub.url} target="_blank" rel="noopener noreferrer">
+                            <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors cursor-pointer">
                               {pub.title}
                             </h4>
-                          )}
-                          <p className="text-sm text-muted-foreground/70 mt-1 line-clamp-2">{pub.description}</p>
-                          <p className="text-xs text-muted-foreground font-mono mt-1.5">{pub.authors}</p>
-                        </div>
-                        <div className="flex gap-3 items-center text-xs font-mono text-muted-foreground shrink-0">
-                          <span>{new Date(pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                          <span className="bg-muted px-2 py-0.5 rounded-sm">{pub.type}</span>
-                        </div>
+                          </a>
+                        ) : (
+                          <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors">
+                            {pub.title}
+                          </h4>
+                        )}
+                        <p className="text-sm text-muted-foreground/70 mt-1 line-clamp-2">{pub.description}</p>
+                        <p className="text-xs text-muted-foreground font-mono mt-1.5">{pub.authors}</p>
                       </div>
-                    </StaggerItem>
+                      <div className="flex gap-3 items-center text-xs font-mono text-muted-foreground shrink-0">
+                        <span>{new Date(pub.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                        <span className="bg-muted px-2 py-0.5 rounded-sm">{pub.type}</span>
+                      </div>
+                    </div>
                   ))}
-                </StaggerContainer>
+                </div>
                 {hiddenCount > 0 && (
                   <button
                     onClick={() => setShowAllPubs(!showAllPubs)}
