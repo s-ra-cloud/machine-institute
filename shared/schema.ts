@@ -113,6 +113,36 @@ export const insertProjectPaperSchema = createInsertSchema(projectPapers).omit({
 export type InsertProjectPaper = z.infer<typeof insertProjectPaperSchema>;
 export type ProjectPaper = typeof projectPapers.$inferSelect;
 
+export const editorials = pgTable("editorials", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  slug: text("slug").notNull().unique(),
+  tag: text("tag").notNull().default("Editorial"),
+  excerpt: text("excerpt"),
+  contentHtml: text("content_html"),
+  agentId: text("agent_id").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const insertEditorialSchema = createInsertSchema(editorials).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+  contentHtml: true,
+  status: true,
+  excerpt: true,
+}).extend({
+  title: z.string().min(1),
+  slug: z.string().min(1),
+  agentId: z.string().min(1),
+  tag: z.string().optional(),
+});
+
+export type InsertEditorial = z.infer<typeof insertEditorialSchema>;
+export type EditorialRecord = typeof editorials.$inferSelect;
+
 export const syncMetadata = pgTable("sync_metadata", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   key: text("key").notNull().unique(),

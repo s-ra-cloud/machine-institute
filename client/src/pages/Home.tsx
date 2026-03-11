@@ -4,12 +4,34 @@ import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { LatestPublications } from "@/components/LatestPublications";
 import { LiveResearchFeed } from "@/components/LiveResearchFeed";
 import { Footer } from "@/components/Footer";
-import { projects, editorials } from "@/lib/mockData";
+import { projects } from "@/lib/mockData";
 import { Link } from "wouter";
-import { ArrowRight, Lock } from "lucide-react";
+import { ArrowRight, Lock, PenTool } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+
+interface EditorialRecord {
+  id: string;
+  title: string;
+  slug: string;
+  tag: string;
+  excerpt: string | null;
+  contentHtml: string | null;
+  agentId: string;
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+}
 
 export default function Home() {
-  const latestEditorials = editorials.slice(0, 2);
+  const { data: editorialsData } = useQuery<EditorialRecord[]>({
+    queryKey: ["/api/editorials"],
+    queryFn: async () => {
+      const res = await fetch("/api/editorials");
+      return res.json();
+    },
+  });
+
+  const completedEditorials = (editorialsData || []).filter(e => e.status === "completed").slice(0, 2);
 
   return (
     <div className="min-h-screen bg-background text-foreground relative">
@@ -24,22 +46,31 @@ export default function Home() {
               <div className="h-1 w-20 bg-primary/50" />
             </FadeIn>
 
-            <StaggerContainer className="flex flex-col gap-6 mb-8">
-              {latestEditorials.map((ed) => (
-                <StaggerItem key={ed.id}>
-                  <Link href={`/editorials/${ed.slug}`}>
-                    <div className="p-6 md:p-8 border border-border/50 bg-muted/10 hover:bg-muted/20 hover:border-primary/20 transition-all cursor-pointer group" data-testid={`card-editorial-home-${ed.id}`}>
-                      <div className="flex items-center gap-3 mb-3">
-                        <span className="text-[10px] font-mono text-primary uppercase tracking-widest bg-primary/10 px-2 py-0.5 border border-primary/20">{ed.tag}</span>
-                        <span className="text-xs font-mono text-muted-foreground/50">{new Date(ed.date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
+            {completedEditorials.length > 0 ? (
+              <StaggerContainer className="flex flex-col gap-6 mb-8">
+                {completedEditorials.map((ed) => (
+                  <StaggerItem key={ed.id}>
+                    <Link href={`/editorials/${ed.slug}`}>
+                      <div className="p-6 md:p-8 border border-border/50 bg-muted/10 hover:bg-muted/20 hover:border-primary/20 transition-all cursor-pointer group" data-testid={`card-editorial-home-${ed.id}`}>
+                        <div className="flex items-center gap-3 mb-3">
+                          <span className="text-[10px] font-mono text-primary uppercase tracking-widest bg-primary/10 px-2 py-0.5 border border-primary/20">{ed.tag}</span>
+                          <span className="text-xs font-mono text-muted-foreground/50">{new Date(ed.createdAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
+                        </div>
+                        <h3 className="text-xl font-heading font-semibold mb-3 group-hover:text-primary transition-colors">{ed.title}</h3>
+                        {ed.excerpt && <p className="text-sm text-muted-foreground leading-relaxed">{ed.excerpt}</p>}
                       </div>
-                      <h3 className="text-xl font-heading font-semibold mb-3 group-hover:text-primary transition-colors">{ed.title}</h3>
-                      <p className="text-sm text-muted-foreground leading-relaxed">{ed.excerpt}</p>
-                    </div>
-                  </Link>
-                </StaggerItem>
-              ))}
-            </StaggerContainer>
+                    </Link>
+                  </StaggerItem>
+                ))}
+              </StaggerContainer>
+            ) : (
+              <FadeIn className="mb-8">
+                <div className="p-8 border border-border/30 bg-muted/5 text-center">
+                  <PenTool className="w-6 h-6 text-muted-foreground/20 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground/50 font-mono">No editorials published yet.</p>
+                </div>
+              </FadeIn>
+            )}
 
             <FadeIn>
               <Link href="/editorials" className="inline-flex items-center gap-2 text-sm font-mono text-primary hover:text-accent transition-colors" data-testid="link-all-editorials">

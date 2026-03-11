@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -637,6 +637,359 @@ I will now provide the papers.`;
       const safeError = (err.message || "Unknown error").replace(/[<>&"']/g, "");
       await storage.updateLiteratureReview(reviewId, {
         status: "failed",
+        contentHtml: `<p>Generation failed: ${safeError}</p>`,
+      });
+    }
+  }
+
+  const DEFAULT_EDITORIAL_PROMPT = `You are a senior editorial writer for a high-level scientific journal. Your task is to write an editorial/op-ed article that synthesizes recent research and identifies why a given topic is currently important for the scientific community.
+
+You will receive:
+
+A list of academic papers (title, abstract, sometimes excerpts).
+
+A research topic or question.
+
+A list of recent arXiv trends or hot topics relevant to this field.
+
+Your goal is to produce an editorial that:
+
+• Explains the scientific context of the topic
+• Synthesizes the main contributions of the provided papers
+• Connects them to emerging trends visible in arXiv research activity
+• Identifies the larger intellectual stakes and future directions
+
+Method
+
+Follow these steps internally before writing:
+
+Extract the key claims, methods, and results from each paper.
+
+Identify common themes, tensions, or paradigm shifts across the papers.
+
+Compare these themes with the listed arXiv hot topics.
+
+Determine why the field is currently experiencing increased attention.
+
+Identify open questions, unresolved debates, or promising research directions.
+
+Output
+
+Write a 1,200–1,800 word editorial article structured as follows:
+
+Title
+A concise and provocative title capturing the scientific moment.
+
+Opening (hook)
+A short paragraph explaining why this research area is suddenly important.
+
+Scientific background
+Explain the field and the core problem in accessible but precise terms.
+
+Recent advances
+Discuss the contributions of the provided papers and how they push the field forward.
+
+Why now?
+Explain how these papers relate to emerging arXiv trends and broader developments.
+
+Implications
+Describe the potential impact on science, technology, or theory.
+
+Future directions
+Highlight the most promising research questions and challenges.
+
+CRITICAL RULES ON REFERENCES:
+
+1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
+2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
+3. Use inline citations in (Author, Date) format. Example: (MachinePsyKw DS32E-N1, 2026).
+4. When the same author has multiple papers from the same date, distinguish them with sequential numbers: (MachinePsyKw DS32E-N1, 2026, #1), (MachinePsyKw DS32E-N1, 2026, #2), etc. The number corresponds to the order the paper appears in the References section.
+5. After writing the editorial, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
+6. For arXiv papers found in trends, cite them as (arXiv: Author et al., Year) if known, otherwise just reference the trend by topic name.
+
+Style guidelines
+
+• Write like a Nature / Science editorial
+• Analytical and synthetic rather than descriptive
+• Avoid listing papers one by one; integrate them into a narrative
+• Maintain scientific accuracy while keeping the text readable
+• Cite papers in parentheses using author and year when possible
+
+## References
+List every cited paper in the following format:
+[#] Author (Date). "Full Paper Title."
+Number them sequentially. This numbering is what disambiguates multiple papers by the same author from the same date.`;
+
+  const EDITORIAL_RATE_LIMIT_KEY = "editorial-generation-global";
+  const EDITORIAL_MAX_PER_24H = 2;
+  const EDITORIAL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+  async function getEditorialRateLimitStatus(): Promise<{
+    remaining: number;
+    resetAt: number | null;
+    count: number;
+  }> {
+    const lastSync = await storage.getLastSyncTime(EDITORIAL_RATE_LIMIT_KEY);
+    if (!lastSync) {
+      return { remaining: EDITORIAL_MAX_PER_24H, resetAt: null, count: 0 };
+    }
+
+    const elapsed = Date.now() - lastSync.getTime();
+    if (elapsed >= EDITORIAL_COOLDOWN_MS) {
+      return { remaining: EDITORIAL_MAX_PER_24H, resetAt: null, count: 0 };
+    }
+
+    const countKey = `${EDITORIAL_RATE_LIMIT_KEY}-count`;
+    const countSync = await storage.getLastSyncTime(countKey);
+    const count = countSync ? countSync.getTime() : 0;
+
+    if (count >= EDITORIAL_MAX_PER_24H) {
+      return {
+        remaining: 0,
+        resetAt: lastSync.getTime() + EDITORIAL_COOLDOWN_MS,
+        count,
+      };
+    }
+
+    return {
+      remaining: EDITORIAL_MAX_PER_24H - count,
+      resetAt: lastSync.getTime() + EDITORIAL_COOLDOWN_MS,
+      count,
+    };
+  }
+
+  async function incrementEditorialCount(): Promise<void> {
+    const lastSync = await storage.getLastSyncTime(EDITORIAL_RATE_LIMIT_KEY);
+    const countKey = `${EDITORIAL_RATE_LIMIT_KEY}-count`;
+    const elapsed = lastSync ? Date.now() - lastSync.getTime() : EDITORIAL_COOLDOWN_MS + 1;
+
+    if (elapsed >= EDITORIAL_COOLDOWN_MS) {
+      await storage.setLastSyncTime(EDITORIAL_RATE_LIMIT_KEY, new Date());
+      await storage.setLastSyncTime(countKey, new Date(1));
+    } else {
+      const countSync = await storage.getLastSyncTime(countKey);
+      const currentCount = countSync ? countSync.getTime() : 0;
+      await storage.setLastSyncTime(countKey, new Date(currentCount + 1));
+    }
+  }
+
+  app.get("/api/editorials/status", async (_req, res) => {
+    try {
+      const status = await getEditorialRateLimitStatus();
+      return res.json(status);
+    } catch (err: any) {
+      console.error("Error getting editorial status:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/editorials", async (_req, res) => {
+    try {
+      const allEditorials = await storage.getAllEditorials();
+      return res.json(allEditorials);
+    } catch (err: any) {
+      console.error("Error fetching editorials:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/editorials/:idOrSlug", async (req, res) => {
+    try {
+      const { idOrSlug } = req.params;
+      let editorial = await storage.getEditorialById(idOrSlug);
+      if (!editorial) {
+        editorial = await storage.getEditorialBySlug(idOrSlug);
+      }
+      if (!editorial) {
+        return res.status(404).json({ error: "Editorial not found" });
+      }
+      return res.json(editorial);
+    } catch (err: any) {
+      console.error("Error fetching editorial:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/editorials/generate", async (req, res) => {
+    try {
+      if (!process.env.OPENROUTER_API_KEY) {
+        return res.status(503).json({ error: "Editorial generation is not configured. OPENROUTER_API_KEY is missing." });
+      }
+
+      const status = await getEditorialRateLimitStatus();
+      if (status.remaining <= 0) {
+        const resetIn = status.resetAt ? Math.ceil((status.resetAt - Date.now()) / 60000) : 0;
+        return res.status(429).json({
+          error: `Editorial generation limit reached (${EDITORIAL_MAX_PER_24H} per 24 hours). Try again in ${resetIn} minutes.`,
+          resetAt: status.resetAt,
+        });
+      }
+
+      const slug = "editorial-" + Date.now().toString(36);
+      const editorial = await storage.createEditorial({
+        title: "Generating editorial...",
+        slug,
+        agentId: "MachInstit CS45O-N1",
+        tag: "Editorial",
+      });
+
+      await incrementEditorialCount();
+
+      res.status(201).json(editorial);
+
+      generateEditorial(editorial.id).catch(err => {
+        console.error("Background editorial generation failed:", err);
+      });
+    } catch (err: any) {
+      console.error("Error creating editorial:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  async function searchArxiv(query: string): Promise<Array<{ title: string; summary: string; authors: string; published: string }>> {
+    try {
+      const encodedQuery = encodeURIComponent(query);
+      const url = `http://export.arxiv.org/api/query?search_query=all:${encodedQuery}&start=0&max_results=10&sortBy=submittedDate&sortOrder=descending`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`arXiv API returned ${response.status}`);
+        return [];
+      }
+      const xml = await response.text();
+      const entries: Array<{ title: string; summary: string; authors: string; published: string }> = [];
+      const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+      let match;
+      while ((match = entryRegex.exec(xml)) !== null) {
+        const entry = match[1];
+        const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/);
+        const summaryMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/);
+        const publishedMatch = entry.match(/<published>([\s\S]*?)<\/published>/);
+        const authorMatches = [...entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g)];
+        entries.push({
+          title: (titleMatch?.[1] || "").trim().replace(/\s+/g, " "),
+          summary: (summaryMatch?.[1] || "").trim().replace(/\s+/g, " ").substring(0, 500),
+          authors: authorMatches.map(m => m[1].trim()).join(", "),
+          published: (publishedMatch?.[1] || "").trim().substring(0, 10),
+        });
+      }
+      return entries;
+    } catch (err) {
+      console.error("arXiv search failed:", err);
+      return [];
+    }
+  }
+
+  async function generateEditorial(editorialId: string) {
+    try {
+      await storage.updateEditorial(editorialId, { status: "generating" });
+
+      const allPapers = await storage.getAllProjectPapers();
+      const allReviews = await storage.getAllLiteratureReviews();
+      const completedReviews = allReviews.filter(r => r.status === "completed" && r.contentHtml);
+
+      if (allPapers.length === 0) {
+        await storage.updateEditorial(editorialId, {
+          status: "failed",
+          title: "Editorial generation failed",
+          contentHtml: `<p>No papers found in the publication log. Papers must be published before an editorial can be generated.</p>`,
+        });
+        return;
+      }
+
+      const paperTexts = allPapers.map((p, i) =>
+        `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.description}`
+      );
+
+      const reviewTexts = completedReviews.map((r, i) => {
+        let plainContent = "";
+        if (r.contentHtml) {
+          plainContent = r.contentHtml
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .substring(0, 2000);
+        }
+        return `Literature Review ${i + 1}:\nResearch Question: ${r.researchQuestion}\nAgent: ${r.agentId}\nDate: ${r.createdAt?.toISOString().split("T")[0] || "unknown"}\nFindings:\n${plainContent || "No content available."}`;
+      });
+
+      const topicKeywords: string[] = [];
+      for (const p of allPapers.slice(0, 10)) {
+        const words = p.title.split(/\s+/).filter(w => w.length > 4);
+        topicKeywords.push(...words.slice(0, 3));
+      }
+      const searchQuery = [...new Set(topicKeywords)].slice(0, 8).join(" ");
+
+      console.log(`Editorial ${editorialId}: Searching arXiv for "${searchQuery}"`);
+      const arxivResults = await searchArxiv(searchQuery);
+
+      const arxivTexts = arxivResults.length > 0
+        ? arxivResults.map((r, i) =>
+            `arXiv Paper ${i + 1}:\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.published}\nSummary: ${r.summary}`
+          ).join("\n\n")
+        : "No recent arXiv papers found for the current research topics.";
+
+      const openrouter = new OpenAI({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: process.env.OPENROUTER_API_KEY,
+      });
+
+      const userMessage = `Topic: Recent developments in AI agent-driven scientific research, machine psychology, and autonomous experimentation — based on the institute's current publication corpus.
+
+Papers from the institute's publication log:
+
+${paperTexts.join("\n\n---\n\n")}
+
+${reviewTexts.length > 0 ? `\nLiterature Reviews conducted by the institute:\n\n${reviewTexts.join("\n\n---\n\n")}` : ""}
+
+Hot arXiv topics (recent publications in related fields):
+
+${arxivTexts}`;
+
+      console.log(`Editorial ${editorialId}: Calling LLM...`);
+      const completion = await openrouter.chat.completions.create({
+        model: "deepseek/deepseek-chat",
+        messages: [
+          { role: "system", content: DEFAULT_EDITORIAL_PROMPT },
+          { role: "user", content: userMessage },
+        ],
+        max_tokens: 6000,
+        temperature: 0.4,
+      });
+
+      const editorialText = completion.choices[0]?.message?.content || "";
+
+      const titleMatch = editorialText.match(/^#\s+(.+)/m) || editorialText.match(/^(.+)\n/);
+      const extractedTitle = titleMatch ? titleMatch[1].replace(/^#+\s*/, "").trim() : "Untitled Editorial";
+
+      const lines = editorialText.split("\n");
+      let excerptText = "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith("#") && trimmed.length > 40) {
+          excerptText = trimmed.substring(0, 200);
+          if (trimmed.length > 200) excerptText += "...";
+          break;
+        }
+      }
+
+      const rawHtml = markdownToHtml(editorialText);
+      const safeHtml = sanitizeHtml(rawHtml);
+
+      await storage.updateEditorial(editorialId, {
+        title: extractedTitle,
+        excerpt: excerptText || "A synthesized editorial on current research trends.",
+        contentHtml: safeHtml,
+        status: "completed",
+        completedAt: new Date(),
+      });
+
+      console.log(`Editorial ${editorialId} completed: "${extractedTitle}"`);
+    } catch (err: any) {
+      console.error(`Editorial ${editorialId} generation failed:`, err);
+      const safeError = (err.message || "Unknown error").replace(/[<>&"']/g, "");
+      await storage.updateEditorial(editorialId, {
+        status: "failed",
+        title: "Editorial generation failed",
         contentHtml: `<p>Generation failed: ${safeError}</p>`,
       });
     }

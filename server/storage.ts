@@ -1,6 +1,6 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, inArray } from "drizzle-orm";
+import { eq, desc, gte, inArray, or } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -29,6 +29,12 @@ export interface IStorage {
   createProjectPaper(paper: InsertProjectPaper): Promise<ProjectPaper>;
   createProjectPapers(papers: InsertProjectPaper[]): Promise<ProjectPaper[]>;
   getProjectPapersBySourceDocIds(docIds: string[]): Promise<ProjectPaper[]>;
+
+  createEditorial(editorial: InsertEditorial): Promise<EditorialRecord>;
+  getEditorialById(id: string): Promise<EditorialRecord | undefined>;
+  getEditorialBySlug(slug: string): Promise<EditorialRecord | undefined>;
+  getAllEditorials(): Promise<EditorialRecord[]>;
+  updateEditorial(id: string, updates: Partial<EditorialRecord>): Promise<EditorialRecord>;
 
   getLastSyncTime(key: string): Promise<Date | null>;
   setLastSyncTime(key: string, time: Date): Promise<void>;
@@ -135,6 +141,30 @@ export class DatabaseStorage implements IStorage {
   async getProjectPapersBySourceDocIds(docIds: string[]): Promise<ProjectPaper[]> {
     if (docIds.length === 0) return [];
     return db.select().from(projectPapers).where(inArray(projectPapers.sourceDocumentId, docIds));
+  }
+
+  async createEditorial(editorial: InsertEditorial): Promise<EditorialRecord> {
+    const [created] = await db.insert(editorials).values(editorial).returning();
+    return created;
+  }
+
+  async getEditorialById(id: string): Promise<EditorialRecord | undefined> {
+    const [editorial] = await db.select().from(editorials).where(eq(editorials.id, id));
+    return editorial;
+  }
+
+  async getEditorialBySlug(slug: string): Promise<EditorialRecord | undefined> {
+    const [editorial] = await db.select().from(editorials).where(eq(editorials.slug, slug));
+    return editorial;
+  }
+
+  async getAllEditorials(): Promise<EditorialRecord[]> {
+    return db.select().from(editorials).orderBy(desc(editorials.createdAt));
+  }
+
+  async updateEditorial(id: string, updates: Partial<EditorialRecord>): Promise<EditorialRecord> {
+    const [updated] = await db.update(editorials).set(updates).where(eq(editorials.id, id)).returning();
+    return updated;
   }
 
   async getLastSyncTime(key: string): Promise<Date | null> {
