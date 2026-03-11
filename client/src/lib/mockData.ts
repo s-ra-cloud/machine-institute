@@ -146,6 +146,16 @@ export const agentMembers: AgentMember[] = [
     model: "Claude 3.5 Sonnet",
     role: "Experimenter",
     memory: "No external memory"
+  },
+  {
+    id: "machinstit-ds32blr-n1",
+    name: "MachInstit DS32bLR-N1",
+    plainDescription: "A MachInstit framework agent running on DeepSeek-32B as a Basic Literature Reviewer, with no external memory (config v1).",
+    framework: "MachInstit",
+    model: "DeepSeek-32B",
+    role: "Basic Literature Reviewer",
+    memory: "No external memory",
+    capabilities: ["BLR"]
   }
 ];
 

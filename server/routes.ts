@@ -1,11 +1,14 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema, insertResearchEventSchema } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
 import fs from "fs";
+import OpenAI from "openai";
+import { JSDOM } from "jsdom";
+import DOMPurify from "dompurify";
 
 function generateSlug(title: string): string {
   return title
@@ -260,6 +263,251 @@ export async function registerRoutes(
       return res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  const DEFAULT_BLR_PROMPT = `You are assisting with an academic literature review.
+
+I will provide a set of academic papers. Your task is to produce a structured literature review based strictly on these papers.
+
+Instructions:
+
+Read all the provided papers carefully.
+
+Identify the main research question or theme connecting them.
+
+Extract for each paper:
+
+main argument or hypothesis
+
+methodology
+
+key findings
+
+theoretical framework (if applicable)
+
+limitations or open questions
+
+Organize the literature review by themes or debates, not by paper summaries alone.
+
+Identify:
+
+points of agreement between authors
+
+points of disagreement or competing interpretations
+
+methodological differences
+
+gaps in the literature
+
+Write the review in clear academic English suitable for a research paper.
+
+Structure the output as follows:
+
+Introduction
+Short paragraph explaining the general topic and scope of the literature.
+
+Thematic Review of the Literature
+Organize the discussion into several thematic subsections synthesizing the papers.
+
+Comparative Discussion
+Explain how the papers relate to each other, including agreements, disagreements, and methodological contrasts.
+
+Research Gaps
+Identify what remains unresolved or insufficiently studied.
+
+Conclusion
+Brief synthesis of the state of the literature.
+
+Additional requirements:
+
+Base the analysis only on the provided papers.
+
+When referring to a study, mention the author and year.
+
+Avoid long quotations.
+
+Prefer synthesis over sequential summaries.
+
+Length: about 1200–2000 words.
+
+I will now provide the papers.`;
+
+  app.get("/api/literature-reviews/default-prompt", (_req, res) => {
+    return res.json({ prompt: DEFAULT_BLR_PROMPT });
+  });
+
+  const reviewRateLimit = new Map<string, number>();
+
+  app.post("/api/literature-reviews", async (req, res) => {
+    try {
+      if (!process.env.OPENROUTER_API_KEY) {
+        return res.status(503).json({ error: "Literature review generation is not configured. OPENROUTER_API_KEY is missing." });
+      }
+
+      const clientIp = req.ip || "unknown";
+      const lastRequest = reviewRateLimit.get(clientIp) || 0;
+      if (Date.now() - lastRequest < 60000) {
+        return res.status(429).json({ error: "Please wait at least 1 minute between review requests." });
+      }
+      reviewRateLimit.set(clientIp, Date.now());
+
+      const ALLOWED_SLUGS: Record<string, string> = {
+        "autonomous-journal-machine-psychology": "autonomous-journal-of-machine-psychology",
+        "autonomous-journal-xai": "autonomous-journal-of-explainable-ai",
+      };
+
+      const { projectId, agentId, researchQuestion, prompt, initiativeSlug } = req.body;
+
+      const resolvedSlug = initiativeSlug || ALLOWED_SLUGS[projectId] || null;
+      if (!resolvedSlug) {
+        return res.status(400).json({ error: "Unknown project. Cannot determine journal." });
+      }
+
+      const result = insertLiteratureReviewSchema.safeParse({
+        projectId,
+        agentId,
+        researchQuestion,
+        prompt: prompt || DEFAULT_BLR_PROMPT,
+      });
+
+      if (!result.success) {
+        const message = fromZodError(result.error).message;
+        return res.status(400).json({ error: message });
+      }
+
+      const review = await storage.createLiteratureReview(result.data);
+
+      res.status(201).json(review);
+
+      generateLiteratureReview(review.id, result.data, resolvedSlug).catch(err => {
+        console.error("Background review generation failed:", err);
+      });
+    } catch (err: any) {
+      console.error("Error creating literature review:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/literature-reviews", async (req, res) => {
+    try {
+      const projectId = req.query.projectId as string;
+      if (!projectId) {
+        return res.status(400).json({ error: "projectId query parameter is required" });
+      }
+      const reviews = await storage.getLiteratureReviewsByProject(projectId);
+      return res.json(reviews);
+    } catch (err: any) {
+      console.error("Error fetching literature reviews:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/literature-reviews/:id", async (req, res) => {
+    try {
+      const review = await storage.getLiteratureReviewById(req.params.id);
+      if (!review) {
+        return res.status(404).json({ error: "Literature review not found" });
+      }
+      return res.json(review);
+    } catch (err: any) {
+      console.error("Error fetching literature review:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  async function fetchPapersFromFutureScience(initiativeSlug: string): Promise<string[]> {
+    try {
+      const response = await fetch(`https://future-science.org/${initiativeSlug}`);
+      const html = await response.text();
+      return [html];
+    } catch (err) {
+      console.error("Failed to fetch from future-science.org:", err);
+      return [];
+    }
+  }
+
+  function sanitizeHtml(html: string): string {
+    const window = new JSDOM("").window;
+    const purify = DOMPurify(window as any);
+    return purify.sanitize(html, {
+      ALLOWED_TAGS: ["h1", "h2", "h3", "h4", "p", "br", "strong", "em", "ul", "ol", "li", "blockquote", "a"],
+      ALLOWED_ATTR: ["href", "target", "rel"],
+    });
+  }
+
+  function markdownToHtml(text: string): string {
+    const lines = text.split("\n");
+    const htmlLines: string[] = [];
+    let inList = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        if (inList) { htmlLines.push("</ul>"); inList = false; }
+        continue;
+      }
+      if (trimmed.startsWith("# ")) { htmlLines.push(`<h1>${trimmed.slice(2)}</h1>`); }
+      else if (trimmed.startsWith("## ")) { htmlLines.push(`<h2>${trimmed.slice(3)}</h2>`); }
+      else if (trimmed.startsWith("### ")) { htmlLines.push(`<h3>${trimmed.slice(4)}</h3>`); }
+      else if (trimmed.startsWith("#### ")) { htmlLines.push(`<h4>${trimmed.slice(5)}</h4>`); }
+      else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+        if (!inList) { htmlLines.push("<ul>"); inList = true; }
+        htmlLines.push(`<li>${trimmed.slice(2)}</li>`);
+      } else {
+        if (inList) { htmlLines.push("</ul>"); inList = false; }
+        let formatted = trimmed
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/\*(.+?)\*/g, "<em>$1</em>");
+        htmlLines.push(`<p>${formatted}</p>`);
+      }
+    }
+    if (inList) htmlLines.push("</ul>");
+    return htmlLines.join("\n");
+  }
+
+  async function generateLiteratureReview(reviewId: string, data: { projectId: string; agentId: string; researchQuestion: string; prompt: string }, initiativeSlug: string) {
+    try {
+      await storage.updateLiteratureReview(reviewId, { status: "generating" });
+
+      const paperTexts = await fetchPapersFromFutureScience(initiativeSlug);
+
+      const openrouter = new OpenAI({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: process.env.OPENROUTER_API_KEY,
+      });
+
+      const systemPrompt = data.prompt;
+      const userMessage = `Research question: ${data.researchQuestion}\n\nThe following is the content from the journal's published papers:\n\n${paperTexts.join("\n\n---\n\n")}`;
+
+      const completion = await openrouter.chat.completions.create({
+        model: "deepseek/deepseek-chat",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        max_tokens: 4000,
+        temperature: 0.3,
+      });
+
+      const reviewText = completion.choices[0]?.message?.content || "";
+      const rawHtml = markdownToHtml(reviewText);
+      const safeHtml = sanitizeHtml(rawHtml);
+
+      await storage.updateLiteratureReview(reviewId, {
+        contentHtml: safeHtml,
+        status: "completed",
+        completedAt: new Date(),
+      });
+
+      console.log(`Literature review ${reviewId} completed successfully.`);
+    } catch (err: any) {
+      console.error(`Literature review ${reviewId} generation failed:`, err);
+      const safeError = (err.message || "Unknown error").replace(/[<>&"']/g, "");
+      await storage.updateLiteratureReview(reviewId, {
+        status: "failed",
+        contentHtml: `<p>Generation failed: ${safeError}</p>`,
+      });
+    }
+  }
 
   return httpServer;
 }

@@ -4,8 +4,8 @@ import { Footer } from "@/components/Footer";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { projects, placeholderPublications } from "@/lib/mockData";
 import { useQuery } from "@tanstack/react-query";
-import type { Paper } from "@shared/schema";
-import { ArrowLeft, ExternalLink, Lock } from "lucide-react";
+import type { Paper, LiteratureReview } from "@shared/schema";
+import { ArrowLeft, ExternalLink, Lock, BookOpen, Loader2, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LiteratureReviewRequest } from "@/components/LiteratureReviewRequest";
 
@@ -21,6 +21,17 @@ export default function ProjectDetail() {
       return res.json();
     },
     enabled: project?.status === "public",
+  });
+
+  const { data: literatureReviews = [] } = useQuery<LiteratureReview[]>({
+    queryKey: ["/api/literature-reviews", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/literature-reviews?projectId=${id}`);
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+    enabled: project?.status === "public",
+    refetchInterval: 10000,
   });
 
   if (!project) {
@@ -162,8 +173,49 @@ export default function ProjectDetail() {
             )}
           </FadeIn>
 
+          {literatureReviews.length > 0 && (
+            <FadeIn delay={0.3} className="mt-16">
+              <h2 className="text-2xl font-heading font-bold mb-6">Literature Reviews</h2>
+              <StaggerContainer className="flex flex-col border-t border-border/50">
+                {literatureReviews.map((review) => (
+                  <StaggerItem key={review.id}>
+                    <Link href={`/literature-reviews/${review.id}`}>
+                      <div className="py-5 border-b border-border/50 flex flex-col md:flex-row gap-3 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4 cursor-pointer" data-testid={`card-review-${review.id}`}>
+                        <div className="max-w-3xl">
+                          <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors flex items-center gap-2">
+                            <BookOpen className="w-4 h-4 shrink-0" />
+                            {review.researchQuestion}
+                          </h4>
+                          <p className="text-sm text-muted-foreground font-light mt-1">{review.agentId}</p>
+                        </div>
+                        <div className="flex gap-3 items-center text-xs font-mono text-muted-foreground shrink-0">
+                          <span>{new Date(review.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                          {review.status === "completed" ? (
+                            <span className="bg-green-500/10 text-green-400 px-2 py-0.5 rounded-sm flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3" /> completed
+                            </span>
+                          ) : review.status === "generating" ? (
+                            <span className="bg-yellow-500/10 text-yellow-400 px-2 py-0.5 rounded-sm flex items-center gap-1">
+                              <Loader2 className="w-3 h-3 animate-spin" /> generating
+                            </span>
+                          ) : review.status === "failed" ? (
+                            <span className="bg-red-500/10 text-red-400 px-2 py-0.5 rounded-sm flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" /> failed
+                            </span>
+                          ) : (
+                            <span className="bg-muted px-2 py-0.5 rounded-sm">{review.status}</span>
+                          )}
+                        </div>
+                      </div>
+                    </Link>
+                  </StaggerItem>
+                ))}
+              </StaggerContainer>
+            </FadeIn>
+          )}
+
           <FadeIn delay={0.4} className="mt-16">
-            <LiteratureReviewRequest journalName={project.title} />
+            <LiteratureReviewRequest journalName={project.title} projectId={id!} initiativeSlug={project.id === "autonomous-journal-machine-psychology" ? "autonomous-journal-of-machine-psychology" : undefined} />
           </FadeIn>
         </div>
       </main>

@@ -14,6 +14,7 @@ import Editorials from "@/pages/Editorials";
 import EditorialDetail from "@/pages/EditorialDetail";
 import History from "@/pages/History";
 import PaperDetail from "@/pages/PaperDetail";
+import LiteratureReviewDetail from "@/pages/LiteratureReviewDetail";
 
 function ScrollToTop() {
   const [location] = useLocation();
@@ -36,6 +37,7 @@ function Router() {
         <Route path="/editorials/:slug" component={EditorialDetail} />
         <Route path="/history" component={History} />
         <Route path="/papers/:slug" component={PaperDetail} />
+        <Route path="/literature-reviews/:id" component={LiteratureReviewDetail} />
         <Route component={NotFound} />
       </Switch>
     </>

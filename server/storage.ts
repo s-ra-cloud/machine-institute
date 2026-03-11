@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, users, papers, researchEvents } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, users, papers, researchEvents, literatureReviews } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte } from "drizzle-orm";
 
@@ -17,6 +17,11 @@ export interface IStorage {
   createResearchEvents(events: InsertResearchEvent[]): Promise<ResearchEvent[]>;
   getRecentEvents(limit: number): Promise<ResearchEvent[]>;
   getActiveEvents(minutesAgo: number): Promise<ResearchEvent[]>;
+
+  createLiteratureReview(review: InsertLiteratureReview): Promise<LiteratureReview>;
+  getLiteratureReviewById(id: string): Promise<LiteratureReview | undefined>;
+  getLiteratureReviewsByProject(projectId: string): Promise<LiteratureReview[]>;
+  updateLiteratureReview(id: string, updates: Partial<LiteratureReview>): Promise<LiteratureReview>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -74,6 +79,25 @@ export class DatabaseStorage implements IStorage {
   async getActiveEvents(minutesAgo: number = 10): Promise<ResearchEvent[]> {
     const cutoff = new Date(Date.now() - minutesAgo * 60 * 1000);
     return db.select().from(researchEvents).where(gte(researchEvents.timestamp, cutoff)).orderBy(desc(researchEvents.timestamp));
+  }
+
+  async createLiteratureReview(review: InsertLiteratureReview): Promise<LiteratureReview> {
+    const [created] = await db.insert(literatureReviews).values(review).returning();
+    return created;
+  }
+
+  async getLiteratureReviewById(id: string): Promise<LiteratureReview | undefined> {
+    const [review] = await db.select().from(literatureReviews).where(eq(literatureReviews.id, id));
+    return review;
+  }
+
+  async getLiteratureReviewsByProject(projectId: string): Promise<LiteratureReview[]> {
+    return db.select().from(literatureReviews).where(eq(literatureReviews.projectId, projectId)).orderBy(desc(literatureReviews.createdAt));
+  }
+
+  async updateLiteratureReview(id: string, updates: Partial<LiteratureReview>): Promise<LiteratureReview> {
+    const [updated] = await db.update(literatureReviews).set(updates).where(eq(literatureReviews.id, id)).returning();
+    return updated;
   }
 }
 
