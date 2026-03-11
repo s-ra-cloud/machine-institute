@@ -5,7 +5,7 @@ import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { projects, placeholderPublications } from "@/lib/mockData";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Paper, LiteratureReview, ProjectPaper } from "@shared/schema";
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { ArrowLeft, ExternalLink, Lock, BookOpen, Loader2, CheckCircle, AlertCircle, ChevronDown, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LiteratureReviewRequest } from "@/components/LiteratureReviewRequest";
@@ -14,8 +14,8 @@ export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const project = projects.find((p) => p.id === id);
   const queryClient = useQueryClient();
-  const syncTriggered = useRef(false);
   const pubLogRef = useRef<HTMLDivElement>(null);
+  const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{ message: string; type: "info" | "success" | "idle" }>(
     { message: "", type: "idle" }
   );
@@ -41,35 +41,34 @@ export default function ProjectDetail() {
     refetchInterval: 10000,
   });
 
-  useEffect(() => {
-    if (!id || !project?.externalUrl || project?.status !== "public" || syncTriggered.current) return;
-    syncTriggered.current = true;
-
-    setSyncStatus({ message: "Checking for new publications…", type: "info" });
-    fetch("/api/project-papers/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId: id }),
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        if (data.newPapers > 0) {
-          setSyncStatus({ message: `${data.newPapers} new paper(s) synced from Future Science.`, type: "success" });
-          queryClient.invalidateQueries({ queryKey: ["/api/project-papers", id] });
-        } else if (data.synced === false) {
-          setSyncStatus({ message: "", type: "idle" });
-        } else {
-          setSyncStatus({ message: "", type: "idle" });
-        }
-        setTimeout(() => setSyncStatus({ message: "", type: "idle" }), 5000);
-      })
-      .catch(() => {
-        setSyncStatus({ message: "", type: "idle" });
+  const handleSync = async () => {
+    if (!id || syncing) return;
+    setSyncing(true);
+    setSyncStatus({ message: "Syncing publications…", type: "info" });
+    try {
+      const res = await fetch("/api/project-papers/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id }),
       });
-  }, [id, project]);
+      if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
+      const data = await res.json();
+      if (data.newPapers > 0) {
+        setSyncStatus({ message: `${data.newPapers} new paper(s) synced.`, type: "success" });
+        queryClient.invalidateQueries({ queryKey: ["/api/project-papers", id] });
+      } else if (data.synced === false) {
+        setSyncStatus({ message: "Cooldown active — try again later.", type: "info" });
+      } else {
+        setSyncStatus({ message: "Already up to date.", type: "success" });
+      }
+      setTimeout(() => setSyncStatus({ message: "", type: "idle" }), 5000);
+    } catch {
+      setSyncStatus({ message: "Sync failed.", type: "info" });
+      setTimeout(() => setSyncStatus({ message: "", type: "idle" }), 4000);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   if (!project) {
     return (
@@ -216,9 +215,20 @@ export default function ProjectDetail() {
           <FadeIn delay={0.3} className="mt-16">
             <div ref={pubLogRef} className="flex items-center gap-3 mb-6">
               <h2 className="text-2xl font-heading font-bold">Publication Log</h2>
+              {project.externalUrl && (
+                <button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest border border-border/50 text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-testid="button-sync-papers"
+                >
+                  <RefreshCw className={`w-3 h-3 ${syncing ? "animate-spin" : ""}`} />
+                  {syncing ? "Syncing…" : "Sync"}
+                </button>
+              )}
               {syncStatus.type === "info" && (
                 <span className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground" data-testid="text-sync-status">
-                  <RefreshCw className="w-3 h-3 animate-spin" /> {syncStatus.message}
+                  {syncStatus.message}
                 </span>
               )}
               {syncStatus.type === "success" && (
