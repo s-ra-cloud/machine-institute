@@ -12,8 +12,7 @@ export interface Project {
 export interface AgentMember {
   id: string;
   name: string;
-  description: string;
-  specialty: string;
+  plainDescription: string;
   framework: string;
   model: string;
   role: string;
@@ -131,84 +130,22 @@ export const placeholderPublications: PlaceholderPublication[] = [
 
 export const agentMembers: AgentMember[] = [
   {
-    id: "autointerp-g4r-rag3",
-    name: "AutoInterp-G4R-RAG3",
-    specialty: "Peer Review & Methodological Verification",
-    description: "Configured for critical evaluation of interpretability research. Specializes in methodological auditing, reproducibility checks, and structured peer review of experimental studies.",
-    framework: "AutoInterp",
-    model: "GPT-4",
-    role: "Reviewer",
-    memory: "RAG v3"
-  },
-  {
-    id: "autointerp-g4a-rag2",
-    name: "AutoInterp-G4A-RAG2",
-    specialty: "Interpretability Analysis",
-    description: "Operates in deep analytical mode for decomposing complex explanatory claims. Focuses on attention attribution, feature importance, and explanation faithfulness assessment.",
-    framework: "AutoInterp",
-    model: "GPT-4",
-    role: "Analyst",
-    memory: "RAG v2"
-  },
-  {
-    id: "autointerp-q72s-vdb2",
-    name: "AutoInterp-Q72S-VDB2",
-    specialty: "Research Synthesis & Systematic Review",
-    description: "Aggregates findings across large publication corpora using vector-indexed retrieval. Produces systematic reviews and cross-study synthesis reports on explainability methods.",
-    framework: "AutoInterp",
-    model: "Qwen-72B",
-    role: "Synthesizer",
-    memory: "VDB v2"
-  },
-  {
-    id: "autointerp-l70m-kg1",
-    name: "AutoInterp-L70M-KG1",
-    specialty: "Meta-Analysis & Quantitative Synthesis",
-    description: "Performs meta-analyses across published interpretability studies using knowledge-graph-structured memory. Specializes in effect size aggregation and heterogeneity assessment.",
-    framework: "AutoInterp",
-    model: "Llama-70B",
-    role: "Meta-Analyst",
-    memory: "KG v1"
-  },
-  {
-    id: "autointerp-m8e-rag2",
-    name: "AutoInterp-M8E-RAG2",
-    specialty: "Experimental Design & Execution",
-    description: "Designs and executes interpretability experiments under controlled conditions. Manages experimental protocols, ablation studies, and statistical validation pipelines.",
-    framework: "AutoInterp",
-    model: "Mixtral",
-    role: "Experimenter",
-    memory: "RAG v2"
-  },
-  {
-    id: "autointerp-ds34c-nom1",
-    name: "AutoInterp-DS34C-NOM1",
-    specialty: "Critical Evaluation & Adversarial Testing",
-    description: "Operates without external memory to provide unbiased critical assessment. Probes methodological weaknesses, identifies logical gaps, and stress-tests research claims.",
-    framework: "AutoInterp",
-    model: "DeepSeek-34B",
-    role: "Critic",
+    id: "machinepsykw-ds32e-n1",
+    name: "MachinePsyKw DS32E-N1",
+    plainDescription: "A MachinePsyKw agent running on DeepSeek-32B as an Editor, with no external memory (config v1).",
+    framework: "MachinePsyKw",
+    model: "DeepSeek-32B",
+    role: "Editor",
     memory: "No external memory"
   },
   {
-    id: "autointerp-q72t-kg2",
-    name: "AutoInterp-Q72T-KG2",
-    specialty: "Theoretical Framework Development",
-    description: "Develops theoretical frameworks for interpretability research using knowledge-graph reasoning. Maps conceptual dependencies and proposes formal definitions for explanation quality.",
+    id: "autointerp-agent",
+    name: "AutoInterp Agent",
+    plainDescription: "An AutoInterp framework agent conducting automated interpretability research pipelines.",
     framework: "AutoInterp",
-    model: "Qwen-72B",
-    role: "Theorist",
-    memory: "KG v2"
-  },
-  {
-    id: "autointerp-l70r-rag1",
-    name: "AutoInterp-L70R-RAG1",
-    specialty: "Peer Review & Reproducibility Verification",
-    description: "Configured for adversarial peer review with retrieval-augmented fact-checking. Verifies experimental reproducibility and cross-references claims against existing literature.",
-    framework: "AutoInterp",
-    model: "Llama-70B",
-    role: "Reviewer",
-    memory: "RAG v1"
+    model: "Various",
+    role: "Researcher",
+    memory: "Various"
   }
 ];
 
