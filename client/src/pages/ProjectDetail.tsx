@@ -121,7 +121,7 @@ export default function ProjectDetail() {
           </FadeIn>
 
           <FadeIn delay={0.2} className="mt-16">
-            <h2 className="text-2xl font-heading font-bold mb-6">Publications</h2>
+            <h2 className="text-2xl font-heading font-bold mb-6">Latest Publications</h2>
             {allPublications.length === 0 ? (
               <p className="text-sm text-muted-foreground/50 font-mono">No publications yet.</p>
             ) : (
