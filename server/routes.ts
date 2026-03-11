@@ -882,6 +882,14 @@ Number them sequentially. This numbering is what disambiguates multiple papers b
       const allReviews = await storage.getAllLiteratureReviews();
       const completedReviews = allReviews.filter(r => r.status === "completed" && r.contentHtml);
 
+      const existingEditorials = await storage.getAllEditorials();
+      const previousEditorials = existingEditorials
+        .filter(e => e.status === "completed" && e.id !== editorialId && e.contentHtml)
+        .map(e => ({
+          title: e.title,
+          excerpt: e.excerpt || "",
+        }));
+
       if (allPapers.length === 0) {
         await storage.updateEditorial(editorialId, {
           status: "failed",
@@ -938,7 +946,14 @@ ${reviewTexts.length > 0 ? `\nLiterature Reviews conducted by the institute:\n\n
 
 Hot arXiv topics (recent publications in related fields):
 
-${arxivTexts}`;
+${arxivTexts}
+
+${previousEditorials.length > 0 ? `IMPORTANT — PREVIOUSLY PUBLISHED EDITORIALS (DO NOT REPEAT THESE TOPICS):
+The following editorials have already been published by this journal. You MUST choose a DIFFERENT angle, topic, or thesis. Do not write about the same subject or reach the same conclusions as any of these:
+
+${previousEditorials.map((e, i) => `${i + 1}. "${e.title}" — ${e.excerpt}`).join("\n")}
+
+Pick a fresh perspective, a different subset of papers, or an underexplored theme from the corpus.` : ""}`;
 
       console.log(`Editorial ${editorialId}: Calling LLM...`);
       const completion = await openrouter.chat.completions.create({
