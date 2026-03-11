@@ -1,7 +1,6 @@
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
-import { LatestPublications } from "@/components/LatestPublications";
 import { projects } from "@/lib/mockData";
 import { Link } from "wouter";
 import { ArrowRight, Lock } from "lucide-react";
@@ -60,11 +59,6 @@ export default function Projects() {
               </StaggerItem>
             ))}
           </StaggerContainer>
-
-          <FadeIn>
-            <h2 className="text-2xl font-heading font-bold mb-6">Latest Publications</h2>
-            <LatestPublications />
-          </FadeIn>
         </div>
       </main>
       <Footer />
