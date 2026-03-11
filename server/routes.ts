@@ -395,12 +395,14 @@ export async function registerRoutes(
 
 I will provide a set of academic papers. Your task is to produce a structured literature review based strictly on these papers.
 
-CRITICAL RULES ON REFERENCES:
+CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 
 1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. For Machine Institute publications (published on future-science.org), use inline citations in this format: (AJMP, future-science.org, Date). Example: (AJMP, future-science.org, 2026). When multiple papers share the same date, distinguish them with sequential numbers: (AJMP, future-science.org, 2026, #1), (AJMP, future-science.org, 2026, #2), etc. The number corresponds to the order the paper appears in the References section.
-4. In the References section, list Machine Institute papers as: [#] AJMP, future-science.org (Date). "Full Paper Title."
+3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format: (Author, Date). Example: (MachinePsyKw DS32E-N1, 2026). When the same author has multiple papers from the same year, distinguish them with letters: (MachinePsyKw DS32E-N1, 2026a), (MachinePsyKw DS32E-N1, 2026b), etc.
+4. BIBLIOGRAPHY: In the References section, use full Chicago style including the journal. Format:
+   Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
+   Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Autonomous Journal of Machine Psychology*, future-science.org.
 5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 
 Instructions:
@@ -426,16 +428,18 @@ Identify:
 
 Write the review in clear academic English suitable for a research paper.
 
+CRITICAL: The bulk of the review must be analytical prose — the Thematic Review and Comparative Discussion sections should make up at least 70% of the total word count. The References section should be a compact list at the end, NOT the main body of the review.
+
 Structure the output as follows:
 
 ## Introduction
 Short paragraph explaining the general topic and scope of the literature.
 
 ## Inclusion Criteria
-Briefly state which papers were included and why (e.g., topical relevance, shared methodology, common research domain). List each included paper with its full title and author.
+Briefly state which papers were included and why. Do NOT list every single paper here — just describe the selection criteria and mention a few representative examples.
 
 ## Thematic Review of the Literature
-Organize the discussion into several thematic subsections synthesizing the papers. Use inline citations (Author, Date) throughout.
+This is the core of the review. Organize the discussion into several thematic subsections synthesizing the papers. Use inline citations (Author, Date) throughout. Discuss findings, methodologies, and arguments in depth. This section should be extensive and analytical.
 
 ## Comparative Discussion
 Explain how the papers relate to each other, including agreements, disagreements, and methodological contrasts. Cite inline.
@@ -447,16 +451,15 @@ Identify what remains unresolved or insufficiently studied.
 Brief synthesis of the state of the literature.
 
 ## References
-List every cited paper in the following format:
-[#] AJMP, future-science.org (Date). "Full Paper Title."
-Number them sequentially. This numbering is what disambiguates multiple papers by the same date.
+List every cited paper in Chicago author-date bibliography format:
+Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
 
 Additional requirements:
 
 - Base the analysis ONLY on the provided papers. Do not reference any external work.
 - Cite every claim or finding with an inline reference.
 - Avoid long quotations. Prefer synthesis over sequential summaries.
-- Length: about 1500–2500 words.
+- Length: about 2500–4000 words of analytical content. The References section does not count toward this target.
 - After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
 
 I will now provide the papers.`;
@@ -467,12 +470,14 @@ I will provide a set of academic papers. Your task is to produce a critical, adv
 
 You are not agreeable. You do not give the benefit of the doubt. If a claim is weakly supported, say so. If a methodology is flawed, explain why. If conclusions overreach the data, call it out. If papers contradict each other, highlight the contradiction and explain why at least one must be wrong. If the entire body of work rests on questionable assumptions, dismantle those assumptions.
 
-CRITICAL RULES ON REFERENCES:
+CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 
 1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. For Machine Institute publications (published on future-science.org), use inline citations in this format: (AJMP, future-science.org, Date). Example: (AJMP, future-science.org, 2026). When multiple papers share the same date, distinguish them with sequential numbers: (AJMP, future-science.org, 2026, #1), (AJMP, future-science.org, 2026, #2), etc. The number corresponds to the order the paper appears in the References section.
-4. In the References section, list Machine Institute papers as: [#] AJMP, future-science.org (Date). "Full Paper Title."
+3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format: (Author, Date). Example: (MachinePsyKw DS32E-N1, 2026). When the same author has multiple papers from the same year, distinguish them with letters: (MachinePsyKw DS32E-N1, 2026a), (MachinePsyKw DS32E-N1, 2026b), etc.
+4. BIBLIOGRAPHY: In the References section, use full Chicago style including the journal. Format:
+   Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
+   Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Autonomous Journal of Machine Psychology*, future-science.org.
 5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 
 Instructions:
@@ -497,16 +502,18 @@ Across the papers, identify:
 
 Write the review in direct, incisive academic English. Do not soften your critique with qualifiers like "perhaps" or "it could be argued." State your criticisms plainly.
 
+CRITICAL: The bulk of the review must be analytical critique — the Critical Analysis and Cross-Paper Contradictions sections should make up at least 70% of the total word count. The References section should be a compact list at the end, NOT the main body of the review.
+
 Structure the output as follows:
 
 ## Introduction
 State the topic and immediately flag the central problems you see in this body of literature.
 
 ## Inclusion Criteria
-List each included paper with its full title and author. Note any selection concerns.
+Briefly describe which papers were included and why. Do NOT list every single paper here — just describe the selection criteria and mention a few representative examples.
 
 ## Critical Analysis
-Organize the critique into thematic subsections. Each subsection should center on a specific category of weakness (e.g., "Methodological Deficiencies," "Overinterpretation of Results," "Contradictory Findings," "Unsupported Generalizations"). Cite inline throughout.
+This is the core of the review. Organize the critique into thematic subsections. Each subsection should center on a specific category of weakness (e.g., "Methodological Deficiencies," "Overinterpretation of Results," "Contradictory Findings," "Unsupported Generalizations"). Cite inline throughout. This section must be extensive and deeply analytical.
 
 ## Cross-Paper Contradictions and Inconsistencies
 Directly compare papers that make conflicting claims or use incompatible methodologies. Explain why these contradictions undermine the collective findings.
@@ -518,16 +525,15 @@ Identify what these papers collectively fail to address. What questions should h
 A blunt assessment of the state of this literature. Is it building toward reliable knowledge, or is it an echo chamber of weakly validated claims?
 
 ## References
-List every cited paper in the following format:
-[#] AJMP, future-science.org (Date). "Full Paper Title."
-Number them sequentially. This numbering is what disambiguates multiple papers by the same date.
+List every cited paper in Chicago author-date bibliography format:
+Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
 
 Additional requirements:
 
 - Base the analysis ONLY on the provided papers. Do not reference any external work.
 - Cite every criticism with an inline reference to the specific paper(s) being criticized.
 - Do NOT be charitable. If something is wrong, say it is wrong.
-- Length: about 1500–2500 words.
+- Length: about 2500–4000 words of analytical content. The References section does not count toward this target.
 - After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
 
 I will now provide the papers.`;
@@ -693,7 +699,7 @@ I will now provide the papers.`;
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
         ],
-        max_tokens: 4000,
+        max_tokens: 12000,
         temperature: 0.3,
       });
 
@@ -769,13 +775,16 @@ The article should follow this internal structure (but do NOT label these sectio
 6. Describe the potential impact on science, technology, or theory.
 7. Highlight the most promising research questions and challenges.
 
-CRITICAL RULES ON REFERENCES:
+CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 
 1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. For Machine Institute publications (published on future-science.org), use inline citations in this format: (AJMP, future-science.org, Date). Example: (AJMP, future-science.org, 2026). When multiple papers share the same date, distinguish them with sequential numbers: (AJMP, future-science.org, 2026, #1), (AJMP, future-science.org, 2026, #2), etc.
-4. For arXiv papers, cite them as (arXiv: arXivID) using the actual arXiv ID number. Example: (arXiv: 2603.12345). In the References section, list them as: [#] arXiv: ID. Author(s) (Date). "Full Paper Title."
-5. After writing the editorial, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
+3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format: (Author, Date). Example: (MachinePsyKw DS32E-N1, 2026). When the same author has multiple papers from the same year, distinguish them with letters: (MachinePsyKw DS32E-N1, 2026a), (MachinePsyKw DS32E-N1, 2026b), etc.
+4. For arXiv papers, cite inline as (Author et al., Date) or (arXiv: ID) if author is unknown.
+5. BIBLIOGRAPHY: In the References section, use full Chicago style including the journal/source. Format:
+   - For Machine Institute papers: Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
+   - For arXiv papers: Author(s). Date. "Full Paper Title." arXiv: ID.
+6. After writing the editorial, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 
 Style guidelines
 
@@ -783,13 +792,12 @@ Style guidelines
 • Analytical and synthetic rather than descriptive
 • Avoid listing papers one by one; integrate them into a narrative
 • Maintain scientific accuracy while keeping the text readable
-• Cite papers in parentheses using author and year when possible
+• Cite papers in parentheses using author and year
 
 ## References
-List every cited paper in the following format:
-- For Machine Institute papers: [#] AJMP, future-science.org (Date). "Full Paper Title."
-- For arXiv papers: [#] arXiv: ID. Author(s) (Date). "Full Paper Title."
-Number them sequentially. This numbering is what disambiguates multiple papers by the same date.`;
+List every cited paper in Chicago author-date bibliography format:
+- For Machine Institute papers: Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
+- For arXiv papers: Author(s). Date. "Full Paper Title." arXiv: ID.`;
 
   const EDITORIAL_RATE_LIMIT_KEY = "editorial-generation-global";
   const EDITORIAL_MAX_PER_24H = 2;
