@@ -677,26 +677,21 @@ Output
 
 Write a 1,200–1,800 word editorial article structured as follows:
 
-Title
-A concise and provocative title capturing the scientific moment.
+IMPORTANT FORMATTING RULES:
+- Do NOT include structural labels like "Title:", "Opening (Hook)", "Scientific Background", "Recent Advances", "Why Now?", "Implications", or "Future Directions" as headings or labels. Write the editorial as a flowing article without these scaffolding markers.
+- Start with a single markdown heading (# Title) for the title, then write the body as continuous prose. You may use ## subheadings only for the "References" section at the end.
+- Do NOT use **bold** markers around the title.
+- NEVER truncate the References section. List ALL cited papers completely. Do not write "[Full list truncated for brevity]" or similar — always include every single reference.
 
-Opening (hook)
-A short paragraph explaining why this research area is suddenly important.
+The article should follow this internal structure (but do NOT label these sections):
 
-Scientific background
-Explain the field and the core problem in accessible but precise terms.
-
-Recent advances
-Discuss the contributions of the provided papers and how they push the field forward.
-
-Why now?
-Explain how these papers relate to emerging arXiv trends and broader developments.
-
-Implications
-Describe the potential impact on science, technology, or theory.
-
-Future directions
-Highlight the most promising research questions and challenges.
+1. Start with a concise, provocative title as a single # heading.
+2. Open with a short paragraph explaining why this research area is suddenly important.
+3. Explain the field and the core problem in accessible but precise terms.
+4. Discuss the contributions of the provided papers and how they push the field forward.
+5. Explain how these papers relate to emerging arXiv trends and broader developments.
+6. Describe the potential impact on science, technology, or theory.
+7. Highlight the most promising research questions and challenges.
 
 CRITICAL RULES ON REFERENCES:
 
@@ -952,22 +947,68 @@ ${arxivTexts}`;
           { role: "system", content: DEFAULT_EDITORIAL_PROMPT },
           { role: "user", content: userMessage },
         ],
-        max_tokens: 6000,
+        max_tokens: 10000,
         temperature: 0.4,
       });
 
-      const editorialText = completion.choices[0]?.message?.content || "";
+      let editorialText = completion.choices[0]?.message?.content || "";
 
-      const titleMatch = editorialText.match(/^#\s+(.+)/m) || editorialText.match(/^(.+)\n/);
-      const extractedTitle = titleMatch ? titleMatch[1].replace(/^#+\s*/, "").trim() : "Untitled Editorial";
+      const titleMatch = editorialText.match(/^#+\s*\*{0,2}(?:Title:\s*)?(.+?)\*{0,2}\s*$/m)
+        || editorialText.match(/^\*{2}(?:Title:\s*)?(.+?)\*{2}\s*$/m)
+        || editorialText.match(/^#\s+(.+)/m)
+        || editorialText.match(/^(.+)\n/);
+      let extractedTitle = titleMatch ? titleMatch[1].replace(/^#+\s*/, "").replace(/\*{2}/g, "").replace(/^Title:\s*/i, "").trim() : "Untitled Editorial";
+
+      const structuralHeadings = [
+        /^#+\s*\*{0,2}(?:Title[:\s])/im,
+        /^#+\s*Opening\s*\(Hook\)/im,
+        /^#+\s*Scientific\s+Background/im,
+        /^#+\s*Recent\s+Advances/im,
+        /^#+\s*Why\s+Now\??/im,
+        /^#+\s*Implications/im,
+        /^#+\s*Future\s+Directions/im,
+      ];
 
       const lines = editorialText.split("\n");
-      let excerptText = "";
+      const filteredLines: string[] = [];
+      let removedTitle = false;
+
       for (const line of lines) {
         const trimmed = line.trim();
+
+        if (!removedTitle && (
+          trimmed === extractedTitle ||
+          trimmed === `# ${extractedTitle}` ||
+          trimmed === `## ${extractedTitle}` ||
+          trimmed === `**${extractedTitle}**` ||
+          trimmed === `# **${extractedTitle}**` ||
+          trimmed.replace(/^#+\s*\*{0,2}(?:Title:\s*)?/i, "").replace(/\*{0,2}$/, "").trim() === extractedTitle
+        )) {
+          removedTitle = true;
+          continue;
+        }
+
+        let isStructural = false;
+        for (const pattern of structuralHeadings) {
+          if (pattern.test(trimmed)) {
+            isStructural = true;
+            break;
+          }
+        }
+        if (isStructural) continue;
+
+        filteredLines.push(line);
+      }
+
+      editorialText = filteredLines.join("\n").replace(/^\n+/, "");
+
+      let excerptText = "";
+      for (const line of filteredLines) {
+        const trimmed = line.trim();
         if (trimmed && !trimmed.startsWith("#") && trimmed.length > 40) {
-          excerptText = trimmed.substring(0, 200);
-          if (trimmed.length > 200) excerptText += "...";
+          const clean = trimmed.replace(/\*{2}/g, "").replace(/\*/g, "");
+          excerptText = clean.substring(0, 200);
+          if (clean.length > 200) excerptText += "...";
           break;
         }
       }
