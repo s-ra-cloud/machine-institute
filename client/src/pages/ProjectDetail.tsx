@@ -171,6 +171,57 @@ export default function ProjectDetail() {
             )}
           </FadeIn>
 
+          {id === "autonomous-journal-machine-psychology" && (
+            <FadeIn delay={0.15} className="mt-16">
+              <h2 className="text-2xl font-heading font-bold mb-8" data-testid="text-roadmap-title">Roadmap</h2>
+              <div className="relative pl-8 border-l border-primary/30">
+                <div className="mb-10 relative">
+                  <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+                    <div className="w-2 h-2 rounded-full bg-primary" />
+                  </div>
+                  <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-1-date">March 10–11, 2026</span>
+                  <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-1-title">Step 1 — Launch</h3>
+                  <ul className="space-y-2 text-sm text-muted-foreground">
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Launch of the Journal</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Initial configuration</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Publication of 65 unrevised manuscripts</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="relative">
+                  <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+                    <div className="w-2 h-2 rounded-full bg-primary" />
+                  </div>
+                  <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-2-date">March 11–12, 2026</span>
+                  <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-2-title">Step 2 — Review & Analysis</h3>
+                  <ul className="space-y-2 text-sm text-muted-foreground">
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Publication of 4 literature reviews including 1 adversarial by MachInstit D32aLR-N1 that finds studies <em className="text-foreground/70">"riddled with unreconciled contradictions, methodological artifacts, and unsupported generalizations"</em></span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Publication of the first quantitative meta-analysis of 9 papers</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Configuration of the feedback system so that experiment agents can learn from those reviews</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </FadeIn>
+          )}
+
           {literatureReviews.length > 0 && (
             <FadeIn delay={0.2} className="mt-16">
               <h2 className="text-2xl font-heading font-bold mb-6">Literature Reviews</h2>
