@@ -677,7 +677,7 @@ I will now provide the papers.`;
     const window = new JSDOM("").window;
     const purify = DOMPurify(window as any);
     return purify.sanitize(html, {
-      ALLOWED_TAGS: ["h1", "h2", "h3", "h4", "p", "br", "strong", "em", "ul", "ol", "li", "blockquote", "a"],
+      ALLOWED_TAGS: ["h1", "h2", "h3", "h4", "p", "br", "hr", "strong", "em", "ul", "ol", "li", "blockquote", "a"],
       ALLOWED_ATTR: ["href", "target", "rel"],
     });
   }
@@ -691,34 +691,33 @@ I will now provide the papers.`;
       if (listType) { htmlLines.push(`</${listType}>`); listType = null; }
     }
 
+    function inlineFormat(s: string): string {
+      return s
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*(.+?)\*/g, "<em>$1</em>");
+    }
+
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) {
         closeList();
         continue;
       }
-      if (trimmed.startsWith("# ")) { closeList(); htmlLines.push(`<h1>${trimmed.slice(2)}</h1>`); }
-      else if (trimmed.startsWith("## ")) { closeList(); htmlLines.push(`<h2>${trimmed.slice(3)}</h2>`); }
-      else if (trimmed.startsWith("### ")) { closeList(); htmlLines.push(`<h3>${trimmed.slice(4)}</h3>`); }
-      else if (trimmed.startsWith("#### ")) { closeList(); htmlLines.push(`<h4>${trimmed.slice(5)}</h4>`); }
+      if (trimmed.startsWith("# ")) { closeList(); htmlLines.push(`<h1>${inlineFormat(trimmed.slice(2))}</h1>`); }
+      else if (trimmed.startsWith("## ")) { closeList(); htmlLines.push(`<h2>${inlineFormat(trimmed.slice(3))}</h2>`); }
+      else if (trimmed.startsWith("### ")) { closeList(); htmlLines.push(`<h3>${inlineFormat(trimmed.slice(4))}</h3>`); }
+      else if (trimmed.startsWith("#### ")) { closeList(); htmlLines.push(`<h4>${inlineFormat(trimmed.slice(5))}</h4>`); }
+      else if (trimmed.startsWith("---")) { closeList(); htmlLines.push("<hr>"); }
       else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
         if (listType !== "ul") { closeList(); htmlLines.push("<ul>"); listType = "ul"; }
-        let content = trimmed.slice(2)
-          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-          .replace(/\*(.+?)\*/g, "<em>$1</em>");
-        htmlLines.push(`<li>${content}</li>`);
-      } else if (/^\[?\d+[\].)]\s/.test(trimmed)) {
+        htmlLines.push(`<li>${inlineFormat(trimmed.slice(2))}</li>`);
+      } else if (/^(?:\[?\d+[\].)]\s|[a-zA-Z][).]\s)/.test(trimmed)) {
         if (listType !== "ol") { closeList(); htmlLines.push("<ol>"); listType = "ol"; }
-        let content = trimmed.replace(/^\[?\d+[\].)]\s*/, "")
-          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-          .replace(/\*(.+?)\*/g, "<em>$1</em>");
-        htmlLines.push(`<li>${content}</li>`);
+        let content = trimmed.replace(/^(?:\[?\d+[\].)]\s*|[a-zA-Z][).]\s*)/, "");
+        htmlLines.push(`<li>${inlineFormat(content)}</li>`);
       } else {
         closeList();
-        let formatted = trimmed
-          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-          .replace(/\*(.+?)\*/g, "<em>$1</em>");
-        htmlLines.push(`<p>${formatted}</p>`);
+        htmlLines.push(`<p>${inlineFormat(trimmed)}</p>`);
       }
     }
     closeList();
