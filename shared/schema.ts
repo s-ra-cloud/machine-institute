@@ -97,6 +97,7 @@ export const projectPapers = pgTable("project_papers", {
   date: text("date").notNull(),
   type: text("type").notNull().default("article"),
   sourceDocumentId: text("source_document_id").unique(),
+  url: text("url"),
 });
 
 export const insertProjectPaperSchema = createInsertSchema(projectPapers).omit({
@@ -108,6 +109,7 @@ export const insertProjectPaperSchema = createInsertSchema(projectPapers).omit({
   authors: z.string().min(1),
   date: z.string().min(1),
   sourceDocumentId: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
 });
 
 export type InsertProjectPaper = z.infer<typeof insertProjectPaperSchema>;

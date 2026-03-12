@@ -40,6 +40,8 @@ export interface IStorage {
   getAgentMemberById(id: string): Promise<AgentMember | undefined>;
   createAgentMember(member: InsertAgentMember): Promise<AgentMember>;
   createAgentMembers(members: InsertAgentMember[]): Promise<AgentMember[]>;
+  upsertAgentMembers(members: InsertAgentMember[]): Promise<AgentMember[]>;
+  updateProjectPaperUrl(sourceDocumentId: string, url: string): Promise<void>;
 
   getLastSyncTime(key: string): Promise<Date | null>;
   setLastSyncTime(key: string, time: Date): Promise<void>;
@@ -189,6 +191,28 @@ export class DatabaseStorage implements IStorage {
   async createAgentMembers(members: InsertAgentMember[]): Promise<AgentMember[]> {
     if (members.length === 0) return [];
     return db.insert(agentMembers).values(members).onConflictDoNothing().returning();
+  }
+
+  async upsertAgentMembers(members: InsertAgentMember[]): Promise<AgentMember[]> {
+    if (members.length === 0) return [];
+    const results: AgentMember[] = [];
+    for (const member of members) {
+      const [result] = await db.insert(agentMembers).values(member)
+        .onConflictDoUpdate({
+          target: agentMembers.id,
+          set: {
+            plainDescription: member.plainDescription,
+            framework: member.framework,
+          },
+        })
+        .returning();
+      results.push(result);
+    }
+    return results;
+  }
+
+  async updateProjectPaperUrl(sourceDocumentId: string, url: string): Promise<void> {
+    await db.update(projectPapers).set({ url }).where(eq(projectPapers.sourceDocumentId, sourceDocumentId));
   }
 
   async getLastSyncTime(key: string): Promise<Date | null> {

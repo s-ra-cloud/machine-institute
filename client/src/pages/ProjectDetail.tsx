@@ -245,7 +245,7 @@ export default function ProjectDetail() {
                   {visiblePublications.map((pub: any, idx: number) => (
                     <div key={pub.id || idx} className="py-5 border-b border-border/50 flex flex-col md:flex-row gap-3 justify-between group hover:bg-muted/10 transition-colors px-4 -mx-4" data-testid={`card-paper-${pub.id || idx}`}>
                       <div className="max-w-3xl">
-                        {pub._source === "placeholder" && pub.url ? (
+                        {pub.url ? (
                           <a href={pub.url} target="_blank" rel="noopener noreferrer">
                             <h4 className="text-base font-medium text-foreground group-hover:text-primary transition-colors cursor-pointer">
                               {pub.title}

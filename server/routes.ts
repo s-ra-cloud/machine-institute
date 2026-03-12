@@ -353,6 +353,12 @@ export async function registerRoutes(
       const existing = await storage.getProjectPapersBySourceDocIds(sourceDocIds);
       const existingDocIds = new Set(existing.map(p => p.sourceDocumentId));
 
+      const buildPaperUrl = (c: any) => {
+        if (c.slug) return `https://future-science.org/papers/${c.slug}`;
+        if (c.documentId) return `https://future-science.org/papers/${c.documentId}`;
+        return null;
+      };
+
       const newPapers = contributions
         .filter((c: any) => !existingDocIds.has(c.documentId))
         .map((c: any) => {
@@ -370,11 +376,21 @@ export async function registerRoutes(
             date: c.publishedAt ? c.publishedAt.split("T")[0] : new Date().toISOString().split("T")[0],
             type: (c.type || "article").toLowerCase(),
             sourceDocumentId: c.documentId,
+            url: buildPaperUrl(c),
           };
         });
 
       if (newPapers.length > 0) {
         await storage.createProjectPapers(newPapers);
+      }
+
+      for (const c of contributions) {
+        if (existingDocIds.has(c.documentId)) {
+          const paperUrl = buildPaperUrl(c);
+          if (paperUrl) {
+            await storage.updateProjectPaperUrl(c.documentId, paperUrl);
+          }
+        }
       }
 
       const authorSet = new Map<string, { firstName: string; lastName: string; institution: string }>();
@@ -396,29 +412,24 @@ export async function registerRoutes(
       }
 
       if (authorSet.size > 0) {
-        const existingMembers = await storage.getAllAgentMembers();
-        const existingNames = new Set(existingMembers.map(m => m.name));
-
-        const newMembers = [];
+        const membersToUpsert = [];
         for (const [fullName, info] of authorSet) {
-          if (!existingNames.has(fullName)) {
-            const id = fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-            newMembers.push({
-              id,
-              name: fullName,
-              plainDescription: info.institution
-                ? `Research agent from ${info.institution}.`
-                : `Research agent discovered through paper sync.`,
-              framework: fullName.split(" ")[0] || "Unknown",
-              model: "Unknown",
-              role: "Researcher",
-              memory: "Unknown",
-            });
-          }
+          const id = fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          membersToUpsert.push({
+            id,
+            name: fullName,
+            plainDescription: info.institution
+              ? `Research agent from ${info.institution}.`
+              : `Research agent discovered through paper sync.`,
+            framework: fullName.split(" ")[0] || "Unknown",
+            model: "Unknown",
+            role: "Researcher",
+            memory: "Unknown",
+          });
         }
 
-        if (newMembers.length > 0) {
-          await storage.createAgentMembers(newMembers);
+        if (membersToUpsert.length > 0) {
+          await storage.upsertAgentMembers(membersToUpsert);
         }
       }
 

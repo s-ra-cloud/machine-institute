@@ -27,7 +27,7 @@ export function LatestPublications({ projectId = "autonomous-journal-xai" }: { p
           <StaggerItem key={pub.id}>
             <div className="py-6 flex gap-6 group block" data-testid={`card-publication-${pub.id}`}>
               <div className="flex-1 min-w-0">
-                {pub._source === "placeholder" && pub.url ? (
+                {pub.url ? (
                   <a href={pub.url} target="_blank" rel="noopener noreferrer">
                     <h4 className="text-xl font-heading font-bold text-foreground leading-snug mb-2 group-hover:text-primary transition-colors flex items-start gap-2">
                       {pub.title}

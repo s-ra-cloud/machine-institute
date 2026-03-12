@@ -24,6 +24,7 @@ async function seedFromFixture() {
             date: pp.date,
             type: pp.type,
             sourceDocumentId: pp.sourceDocumentId || null,
+            url: pp.url || null,
           }).onConflictDoNothing();
         } catch (e) {}
       }
