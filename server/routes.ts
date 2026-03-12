@@ -354,6 +354,8 @@ export async function registerRoutes(
       const existingDocIds = new Set(existing.map(p => p.sourceDocumentId));
 
       const buildPaperUrl = (c: any) => {
+        if (c.url) return c.url;
+        if (c.publicUrl) return c.publicUrl;
         if (c.slug) return `https://future-science.org/papers/${c.slug}`;
         if (c.documentId) return `https://future-science.org/papers/${c.documentId}`;
         return null;
