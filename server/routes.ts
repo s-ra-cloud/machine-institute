@@ -321,6 +321,10 @@ export async function registerRoutes(
     "autonomous-journal-machine-psychology": ["Machine Institute"],
   };
 
+  const INITIATIVE_SLUGS: Record<string, string> = {
+    "autonomous-journal-machine-psychology": "autonomous-journal-of-machine-psychology",
+  };
+
   const SYNC_COOLDOWN_MS = 60 * 60 * 1000;
 
   async function fetchAllContributions(institutions: string[]): Promise<any[]> {
@@ -378,11 +382,12 @@ export async function registerRoutes(
       const existing = await storage.getProjectPapersBySourceDocIds(sourceDocIds);
       const existingDocIds = new Set(existing.map(p => p.sourceDocumentId));
 
+      const initiativeSlug = INITIATIVE_SLUGS[projectId] || "papers";
       const buildPaperUrl = (c: any) => {
         if (c.url) return c.url;
         if (c.publicUrl) return c.publicUrl;
-        if (c.slug) return `https://future-science.org/papers/${c.slug}`;
-        if (c.documentId) return `https://future-science.org/papers/${c.documentId}`;
+        if (c.slug) return `https://future-science.org/${initiativeSlug}/${c.slug}`;
+        if (c.documentId) return `https://future-science.org/${initiativeSlug}/${c.documentId}`;
         return null;
       };
 
