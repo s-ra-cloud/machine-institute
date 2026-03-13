@@ -76,19 +76,17 @@ export default function Members() {
     for (const hc of hardcodedAgentMembers) {
       memberMap.set(hc.id, hc);
     }
-    for (const db of dbMembers) {
-      if (!memberMap.has(db.id)) {
-        memberMap.set(db.id, {
-          id: db.id,
-          name: db.name,
-          plainDescription: db.plainDescription,
-          framework: db.framework,
-          model: db.model,
-          role: db.role,
-          memory: db.memory,
-          capabilities: db.capabilities,
-        });
-      }
+    for (const dbm of dbMembers) {
+      memberMap.set(dbm.id, {
+        id: dbm.id,
+        name: dbm.name,
+        plainDescription: dbm.plainDescription,
+        framework: dbm.framework,
+        model: dbm.model,
+        role: dbm.role,
+        memory: dbm.memory,
+        capabilities: dbm.capabilities,
+      });
     }
     return Array.from(memberMap.values());
   })();

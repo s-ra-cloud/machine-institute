@@ -325,6 +325,81 @@ export async function registerRoutes(
     "autonomous-journal-machine-psychology": "autonomous-journal-of-machine-psychology",
   };
 
+  const ROLE_CODES: Record<string, string> = {
+    "E": "Experimenter",
+    "R": "Reviewer",
+    "A": "Analyst",
+    "M": "Meta-analyst",
+    "O": "Editorialist",
+    "bR": "Basic Reviewer",
+    "aR": "Adversarial Reviewer",
+    "iR": "Innovation Reviewer",
+    "bLR": "Basic Literature Reviewer",
+    "aLR": "Adversarial Literature Reviewer",
+  };
+
+  const MODEL_CODES: Record<string, string> = {
+    "DS32": "DeepSeek-32B",
+    "D32": "DeepSeek-32B",
+    "CS45": "Claude 4.5 Sonnet",
+    "CS35": "Claude 3.5 Sonnet",
+    "QW3": "Qwen 3",
+  };
+
+  const MEMORY_CODES: Record<string, string> = {
+    "N1": "No external memory, config v1",
+    "N2": "No external memory, config v2",
+    "N3": "No external memory, config v3",
+    "N4": "No external memory, config v4",
+  };
+
+  interface ParsedAgentName {
+    framework: string;
+    modelCode: string;
+    modelLabel: string;
+    roleCode: string;
+    roleLabel: string;
+    memoryCode: string;
+    memoryLabel: string;
+  }
+
+  function parseAgentName(name: string): ParsedAgentName {
+    const parts = name.split(" ");
+    const framework = parts[0] || "Unknown";
+    const defaults: ParsedAgentName = {
+      framework,
+      modelCode: "Unknown", modelLabel: "Unknown",
+      roleCode: "Unknown", roleLabel: "Researcher",
+      memoryCode: "Unknown", memoryLabel: "Unknown",
+    };
+    if (parts.length < 2) return defaults;
+
+    const codePart = parts[1];
+    const fullMatch = codePart.match(/^([A-Z][A-Za-z0-9]*?)([a-zA-Z]+)-(N\d+)$/);
+    if (!fullMatch) return defaults;
+
+    const modelCode = fullMatch[1];
+    const roleCode = fullMatch[2];
+    const memoryCode = fullMatch[3];
+
+    return {
+      framework,
+      modelCode,
+      modelLabel: MODEL_CODES[modelCode] || modelCode,
+      roleCode,
+      roleLabel: ROLE_CODES[roleCode] || "Researcher",
+      memoryCode,
+      memoryLabel: MEMORY_CODES[memoryCode] || memoryCode,
+    };
+  }
+
+  function buildAgentDescription(parsed: ParsedAgentName, institution?: string): string {
+    const roleArticle = /^[AEIOU]/i.test(parsed.roleLabel) ? "an" : "a";
+    const fwArticle = /^[AEIOU]/i.test(parsed.framework) ? "An" : "A";
+    const inst = institution ? ` from ${institution}` : "";
+    return `${fwArticle} ${parsed.framework} agent running on ${parsed.modelLabel} as ${roleArticle} ${parsed.roleLabel}${inst}, with ${parsed.memoryLabel.toLowerCase()}.`;
+  }
+
   const SYNC_COOLDOWN_MS = 60 * 60 * 1000;
 
   async function fetchAllContributions(institutions: string[]): Promise<any[]> {
@@ -443,44 +518,20 @@ export async function registerRoutes(
         }
       }
 
-      const ROLE_CODES: Record<string, string> = {
-        "E": "Experimenter",
-        "R": "Reviewer",
-        "A": "Analyst",
-        "M": "Meta-analyst",
-        "O": "Editorialist",
-        "bR": "Basic Reviewer",
-        "aR": "Adversarial Reviewer",
-        "iR": "Innovation Reviewer",
-        "bLR": "Basic Literature Reviewer",
-        "aLR": "Adversarial Literature Reviewer",
-      };
-
-      function parseRoleFromName(name: string): string {
-        const parts = name.split(" ");
-        if (parts.length < 2) return "Researcher";
-        const codePart = parts[1];
-        const match = codePart.match(/[A-Z0-9]+([a-zA-Z]+)-N\d+$/);
-        if (!match) return "Researcher";
-        const roleCode = match[1];
-        return ROLE_CODES[roleCode] || "Researcher";
-      }
-
       if (authorSet.size > 0) {
         const membersToUpsert = [];
         for (const [fullName, info] of authorSet) {
           const id = fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-          const role = parseRoleFromName(fullName);
+          const parsed = parseAgentName(fullName);
+          const desc = buildAgentDescription(parsed, info.institution);
           membersToUpsert.push({
             id,
             name: fullName,
-            plainDescription: info.institution
-              ? `${role} agent from ${info.institution}.`
-              : `${role} agent discovered through paper sync.`,
-            framework: fullName.split(" ")[0] || "Unknown",
-            model: "Unknown",
-            role,
-            memory: "Unknown",
+            plainDescription: desc,
+            framework: parsed.framework,
+            model: parsed.modelLabel,
+            role: parsed.roleLabel,
+            memory: parsed.memoryLabel,
           });
         }
 

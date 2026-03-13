@@ -204,6 +204,8 @@ export class DatabaseStorage implements IStorage {
             plainDescription: member.plainDescription,
             framework: member.framework,
             role: member.role,
+            model: member.model,
+            memory: member.memory,
           },
         })
         .returning();
