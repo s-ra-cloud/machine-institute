@@ -317,7 +317,40 @@ export async function registerRoutes(
     "autonomous-journal-machine-psychology": "ixli00u1vnheboi9z80ml9o6",
   };
 
+  const INITIATIVE_INSTITUTIONS: Record<string, string[]> = {
+    "autonomous-journal-machine-psychology": ["Machine Institute"],
+  };
+
   const SYNC_COOLDOWN_MS = 60 * 60 * 1000;
+
+  async function fetchAllContributions(institutions: string[]): Promise<any[]> {
+    const PAGE_SIZE = 25;
+    let page = 1;
+    let all: any[] = [];
+    let pageCount = 1;
+
+    while (page <= pageCount) {
+      const url = `https://future-science.org/api/v1/public/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        throw new Error(`Future Science API returned ${resp.status} on page ${page}`);
+      }
+      const json = await resp.json() as any;
+      const items = json?.data || [];
+      pageCount = json?.meta?.pagination?.pageCount || 1;
+
+      const filtered = items.filter((c: any) => {
+        const authors = Array.isArray(c.author) ? c.author : (c.author ? [c.author] : []);
+        return authors.some((a: any) =>
+          institutions.some(inst => (a.institution || "").includes(inst))
+        );
+      });
+      all = all.concat(filtered);
+      page++;
+    }
+
+    return all;
+  }
 
   app.post("/api/project-papers/sync", async (req, res) => {
     try {
@@ -333,16 +366,8 @@ export async function registerRoutes(
         return res.json({ synced: false, message: `Sync available in ${nextSyncIn} minutes.`, newPapers: 0 });
       }
 
-      const docId = INITIATIVE_DOC_IDS[projectId];
-      const apiUrl = `https://future-science.org/api/v1/public/initiatives/${docId}`;
-      const response = await fetch(apiUrl);
-      if (!response.ok) {
-        console.error(`Future Science API returned ${response.status}`);
-        return res.status(502).json({ error: "Failed to fetch from Future Science." });
-      }
-
-      const data = await response.json() as any;
-      const contributions = data?.data?.contributions || [];
+      const institutions = INITIATIVE_INSTITUTIONS[projectId] || [];
+      const contributions = await fetchAllContributions(institutions);
 
       if (contributions.length === 0) {
         await storage.setLastSyncTime(syncKey, new Date());

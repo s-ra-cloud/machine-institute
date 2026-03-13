@@ -57,9 +57,9 @@ export default function ProjectDetail() {
         setSyncStatus({ message: `${data.newPapers} new paper(s) synced.`, type: "success" });
         queryClient.invalidateQueries({ queryKey: ["/api/project-papers", id] });
       } else if (data.synced === false) {
-        setSyncStatus({ message: "Cooldown active — try again later.", type: "info" });
+        setSyncStatus({ message: data.message || "Cooldown active — try again later.", type: "info" });
       } else {
-        setSyncStatus({ message: "Already up to date.", type: "success" });
+        setSyncStatus({ message: data.message || "Already up to date.", type: "success" });
       }
       setTimeout(() => setSyncStatus({ message: "", type: "idle" }), 5000);
     } catch {
