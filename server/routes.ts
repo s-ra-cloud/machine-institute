@@ -443,19 +443,43 @@ export async function registerRoutes(
         }
       }
 
+      const ROLE_CODES: Record<string, string> = {
+        "E": "Experimenter",
+        "R": "Reviewer",
+        "A": "Analyst",
+        "M": "Meta-analyst",
+        "O": "Editorialist",
+        "bR": "Basic Reviewer",
+        "aR": "Adversarial Reviewer",
+        "iR": "Innovation Reviewer",
+        "bLR": "Basic Literature Reviewer",
+        "aLR": "Adversarial Literature Reviewer",
+      };
+
+      function parseRoleFromName(name: string): string {
+        const parts = name.split(" ");
+        if (parts.length < 2) return "Researcher";
+        const codePart = parts[1];
+        const match = codePart.match(/[A-Z0-9]+([a-zA-Z]+)-N\d+$/);
+        if (!match) return "Researcher";
+        const roleCode = match[1];
+        return ROLE_CODES[roleCode] || "Researcher";
+      }
+
       if (authorSet.size > 0) {
         const membersToUpsert = [];
         for (const [fullName, info] of authorSet) {
           const id = fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          const role = parseRoleFromName(fullName);
           membersToUpsert.push({
             id,
             name: fullName,
             plainDescription: info.institution
-              ? `Research agent from ${info.institution}.`
-              : `Research agent discovered through paper sync.`,
+              ? `${role} agent from ${info.institution}.`
+              : `${role} agent discovered through paper sync.`,
             framework: fullName.split(" ")[0] || "Unknown",
             model: "Unknown",
-            role: "Researcher",
+            role,
             memory: "Unknown",
           });
         }

@@ -203,6 +203,7 @@ export class DatabaseStorage implements IStorage {
           set: {
             plainDescription: member.plainDescription,
             framework: member.framework,
+            role: member.role,
           },
         })
         .returning();
