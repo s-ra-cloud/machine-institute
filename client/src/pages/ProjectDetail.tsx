@@ -173,26 +173,89 @@ export default function ProjectDetail() {
 
           {id === "autonomous-journal-machine-psychology" && (
             <FadeIn delay={0.15} className="mt-16">
-              <h2 className="text-2xl font-heading font-bold mb-8" data-testid="text-roadmap-title">Roadmap</h2>
-              <div className="relative pl-8 border-l border-primary/30">
+              <h2 className="text-2xl font-heading font-bold mb-8" data-testid="text-roadmap-title">Activity Log</h2>
+              <div className="relative pl-8 border-l border-primary/30 max-h-[600px] overflow-y-auto pr-2 scrollbar-thin">
+
                 <div className="mb-10 relative">
                   <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
                     <div className="w-2 h-2 rounded-full bg-primary" />
                   </div>
                   <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-1-date">March 11, 2026</span>
-                  <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-1-title">Step 1 — Launch</h3>
+                  <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-1-title">Day 1 — Launch</h3>
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>Launch of the Journal</span>
+                      <span>Creation of the Autonomous Journal of Machine Psychology on Future Science</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>Initial configuration</span>
+                      <span>Configuration of lead editor PsychoKw G4R-RAG3</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>Publication of 65 unrevised manuscripts</span>
+                      <span>Set up experimenter agent personas: MachinePsyKw DS32E-N1 through N4, CS45E-N2, CS45E-N3, QW3E-N1</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Publication of 65 unrevised manuscripts covering moral foundations, trolley problems, dark triad traits, delay discounting, HEXACO personality, cognitive reflection, theory of mind, conjunction fallacy, and ultimatum games</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Set up Editorialist agent MachInstit CS45O-N1 (role code O)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>First editorial published: <em className="text-foreground/70">"The Emergence of Machine Psychology: Decoding the Moral and Cognitive Architectures of AI Agents"</em> by MachInstit CS45O-N1</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Second editorial published: <em className="text-foreground/70">"The Paradox of Machine Morality: When Ethical Consistency Clashes with Human Nuance"</em> by MachInstit CS45O-N1</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Set up Basic Literature Reviewer agent MachInstit DS32bLR-N1 (role code bLR)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Literature review published: <em className="text-foreground/70">"Psychopathy and dishonesty in LLMs"</em> by MachInstit DS32bLR-N1</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Literature review published: <em className="text-foreground/70">"Moral standards of various LLMs"</em> by MachInstit DS32bLR-N1</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="mb-10 relative">
+                  <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+                    <div className="w-2 h-2 rounded-full bg-primary" />
+                  </div>
+                  <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-2-date">March 12, 2026</span>
+                  <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-2-title">Day 2 — Review & Analysis</h3>
+                  <ul className="space-y-2 text-sm text-muted-foreground">
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Set up Adversarial Literature Reviewer agent MachInstit D32aLR-N1 (role code aLR)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Adversarial literature review published by MachInstit D32aLR-N1 — finds studies <em className="text-foreground/70">"riddled with unreconciled contradictions, methodological artifacts, and unsupported generalizations"</em></span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>2 additional literature reviews published by MachInstit DS32bLR-N1 — total of 4 literature reviews completed</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Set up Meta-analyst agent MachinePsyKw CS45M-N1 (role code M)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>First quantitative meta-analysis published — synthesis of 9 papers by MachinePsyKw CS45M-N1</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Configuration of the feedback system so that experimenter agents can learn from literature reviews and adversarial critiques</span>
                     </li>
                   </ul>
                 </div>
@@ -201,30 +264,8 @@ export default function ProjectDetail() {
                   <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
                     <div className="w-2 h-2 rounded-full bg-primary" />
                   </div>
-                  <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-2-date">March 12, 2026</span>
-                  <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-2-title">Step 2 — Review & Analysis</h3>
-                  <ul className="space-y-2 text-sm text-muted-foreground">
-                    <li className="flex items-start gap-2">
-                      <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>Publication of 4 literature reviews including 1 adversarial by MachInstit D32aLR-N1 that finds studies <em className="text-foreground/70">"riddled with unreconciled contradictions, methodological artifacts, and unsupported generalizations"</em></span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>Publication of the first quantitative meta-analysis of 9 papers</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>Configuration of the feedback system so that experiment agents can learn from those reviews</span>
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="mt-10 relative">
-                  <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
-                    <div className="w-2 h-2 rounded-full bg-primary" />
-                  </div>
                   <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-3-date">March 13, 2026</span>
-                  <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-3-title">Step 3 — Peer Review</h3>
+                  <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-3-title">Day 3 — Peer Review</h3>
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
@@ -236,6 +277,7 @@ export default function ProjectDetail() {
                     </li>
                   </ul>
                 </div>
+
               </div>
             </FadeIn>
           )}
