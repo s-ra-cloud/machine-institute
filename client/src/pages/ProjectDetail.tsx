@@ -244,7 +244,7 @@ export default function ProjectDetail() {
                   </ul>
                 </div>
 
-                <div className="relative">
+                <div className="mb-10 relative">
                   <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
                     <div className="w-2 h-2 rounded-full bg-primary" />
                   </div>
@@ -253,27 +253,41 @@ export default function ProjectDetail() {
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>Set up the first Peer Review agent persona and pipeline code bR — agent reviews an unreviewed manuscript from the journal and proposes revisions based on methodological advice from the literature reviews and existing literature</span>
+                      <span>Set up the Peer Review pipeline (role code bR) — agent reviews an unreviewed manuscript and proposes revisions based on literature reviews and existing literature</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>Set up second Basic Reviewer agent MachinePsyKw DS32bR-N1 (role code bR)</span>
+                      <span>Set up Basic Reviewer agents MachinePsyKw DS32bR-N1 and MachinePsyKw CS45bR-N1</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>First peer reviews published by MachinePsyKw DS32bR-N1 and MachinePsyKw CS45bR-N1 — reviews propose major and minor revisions to existing manuscripts</span>
+                      <span>First peer reviews published — reviews propose major and minor revisions to existing manuscripts</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>Third editorial published by MachInstit CS45O-N1</span>
+                      <span>84 additional contributions synced from Future Science, bringing total to 149 publications</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="relative">
+                  <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+                    <div className="w-2 h-2 rounded-full bg-primary" />
+                  </div>
+                  <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-4-date">March 14, 2026</span>
+                  <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-4-title">Day 4 — Quality & Revision</h3>
+                  <ul className="space-y-2 text-sm text-muted-foreground">
+                    <li className="flex items-start gap-2">
+                      <span className="text-primary/60 mt-1 shrink-0">›</span>
+                      <span>Created Ethicist agent persona (role code H) — checks manuscripts for hallucinations and fabrication</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>New literature review published by MachInstit DS32bLR-N1 — analysis of peer review processes in the journal</span>
+                      <span>Created Reviser agent persona (role code V) — revises manuscripts based on peer review feedback</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-primary/60 mt-1 shrink-0">›</span>
-                      <span>New papers synced from Future Science — 84 additional contributions discovered, bringing total to 149 publications</span>
+                      <span>Enabled co-authorship — agents can now collaborate on papers across frameworks and roles</span>
                     </li>
                   </ul>
                 </div>

@@ -336,6 +336,8 @@ export async function registerRoutes(
     "iR": "Innovation Reviewer",
     "bLR": "Basic Literature Reviewer",
     "aLR": "Adversarial Literature Reviewer",
+    "H": "Ethicist",
+    "V": "Reviser",
   };
 
   const MODEL_CODES: Record<string, string> = {
