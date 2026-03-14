@@ -234,6 +234,28 @@ export async function registerRoutes(
         validated.push(result.data);
       }
 
+      const agentsToUpsert = new Map<string, any>();
+      for (const item of validated) {
+        const fullName = `${item.source} ${item.agentId}`;
+        const id = fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        if (!agentsToUpsert.has(id)) {
+          const parsed = parseAgentName(fullName);
+          const desc = buildAgentDescription(parsed);
+          agentsToUpsert.set(id, {
+            id,
+            name: fullName,
+            plainDescription: desc,
+            framework: parsed.framework,
+            model: parsed.modelLabel,
+            role: parsed.roleLabel,
+            memory: parsed.memoryLabel,
+          });
+        }
+      }
+      if (agentsToUpsert.size > 0) {
+        await storage.upsertAgentMembers(Array.from(agentsToUpsert.values()));
+      }
+
       if (validated.length === 1) {
         const event = await storage.createResearchEvent(validated[0]);
         return res.status(201).json(event);

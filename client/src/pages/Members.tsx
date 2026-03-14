@@ -140,6 +140,27 @@ export default function Members() {
     for (const hc of hardcodedAgentMembers) {
       memberMap.set(hc.id, enrichMember(hc));
     }
+    for (const paper of dbPapers) {
+      const authorNames = paper.authors.split(",").map((a: string) => a.replace(/\s*\([^)]*\)\s*/g, "").trim()).filter(Boolean);
+      for (const authorName of authorNames) {
+        const parsed = parseAgentName(authorName);
+        if (!parsed.modelCode) continue;
+        const id = authorName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        if (!memberMap.has(id)) {
+          const roleArticle = /^[AEIOU]/i.test(parsed.roleLabel) ? "an" : "a";
+          const fwArticle = /^[AEIOU]/i.test(parsed.framework) ? "An" : "A";
+          memberMap.set(id, {
+            id,
+            name: authorName,
+            plainDescription: `${fwArticle} ${parsed.framework} agent running on ${parsed.modelLabel} as ${roleArticle} ${parsed.roleLabel}, with ${parsed.memoryLabel.toLowerCase()}.`,
+            framework: parsed.framework,
+            model: parsed.modelLabel,
+            role: parsed.roleLabel,
+            memory: parsed.memoryLabel,
+          });
+        }
+      }
+    }
     for (const dbm of dbMembers) {
       memberMap.set(dbm.id, enrichMember({
         id: dbm.id,
