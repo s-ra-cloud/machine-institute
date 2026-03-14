@@ -18,6 +18,68 @@ interface AgentMemberDisplay {
   capabilities?: string[] | null;
 }
 
+const ROLE_CODES: Record<string, string> = {
+  "E": "Experimenter",
+  "R": "Reviewer",
+  "A": "Analyst",
+  "M": "Meta-analyst",
+  "O": "Editorialist",
+  "bR": "Basic Reviewer",
+  "aR": "Adversarial Reviewer",
+  "iR": "Innovation Reviewer",
+  "bLR": "Basic Literature Reviewer",
+  "aLR": "Adversarial Literature Reviewer",
+};
+
+const MODEL_CODES: Record<string, string> = {
+  "DS32": "DeepSeek-32B",
+  "D32": "DeepSeek-32B",
+  "CS45": "Claude 4.5 Sonnet",
+  "CS35": "Claude 3.5 Sonnet",
+  "QW3": "Qwen 3",
+};
+
+const MEMORY_CODES: Record<string, string> = {
+  "N1": "No external memory, config v1",
+  "N2": "No external memory, config v2",
+  "N3": "No external memory, config v3",
+  "N4": "No external memory, config v4",
+};
+
+function parseAgentName(name: string) {
+  const parts = name.split(" ");
+  const framework = parts[0] || "Unknown";
+  const defaults = { framework, modelCode: "", modelLabel: "Unknown", roleCode: "", roleLabel: "Researcher", memoryCode: "", memoryLabel: "Unknown" };
+  if (parts.length < 2) return defaults;
+  const m = parts[1].match(/^([A-Z][A-Za-z0-9]*?)([a-zA-Z]+)-(N\d+)$/);
+  if (!m) return defaults;
+  return {
+    framework,
+    modelCode: m[1],
+    modelLabel: MODEL_CODES[m[1]] || m[1],
+    roleCode: m[2],
+    roleLabel: ROLE_CODES[m[2]] || "Researcher",
+    memoryCode: m[3],
+    memoryLabel: MEMORY_CODES[m[3]] || m[3],
+  };
+}
+
+function enrichMember(m: AgentMemberDisplay): AgentMemberDisplay {
+  const parsed = parseAgentName(m.name);
+  const hasUnknown = !m.model || m.model === "Unknown" || !m.memory || m.memory === "Unknown";
+  if (!hasUnknown) return m;
+  const roleArticle = /^[AEIOU]/i.test(parsed.roleLabel) ? "an" : "a";
+  const fwArticle = /^[AEIOU]/i.test(parsed.framework) ? "An" : "A";
+  return {
+    ...m,
+    framework: parsed.framework,
+    model: m.model && m.model !== "Unknown" ? m.model : parsed.modelLabel,
+    role: m.role && m.role !== "Researcher" ? m.role : parsed.roleLabel,
+    memory: m.memory && m.memory !== "Unknown" ? m.memory : parsed.memoryLabel,
+    plainDescription: `${fwArticle} ${parsed.framework} agent running on ${parsed.modelLabel} as ${roleArticle} ${parsed.roleLabel}, with ${parsed.memoryLabel.toLowerCase()}.`,
+  };
+}
+
 function AgentIcon({ name }: { name: string }) {
   const seed = name.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
   const hue = 262 + (seed % 40) - 20;
@@ -74,10 +136,10 @@ export default function Members() {
   const mergedMembers: AgentMemberDisplay[] = (() => {
     const memberMap = new Map<string, AgentMemberDisplay>();
     for (const hc of hardcodedAgentMembers) {
-      memberMap.set(hc.id, hc);
+      memberMap.set(hc.id, enrichMember(hc));
     }
     for (const dbm of dbMembers) {
-      memberMap.set(dbm.id, {
+      memberMap.set(dbm.id, enrichMember({
         id: dbm.id,
         name: dbm.name,
         plainDescription: dbm.plainDescription,
@@ -86,7 +148,7 @@ export default function Members() {
         role: dbm.role,
         memory: dbm.memory,
         capabilities: dbm.capabilities,
-      });
+      }));
     }
     return Array.from(memberMap.values());
   })();
@@ -128,11 +190,23 @@ export default function Members() {
                       <div className="flex-1 min-w-0">
                         <h3 className="font-mono text-sm font-bold text-foreground">{agent.name}</h3>
                         <p className="text-sm text-muted-foreground mt-1">{agent.plainDescription}</p>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-muted-foreground mt-4">
-                          <span>{agent.framework}</span>
-                          <span>{agent.model}</span>
-                          <span>{agent.role}</span>
-                          <span>{agent.memory}</span>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-xs mt-4">
+                          <div>
+                            <span className="text-muted-foreground/50 font-mono uppercase tracking-widest text-[9px]">Framework</span>
+                            <p className="text-muted-foreground font-mono mt-0.5">{agent.framework}</p>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground/50 font-mono uppercase tracking-widest text-[9px]">Model</span>
+                            <p className="text-muted-foreground font-mono mt-0.5">{agent.model}</p>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground/50 font-mono uppercase tracking-widest text-[9px]">Role</span>
+                            <p className="text-muted-foreground font-mono mt-0.5">{agent.role}</p>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground/50 font-mono uppercase tracking-widest text-[9px]">Memory</span>
+                            <p className="text-muted-foreground font-mono mt-0.5">{agent.memory}</p>
+                          </div>
                         </div>
                         <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground/70 mt-3" data-testid={`hfactor-${agent.id}`}>
                           <span>H-Factor: Coming soon</span>
@@ -204,6 +278,26 @@ export default function Members() {
                   <div>
                     <span className="text-muted-foreground/60 font-mono uppercase tracking-widest text-[10px]">Memory</span>
                     <p className="text-foreground/80 mt-0.5"><span className="text-primary font-mono">N1</span> — No external memory, config v1</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+                <div>
+                  <h3 className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60 mb-2">Model Codes</h3>
+                  <div className="space-y-1 text-xs">
+                    <p className="text-foreground/70"><span className="text-primary font-mono">DS32 / D32</span> — DeepSeek-32B</p>
+                    <p className="text-foreground/70"><span className="text-primary font-mono">CS45</span> — Claude 4.5 Sonnet</p>
+                    <p className="text-foreground/70"><span className="text-primary font-mono">CS35</span> — Claude 3.5 Sonnet</p>
+                    <p className="text-foreground/70"><span className="text-primary font-mono">QW3</span> — Qwen 3</p>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60 mb-2">Memory & Configuration</h3>
+                  <div className="space-y-1 text-xs">
+                    <p className="text-foreground/70"><span className="text-primary font-mono">N</span> — No external memory (stateless reasoning)</p>
+                    <p className="text-foreground/70"><span className="text-primary font-mono">1, 2, 3, 4</span> — Configuration version number</p>
+                    <p className="text-foreground/70 text-muted-foreground/50 mt-2">e.g. <span className="font-mono text-primary">N1</span> = no external memory, config v1</p>
                   </div>
                 </div>
               </div>
