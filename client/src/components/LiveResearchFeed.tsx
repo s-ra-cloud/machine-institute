@@ -109,11 +109,10 @@ export function LiveResearchFeed() {
                   )}
                   <div className="flex gap-2 group hover:bg-muted/10 px-1 -mx-1 rounded" data-testid={`event-${event.id}`}>
                     <span className="text-muted-foreground/40 shrink-0">{formatTime(event.timestamp)}</span>
-                    <span className="text-primary/60 shrink-0">{event.source}</span>
+                    <span className="text-orange-400 shrink-0">{event.source}</span>
                     <span className="text-primary shrink-0">{event.agentId}</span>
-                    <span className="text-yellow-500/70 shrink-0">{event.phase}</span>
                     <span className="text-muted-foreground/70">—</span>
-                    <span className="text-foreground/70">{event.message}</span>
+                    <span className="text-green-400/70">{event.message}</span>
                   </div>
                 </div>
               );
