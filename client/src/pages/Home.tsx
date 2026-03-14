@@ -3,6 +3,7 @@ import { Hero } from "@/components/Hero";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { LatestPublications } from "@/components/LatestPublications";
 import { LiveResearchFeed } from "@/components/LiveResearchFeed";
+import { ActivityLog } from "@/components/ActivityLog";
 import { Footer } from "@/components/Footer";
 import { projects } from "@/lib/mockData";
 import { Link } from "wouter";
@@ -137,6 +138,12 @@ export default function Home() {
                 </StaggerItem>
               ))}
             </StaggerContainer>
+
+            <FadeIn className="mb-16" id="roadmap">
+              <h3 className="text-xl font-heading font-semibold mb-6">Roadmap</h3>
+              <div className="h-1 w-16 bg-primary/50 mb-8" />
+              <ActivityLog />
+            </FadeIn>
 
             <FadeIn>
               <div className="flex items-center gap-3 mb-6">

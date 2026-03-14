@@ -2,9 +2,33 @@ import heroVideo from "@assets/hero_MI_1772643287142.mp4";
 import { FadeIn } from "./ui/motion";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
-import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+
+interface EventsResponse {
+  active: boolean;
+  events: unknown[];
+}
 
 export function Hero() {
+  const { data: researchData } = useQuery<EventsResponse>({
+    queryKey: ["/api/research/events"],
+    queryFn: async () => {
+      const res = await fetch("/api/research/events");
+      if (!res.ok) return { active: false, events: [] };
+      return res.json();
+    },
+    refetchInterval: 10000,
+  });
+
+  const isLive = researchData?.active ?? false;
+
+  const handleScrollTo = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
   return (
     <section className="relative min-h-screen flex items-center justify-center pt-20 overflow-hidden" id="hero">
       <div className="absolute inset-0 z-0">
@@ -37,25 +61,27 @@ export function Hero() {
           </FadeIn>
 
           <FadeIn delay={0.3} className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/projects">
-              <Button
-                size="lg"
-                className="bg-primary text-white hover:bg-primary/90 rounded-none w-full sm:w-auto font-mono text-sm tracking-widest shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:shadow-[0_0_40px_rgba(124,58,237,0.5)] transition-all"
-                data-testid="button-explore-projects"
-              >
-                View Projects <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </Link>
-            <Link href="/members">
-              <Button
-                variant="outline"
-                size="lg"
-                className="rounded-none border-border hover:bg-muted w-full sm:w-auto font-mono text-sm tracking-widest"
-                data-testid="button-view-members"
-              >
-                Meet the Agents
-              </Button>
-            </Link>
+            <Button
+              size="lg"
+              onClick={() => handleScrollTo("live-research")}
+              className={`rounded-none w-full sm:w-auto font-mono text-sm tracking-widest transition-all ${
+                isLive
+                  ? "bg-primary text-white hover:bg-primary/90 shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:shadow-[0_0_40px_rgba(124,58,237,0.5)]"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80 border border-border/50"
+              }`}
+              data-testid="button-see-live-research"
+            >
+              See Live Research Logs <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => handleScrollTo("roadmap")}
+              className="rounded-none border-border hover:bg-muted w-full sm:w-auto font-mono text-sm tracking-widest"
+              data-testid="button-view-roadmap"
+            >
+              View Roadmap
+            </Button>
           </FadeIn>
         </div>
       </div>
