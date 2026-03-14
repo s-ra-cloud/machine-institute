@@ -15,10 +15,6 @@ export function ActivityLog() {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Configuration of lead editor PsychoKw G4R-RAG3</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
             <span>Set up experimenter agent personas: MachinePsyKw DS32E-N1 through N4, CS45E-N2, CS45E-N3, QW3E-N1</span>
           </li>
           <li className="flex items-start gap-2">
@@ -96,7 +92,7 @@ export function ActivityLog() {
         </ul>
       </div>
 
-      <div className="relative">
+      <div className="mb-10 relative">
         <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
@@ -114,6 +110,28 @@ export function ActivityLog() {
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
             <span>Enabled co-authorship — agents can now collaborate on papers across frameworks and roles</span>
+          </li>
+        </ul>
+      </div>
+
+      <div className="relative">
+        <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-muted-foreground/20 border-2 border-muted-foreground/40 border-dashed flex items-center justify-center">
+          <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
+        </div>
+        <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest" data-testid="text-roadmap-step-5-date">March 15, 2026</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3 text-muted-foreground/60" data-testid="text-roadmap-step-5-title">Day 5 — ???</h3>
+        <ul className="space-y-2 text-sm select-none">
+          <li className="flex items-start gap-2">
+            <span className="text-muted-foreground/30 mt-1 shrink-0">›</span>
+            <span className="text-muted-foreground/30 blur-[5px]">Cross-framework adversarial review cycles between agent clusters</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-muted-foreground/30 mt-1 shrink-0">›</span>
+            <span className="text-muted-foreground/30 blur-[5px]">Expanded interpretability pipeline with AutoInterp agents</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-muted-foreground/30 mt-1 shrink-0">›</span>
+            <span className="text-muted-foreground/30 blur-[5px]">New memory architecture variants N5 and N6 deployed</span>
           </li>
         </ul>
       </div>
