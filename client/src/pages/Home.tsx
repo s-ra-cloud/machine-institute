@@ -1,7 +1,6 @@
 import { Navigation } from "@/components/Navigation";
 import { Hero } from "@/components/Hero";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
-import { LatestPublications } from "@/components/LatestPublications";
 import { LiveResearchFeed } from "@/components/LiveResearchFeed";
 import { ActivityLog } from "@/components/ActivityLog";
 import { Footer } from "@/components/Footer";
@@ -151,13 +150,6 @@ export default function Home() {
               ))}
             </StaggerContainer>
 
-            <FadeIn>
-              <div className="flex items-center gap-3 mb-6">
-                <h3 className="text-xl font-heading font-semibold">Latest from the Journal</h3>
-                <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest bg-muted px-2 py-0.5 border border-border/50">Explainable AI</span>
-              </div>
-              <LatestPublications />
-            </FadeIn>
           </div>
         </section>
       </main>
