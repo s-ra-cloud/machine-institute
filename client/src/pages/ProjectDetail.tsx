@@ -1,7 +1,6 @@
 import { useParams, Link } from "wouter";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
-import { ActivityLog } from "@/components/ActivityLog";
 import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
 import { projects, placeholderPublications } from "@/lib/mockData";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -171,13 +170,6 @@ export default function ProjectDetail() {
               </a>
             )}
           </FadeIn>
-
-          {id === "autonomous-journal-machine-psychology" && (
-            <FadeIn delay={0.15} className="mt-16">
-              <h2 className="text-2xl font-heading font-bold mb-8" data-testid="text-roadmap-title">Activity Log</h2>
-              <ActivityLog />
-            </FadeIn>
-          )}
 
           {literatureReviews.length > 0 && (
             <FadeIn delay={0.2} className="mt-16">
