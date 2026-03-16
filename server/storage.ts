@@ -16,6 +16,7 @@ export interface IStorage {
   createResearchEvent(event: InsertResearchEvent): Promise<ResearchEvent>;
   createResearchEvents(events: InsertResearchEvent[]): Promise<ResearchEvent[]>;
   getRecentEvents(limit: number): Promise<ResearchEvent[]>;
+  getEventsSince(since: Date): Promise<ResearchEvent[]>;
   getActiveEvents(minutesAgo: number): Promise<ResearchEvent[]>;
 
   createLiteratureReview(review: InsertLiteratureReview): Promise<LiteratureReview>;
@@ -97,6 +98,10 @@ export class DatabaseStorage implements IStorage {
 
   async getRecentEvents(limit: number = 20): Promise<ResearchEvent[]> {
     return db.select().from(researchEvents).orderBy(desc(researchEvents.timestamp)).limit(limit);
+  }
+
+  async getEventsSince(since: Date): Promise<ResearchEvent[]> {
+    return db.select().from(researchEvents).where(gte(researchEvents.timestamp, since)).orderBy(desc(researchEvents.timestamp));
   }
 
   async getActiveEvents(minutesAgo: number = 10): Promise<ResearchEvent[]> {

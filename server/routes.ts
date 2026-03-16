@@ -271,8 +271,11 @@ export async function registerRoutes(
 
   app.get("/api/research/events", async (req, res) => {
     try {
-      const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 20, 100));
-      const events = await storage.getRecentEvents(limit);
+      const since = req.query.since as string | undefined;
+      const limit = req.query.limit ? Math.max(1, parseInt(req.query.limit as string) || 500) : undefined;
+      const events = since
+        ? await storage.getEventsSince(new Date(since))
+        : await storage.getRecentEvents(limit || 500);
       const activeEvents = await storage.getActiveEvents(10);
       const active = activeEvents.length > 0;
 

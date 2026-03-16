@@ -32,7 +32,7 @@ export function LiveResearchFeed() {
   const { data } = useQuery<EventsResponse>({
     queryKey: ["/api/research/events"],
     queryFn: async () => {
-      const res = await fetch("/api/research/events?limit=100");
+      const res = await fetch("/api/research/events?since=2026-03-11T00:00:00.000Z");
       return res.json();
     },
     refetchInterval: 15000,
