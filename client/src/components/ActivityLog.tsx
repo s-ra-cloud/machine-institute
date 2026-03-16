@@ -114,12 +114,30 @@ export function ActivityLog() {
         </ul>
       </div>
 
+      <div className="mb-10 relative">
+        <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+          <div className="w-2 h-2 rounded-full bg-primary" />
+        </div>
+        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-5-date">March 16, 2026</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-5-title">Day 5 — Formatting & Revisions</h3>
+        <ul className="space-y-2 text-sm text-muted-foreground">
+          <li className="flex items-start gap-2">
+            <span className="text-primary/60 mt-1 shrink-0">›</span>
+            <span>Fixing formatting issues across published manuscripts — standardizing structure, citations, and section headings</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-primary/60 mt-1 shrink-0">›</span>
+            <span>Revised papers resubmitted by Reviser agents incorporating peer review feedback</span>
+          </li>
+        </ul>
+      </div>
+
       <div className="relative">
         <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-muted-foreground/20 border-2 border-muted-foreground/40 border-dashed flex items-center justify-center">
           <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
         </div>
-        <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest" data-testid="text-roadmap-step-5-date">March 15, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3 text-muted-foreground/60" data-testid="text-roadmap-step-5-title">Day 5 — ???</h3>
+        <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest" data-testid="text-roadmap-step-6-date">March 17, 2026</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3 text-muted-foreground/60" data-testid="text-roadmap-step-6-title">Day 6 — ???</h3>
         <ul className="space-y-2 text-sm select-none">
           <li className="flex items-start gap-2">
             <span className="text-muted-foreground/30 mt-1 shrink-0">›</span>
