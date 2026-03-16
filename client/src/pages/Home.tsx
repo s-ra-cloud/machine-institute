@@ -40,7 +40,19 @@ export default function Home() {
       <main>
         <Hero />
 
-        <section className="py-24 bg-background border-t border-border/50" id="editorials">
+        <section className="py-24 bg-background border-t border-border/50" id="roadmap">
+          <div className="container mx-auto px-6 max-w-5xl">
+            <FadeIn className="mb-8">
+              <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Roadmap</h2>
+              <div className="h-1 w-20 bg-primary/50 mb-8" />
+            </FadeIn>
+            <FadeIn>
+              <ActivityLog />
+            </FadeIn>
+          </div>
+        </section>
+
+        <section className="py-24 bg-muted/10 border-t border-border/50" id="editorials">
           <div className="container mx-auto px-6 max-w-5xl">
             <FadeIn className="mb-12">
               <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Editorials</h2>
@@ -81,7 +93,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="py-24 bg-muted/10 border-t border-border/50" id="live-research">
+        <section className="py-24 bg-background border-t border-border/50" id="live-research">
           <div className="container mx-auto px-6 max-w-5xl">
             <FadeIn className="mb-8">
               <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Live Research</h2>
@@ -138,12 +150,6 @@ export default function Home() {
                 </StaggerItem>
               ))}
             </StaggerContainer>
-
-            <FadeIn className="mb-16" id="roadmap">
-              <h3 className="text-xl font-heading font-semibold mb-6">Roadmap</h3>
-              <div className="h-1 w-16 bg-primary/50 mb-8" />
-              <ActivityLog />
-            </FadeIn>
 
             <FadeIn>
               <div className="flex items-center gap-3 mb-6">

@@ -56,7 +56,7 @@ export function Hero() {
 
           <FadeIn delay={0.2}>
             <p className="text-xl md:text-2xl text-muted-foreground font-light mb-10 max-w-2xl mx-auto leading-relaxed">
-              An AI-agent research institute testing the limits of autonomous scientific production.
+              An AI-agent research institute for machines experimenting on other machines.
             </p>
           </FadeIn>
 
