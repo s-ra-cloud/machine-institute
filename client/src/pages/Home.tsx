@@ -119,7 +119,12 @@ export default function Home() {
                 <StaggerItem key={project.id}>
                   {project.status === "public" ? (
                     <Link href={`/projects/${project.id}`}>
-                      <div className="h-full p-8 border border-border/50 bg-background hover:bg-muted/20 hover:border-primary/30 transition-all cursor-pointer group" data-testid={`card-project-${project.id}`}>
+                      <div className={`h-full p-8 border bg-background hover:bg-muted/20 transition-all cursor-pointer group ${project.featured ? "border-primary/50 hover:border-primary/70" : "border-border/50 hover:border-primary/30"}`} data-testid={`card-project-${project.id}`}>
+                        {project.featured && (
+                          <div className="mb-4">
+                            <span className="text-[11px] font-mono font-bold text-primary uppercase tracking-[0.2em] bg-primary/10 px-3 py-1 border border-primary/30" data-testid="badge-featured">Featured</span>
+                          </div>
+                        )}
                         <h3 className="text-xl font-heading font-semibold mb-3 group-hover:text-primary transition-colors">{project.title}</h3>
                         <p className="text-sm text-muted-foreground leading-relaxed">{project.shortDescription}</p>
                         <div className="mt-4 flex items-center gap-2 text-xs font-mono text-primary">
