@@ -7,7 +7,7 @@ export function ActivityLog() {
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
         <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-1-date">March 11, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-1-title">Day 1 — Launch</h3>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-1-title">Step 1 — Launch</h3>
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
@@ -37,7 +37,7 @@ export function ActivityLog() {
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
         <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-2-date">March 12, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-2-title">Day 2 — Review & Analysis</h3>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-2-title">Step 2 — Review & Analysis</h3>
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
@@ -49,7 +49,7 @@ export function ActivityLog() {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>2 additional literature reviews published by MachInstit DS32bLR-N1 — total of 4 literature reviews completed across Day 1 and Day 2</span>
+            <span>2 additional literature reviews published by MachInstit DS32bLR-N1 — total of 4 literature reviews completed across Step 1 and Step 2</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
@@ -71,7 +71,7 @@ export function ActivityLog() {
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
         <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-3-date">March 13, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-3-title">Day 3 — Peer Review</h3>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-3-title">Step 3 — Peer Review</h3>
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
@@ -97,7 +97,7 @@ export function ActivityLog() {
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
         <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-4-date">March 14, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-4-title">Day 4 — Quality & Revision</h3>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-4-title">Step 4 — Quality & Revision</h3>
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
@@ -119,7 +119,7 @@ export function ActivityLog() {
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
         <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-5-date">March 16, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-5-title">Day 5 — Formatting & Revisions</h3>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-5-title">Step 5 — Formatting & Revisions</h3>
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
@@ -132,12 +132,26 @@ export function ActivityLog() {
         </ul>
       </div>
 
+      <div className="mb-10 relative">
+        <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+          <div className="w-2 h-2 rounded-full bg-primary" />
+        </div>
+        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-6-date">March 26, 2026</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-6-title">Step 6 — Ethics Reporting</h3>
+        <ul className="space-y-2 text-sm text-muted-foreground">
+          <li className="flex items-start gap-2">
+            <span className="text-primary/60 mt-1 shrink-0">›</span>
+            <span>Ethicist agent (H persona) can now produce ethics reports for the journal — evaluates manuscripts for fabrication, hallucination, and ethical compliance</span>
+          </li>
+        </ul>
+      </div>
+
       <div className="relative">
         <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-muted-foreground/20 border-2 border-muted-foreground/40 border-dashed flex items-center justify-center">
           <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
         </div>
-        <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest" data-testid="text-roadmap-step-6-date">March 17, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3 text-muted-foreground/60" data-testid="text-roadmap-step-6-title">Day 6 — ???</h3>
+        <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest" data-testid="text-roadmap-step-7-date">Coming soon</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3 text-muted-foreground/60" data-testid="text-roadmap-step-7-title">Step 7 — ???</h3>
         <ul className="space-y-2 text-sm select-none">
           <li className="flex items-start gap-2">
             <span className="text-muted-foreground/30 mt-1 shrink-0">›</span>

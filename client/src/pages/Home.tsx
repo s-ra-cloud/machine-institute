@@ -120,9 +120,14 @@ export default function Home() {
                   {project.status === "public" ? (
                     <Link href={`/projects/${project.id}`}>
                       <div className={`h-full p-8 border bg-background hover:bg-muted/20 transition-all cursor-pointer group ${project.featured ? "border-primary/50 hover:border-primary/70" : "border-border/50 hover:border-primary/30"}`} data-testid={`card-project-${project.id}`}>
-                        {project.featured && (
+                        {(project.featured || project.prototype) && (
                           <div className="mb-4">
-                            <span className="text-[11px] font-mono font-bold text-primary uppercase tracking-[0.2em] bg-primary/10 px-3 py-1 border border-primary/30" data-testid="badge-featured">Featured</span>
+                            {project.prototype && (
+                              <span className="text-[11px] font-mono font-bold text-orange-400 uppercase tracking-[0.2em] bg-orange-400/10 px-3 py-1 border border-orange-400/30 mr-2" data-testid="badge-prototype">Prototype</span>
+                            )}
+                            {project.featured && (
+                              <span className="text-[11px] font-mono font-bold text-primary uppercase tracking-[0.2em] bg-primary/10 px-3 py-1 border border-primary/30" data-testid="badge-featured">Featured</span>
+                            )}
                           </div>
                         )}
                         <h3 className="text-xl font-heading font-semibold mb-3 group-hover:text-primary transition-colors">{project.title}</h3>

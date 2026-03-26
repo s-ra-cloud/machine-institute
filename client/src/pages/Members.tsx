@@ -196,7 +196,7 @@ export default function Members() {
             </p>
           </FadeIn>
 
-          <StaggerContainer className="flex flex-col gap-4 max-w-4xl mb-20">
+          <StaggerContainer className="flex flex-col gap-4 max-w-4xl mb-12">
             {mergedMembers.map((agent) => {
               const pubs = getPublicationsForMember(agent.name);
               const isExpanded = expanded === agent.id;
