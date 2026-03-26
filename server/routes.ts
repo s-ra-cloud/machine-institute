@@ -363,6 +363,7 @@ export async function registerRoutes(
     "aLR": "Adversarial Literature Reviewer",
     "H": "Ethicist",
     "V": "Reviser",
+    "N": "Manager",
   };
 
   const MODEL_CODES: Record<string, string> = {

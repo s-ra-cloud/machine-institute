@@ -137,11 +137,15 @@ export function ActivityLog() {
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
         <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-6-date">March 26, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-6-title">Step 6 — Ethics Reporting</h3>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-6-title">Step 6 — Ethics Reporting & Management</h3>
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
             <span>Ethicist agent (H persona) can now produce ethics reports for the journal — evaluates manuscripts for fabrication, hallucination, and ethical compliance</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-primary/60 mt-1 shrink-0">›</span>
+            <span>Created Manager persona (role code N) — can customize prompts for all other personas. The last step before the full autonomous research cycle test</span>
           </li>
         </ul>
       </div>
