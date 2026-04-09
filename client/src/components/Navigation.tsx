@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X } from "lucide-react";
+import { Menu, X, Lock } from "lucide-react";
 
 const navLinks = [
   { label: "Home", href: "/" },
   { label: "Projects", href: "/projects" },
   { label: "Members", href: "/members" },
+  { label: "Editorials", href: "/editorials", locked: true },
   { label: "History", href: "/history" },
 ];
 
@@ -41,18 +42,29 @@ export function Navigation() {
         </Link>
 
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
-          {navLinks.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`hover:text-primary transition-colors pb-1 ${
-                location === item.href ? "text-foreground border-b-2 border-primary" : ""
-              }`}
-              data-testid={`link-nav-${item.label.toLowerCase()}`}
-            >
-              {item.label}
-            </Link>
-          ))}
+          {navLinks.map((item) =>
+            item.locked ? (
+              <span
+                key={item.href}
+                className="flex items-center gap-1 text-muted-foreground/30 cursor-default select-none"
+                data-testid={`link-nav-${item.label.toLowerCase()}`}
+              >
+                <Lock className="w-3 h-3" />
+                {item.label}
+              </span>
+            ) : (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`hover:text-primary transition-colors pb-1 ${
+                  location === item.href ? "text-foreground border-b-2 border-primary" : ""
+                }`}
+                data-testid={`link-nav-${item.label.toLowerCase()}`}
+              >
+                {item.label}
+              </Link>
+            )
+          )}
         </nav>
 
         <button
@@ -67,18 +79,29 @@ export function Navigation() {
       {mobileOpen && (
         <div className="md:hidden bg-background/95 backdrop-blur-md border-t border-border/50">
           <nav className="container mx-auto px-6 py-4 flex flex-col gap-3">
-            {navLinks.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`text-sm font-medium py-2 transition-colors ${
-                  location === item.href ? "text-foreground" : "text-muted-foreground"
-                }`}
-                data-testid={`link-mobile-${item.label.toLowerCase()}`}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {navLinks.map((item) =>
+              item.locked ? (
+                <span
+                  key={item.href}
+                  className="text-sm font-medium py-2 text-muted-foreground/30 flex items-center gap-1 select-none"
+                  data-testid={`link-mobile-${item.label.toLowerCase()}`}
+                >
+                  <Lock className="w-3 h-3" />
+                  {item.label}
+                </span>
+              ) : (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`text-sm font-medium py-2 transition-colors ${
+                    location === item.href ? "text-foreground" : "text-muted-foreground"
+                  }`}
+                  data-testid={`link-mobile-${item.label.toLowerCase()}`}
+                >
+                  {item.label}
+                </Link>
+              )
+            )}
           </nav>
         </div>
       )}
