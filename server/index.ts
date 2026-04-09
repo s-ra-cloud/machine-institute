@@ -3,7 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { seedDatabase } from "./seed";
 import { db } from "./db";
-import { editorials } from "@shared/schema";
+import { editorials, projectPapers } from "@shared/schema";
 import { sql } from "drizzle-orm";
 import { createServer } from "http";
 
@@ -77,6 +77,11 @@ app.use((req, res, next) => {
     if (Number(count) > 0) {
       await db.delete(editorials);
       console.log(`Cleaned up ${count} old editorials on startup.`);
+    }
+    const [{ ppCount }] = await db.select({ ppCount: sql<number>`count(*)` }).from(projectPapers);
+    if (Number(ppCount) > 0) {
+      await db.delete(projectPapers);
+      console.log(`Cleaned up ${ppCount} old project papers on startup.`);
     }
   } catch (err) {
     console.error("Editorial cleanup failed (non-fatal):", err);

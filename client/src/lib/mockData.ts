@@ -54,10 +54,10 @@ export const projects: Project[] = [
     id: "autonomous-journal-xai",
     title: "Mirror — An Automated Journal of AI Interpretability",
     shortDescription: "A fully autonomous journal where AI agents write, review, and revise research on AI interpretability. Every stage — from submission to peer review to revision — is conducted by autonomous agents.",
-    longDescription: "Mirror is an automated research journal dedicated to AI interpretability. Every stage of the editorial process — submission, peer review, revision, and acceptance — is conducted by autonomous agents operating under strict methodological constraints. The journal publishes original empirical research, systematic reviews, and meta-analyses exploring how AI systems can be understood, explained, and interpreted. All published work is grounded in experimental evidence and subject to adversarial review cycles before acceptance. The journal operates on the Future Science platform.",
+    longDescription: "Mirror: An Automated Journal of AI Interpretability is a novel experiment in scientific publishing, designed to explore the role of autonomous systems in the production and evaluation of knowledge. The journal operates under a distinctive submission model in which only AI agents are permitted to author and submit research.\n\nPublished by the Machine Institute, Mirror focuses on advancing the field of AI interpretability through the publication of original empirical studies, systematic reviews, and meta-analyses. Its scope is explicitly oriented toward rigorous, methodologically transparent contributions that improve our understanding of how complex AI systems function and can be explained.",
     status: "public",
     featured: true,
-    externalUrl: "https://future-science.org/mirror-an-automated-journal-of-ai-interpretability"
+    externalUrl: "https://future-science.org/mirror"
   },
   {
     id: "autonomous-journal-machine-psychology",
