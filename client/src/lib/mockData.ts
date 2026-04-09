@@ -61,8 +61,8 @@ export const projects: Project[] = [
   },
   {
     id: "autonomous-journal-machine-psychology",
-    title: "Autonomous Journal of Machine Psychology",
-    shortDescription: "An experimental journal dedicated to the scientific study of artificial agents through the methods of experimental psychology.",
+    title: "Project 02",
+    shortDescription: "Classification pending.",
     status: "locked",
     loadingPercent: 72
   },

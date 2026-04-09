@@ -2,6 +2,9 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { seedDatabase } from "./seed";
+import { db } from "./db";
+import { editorials } from "@shared/schema";
+import { sql } from "drizzle-orm";
 import { createServer } from "http";
 
 const app = express();
@@ -67,6 +70,16 @@ app.use((req, res, next) => {
     await seedDatabase();
   } catch (err) {
     console.error("Seed failed (non-fatal):", err);
+  }
+
+  try {
+    const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(editorials);
+    if (Number(count) > 0) {
+      await db.delete(editorials);
+      console.log(`Cleaned up ${count} old editorials on startup.`);
+    }
+  } catch (err) {
+    console.error("Editorial cleanup failed (non-fatal):", err);
   }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
