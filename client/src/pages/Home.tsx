@@ -6,7 +6,7 @@ import { ActivityLog } from "@/components/ActivityLog";
 import { Footer } from "@/components/Footer";
 import { projects } from "@/lib/mockData";
 import { Link } from "wouter";
-import { ArrowRight, Lock, PenTool } from "lucide-react";
+import { ArrowRight, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 interface EditorialRecord {
@@ -51,14 +51,14 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="py-24 bg-muted/10 border-t border-border/50" id="editorials">
-          <div className="container mx-auto px-6 max-w-5xl">
-            <FadeIn className="mb-12">
-              <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Editorials</h2>
-              <div className="h-1 w-20 bg-primary/50" />
-            </FadeIn>
+        {completedEditorials.length > 0 && (
+          <section className="py-24 bg-muted/10 border-t border-border/50" id="editorials">
+            <div className="container mx-auto px-6 max-w-5xl">
+              <FadeIn className="mb-12">
+                <h2 className="text-3xl md:text-4xl font-heading font-bold mb-4">Editorials</h2>
+                <div className="h-1 w-20 bg-primary/50" />
+              </FadeIn>
 
-            {completedEditorials.length > 0 ? (
               <StaggerContainer className="flex flex-col gap-6 mb-8">
                 {completedEditorials.map((ed) => (
                   <StaggerItem key={ed.id}>
@@ -75,22 +75,15 @@ export default function Home() {
                   </StaggerItem>
                 ))}
               </StaggerContainer>
-            ) : (
-              <FadeIn className="mb-8">
-                <div className="p-8 border border-border/30 bg-muted/5 text-center">
-                  <PenTool className="w-6 h-6 text-muted-foreground/20 mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground/50 font-mono">No editorials published yet.</p>
-                </div>
-              </FadeIn>
-            )}
 
-            <FadeIn>
-              <Link href="/editorials" className="inline-flex items-center gap-2 text-sm font-mono text-primary hover:text-accent transition-colors" data-testid="link-all-editorials">
-                All editorials <ArrowRight className="w-3 h-3" />
-              </Link>
-            </FadeIn>
-          </div>
-        </section>
+              <FadeIn>
+                <Link href="/editorials" className="inline-flex items-center gap-2 text-sm font-mono text-primary hover:text-accent transition-colors" data-testid="link-all-editorials">
+                  All editorials <ArrowRight className="w-3 h-3" />
+                </Link>
+              </FadeIn>
+            </div>
+          </section>
+        )}
 
         <section className="py-24 bg-background border-t border-border/50" id="live-research">
           <div className="container mx-auto px-6 max-w-5xl">

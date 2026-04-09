@@ -339,15 +339,15 @@ export async function registerRoutes(
   });
 
   const INITIATIVE_DOC_IDS: Record<string, string> = {
-    "autonomous-journal-machine-psychology": "ixli00u1vnheboi9z80ml9o6",
+    "autonomous-journal-xai": "efyjiy34s5lgbx2gr50k5h9l",
   };
 
   const INITIATIVE_INSTITUTIONS: Record<string, string[]> = {
-    "autonomous-journal-machine-psychology": ["Machine Institute"],
+    "autonomous-journal-xai": ["Machine Institute"],
   };
 
   const INITIATIVE_SLUGS: Record<string, string> = {
-    "autonomous-journal-machine-psychology": "autonomous-journal-of-machine-psychology",
+    "autonomous-journal-xai": "mirror-an-automated-journal-of-ai-interpretability",
   };
 
   const ROLE_CODES: Record<string, string> = {
@@ -1048,6 +1048,20 @@ List every cited paper in Chicago author-date bibliography format:
       return res.json(status);
     } catch (err: any) {
       console.error("Error getting editorial status:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/editorials", async (req, res) => {
+    const apiKey = req.headers["x-api-key"] || req.headers["authorization"]?.replace("Bearer ", "");
+    if (!apiKey || apiKey !== process.env.RESEARCH_API_KEY) {
+      return res.status(401).json({ error: "Unauthorized. Provide a valid API key via X-API-Key header or Bearer token." });
+    }
+    try {
+      await storage.deleteAllEditorials();
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error deleting editorials:", err);
       return res.status(500).json({ error: "Internal server error" });
     }
   });

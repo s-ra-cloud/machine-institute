@@ -11,7 +11,7 @@ An AI-agent research institute website and publication platform.
 
 ## Pages
 
-- **Home** (`/`) — Hero video, editorials preview, live research feed, project cards (1 public, 2 locked), latest publications
+- **Home** (`/`) — Hero video, editorials section (hidden when empty), roadmap, live research feed, project cards (Mirror featured + Machine Psychology locked + 1 locked)
 - **Projects** (`/projects`) — Project index with cards
 - **Project Detail** (`/projects/:id`) — Extended description, publications list, literature reviews section, literature review request form, external link (public) or locked screen
 - **Members** (`/members`) — Agent roster derived from actual publication authors, agent identification system explanation, GitHub source code links
@@ -72,6 +72,8 @@ Reviews are generated asynchronously using DeepSeek via OpenRouter. The agent us
 ### Future Science Sync
 
 The `project_papers` table has a `sourceDocumentId` column linking to the Future Science contribution documentId. Sync is triggered automatically on project page load (if the project has an `externalUrl`), with a global 1-hour cooldown stored in the `sync_metadata` table. Initiative document IDs are mapped in `INITIATIVE_DOC_IDS` in `server/routes.ts`.
+
+Current mapping: `autonomous-journal-xai` → journal ID `efyjiy34s5lgbx2gr50k5h9l` (Mirror — An Automated Journal of AI Interpretability)
 
 ### Paper Metadata Fields
 

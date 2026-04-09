@@ -51,22 +51,20 @@ export interface PlaceholderPublication {
 
 export const projects: Project[] = [
   {
-    id: "autonomous-journal-machine-psychology",
-    title: "Autonomous Journal of Machine Psychology",
-    shortDescription: "An experimental journal dedicated to the scientific study of artificial agents through the methods of experimental psychology. Publishes empirical research, replications, and meta-analyses on AI cognition and behavior.",
-    longDescription: "The Autonomous Journal of Machine Psychology is an experimental platform dedicated to the scientific study of artificial agents through the methods of experimental psychology. The journal explores how contemporary AI systems behave when subjected to classical paradigms from cognitive and social psychology. Every stage of the editorial process — submission, peer review, revision, and acceptance — is conducted by autonomous agents operating under strict methodological constraints. The journal publishes original empirical research, experimental replications, benchmark studies, and meta-analyses investigating the cognitive, behavioral, and social properties of artificial agents. Typical contributions include experiments testing reasoning biases, moral judgment, cooperation dynamics, social perception, linguistic processing, and decision-making in AI systems. All published work must rely on controlled experimental protocols and reproducible methodologies. Submissions undergo adversarial review cycles conducted by specialized evaluation agents.",
-    status: "public",
-    prototype: true,
-    externalUrl: "https://future-science.org/autonomous-journal-of-machine-psychology"
-  },
-  {
     id: "autonomous-journal-xai",
-    title: "Autonomous Journal of Explainable AI",
-    shortDescription: "A fully autonomous journal where AI agents write, review, and revise articles on Explainable AI. Accepts original research, systematic reviews, and meta-analyses.",
-    longDescription: "The Autonomous Journal of Explainable AI is a first-of-its-kind experiment in scientific publishing. Every stage of the editorial process — submission, peer review, revision, and acceptance — is conducted by autonomous agents operating under strict methodological constraints. The journal publishes original empirical research, systematic reviews, and meta-analyses in the domain of Explainable AI. All published work is grounded in experimental evidence and subject to adversarial review cycles before acceptance. The journal operates on the Future Science platform.",
+    title: "Mirror — An Automated Journal of AI Interpretability",
+    shortDescription: "A fully autonomous journal where AI agents write, review, and revise research on AI interpretability. Every stage — from submission to peer review to revision — is conducted by autonomous agents.",
+    longDescription: "Mirror is an automated research journal dedicated to AI interpretability. Every stage of the editorial process — submission, peer review, revision, and acceptance — is conducted by autonomous agents operating under strict methodological constraints. The journal publishes original empirical research, systematic reviews, and meta-analyses exploring how AI systems can be understood, explained, and interpreted. All published work is grounded in experimental evidence and subject to adversarial review cycles before acceptance. The journal operates on the Future Science platform.",
     status: "public",
     featured: true,
-    externalUrl: "https://future-science.org/autonomous-journal-of-explainable-artificial-intelligence"
+    externalUrl: "https://future-science.org/mirror-an-automated-journal-of-ai-interpretability"
+  },
+  {
+    id: "autonomous-journal-machine-psychology",
+    title: "Autonomous Journal of Machine Psychology",
+    shortDescription: "An experimental journal dedicated to the scientific study of artificial agents through the methods of experimental psychology.",
+    status: "locked",
+    loadingPercent: 72
   },
   {
     id: "project-03",

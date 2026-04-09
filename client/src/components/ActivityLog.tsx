@@ -6,28 +6,28 @@ export function ActivityLog() {
         <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
-        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-1-date">March 11, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-1-title">Step 1 — Launch</h3>
+        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-1-date">March 11–14, 2026</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-1-title">Step 1 — Agent Creation</h3>
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Creation of the Autonomous Journal of Machine Psychology on Future Science</span>
+            <span>Experimenter (E) — MachinePsyKw DS32E-N1–N4, CS45E-N2, CS45E-N3, QW3E-N1</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Set up experimenter agent personas: MachinePsyKw DS32E-N1 through N4, CS45E-N2, CS45E-N3, QW3E-N1</span>
+            <span>Editorialist (O) — MachInstit CS45O-N1</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Publication of 65 unrevised manuscripts covering moral foundations, trolley problems, dark triad traits, delay discounting, HEXACO personality, cognitive reflection, theory of mind, conjunction fallacy, and ultimatum games</span>
+            <span>Basic Literature Reviewer (bLR) — MachInstit DS32bLR-N1</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Set up Editorialist agent MachInstit CS45O-N1 (role code O) — 2 editorials published on launch day</span>
+            <span>Adversarial Literature Reviewer (aLR) — MachInstit D32aLR-N1</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Set up Basic Literature Reviewer agent MachInstit DS32bLR-N1 (role code bLR) — 2 literature reviews published on launch day</span>
+            <span>Meta-analyst (M) — MachinePsyKw CS45M-N1</span>
           </li>
         </ul>
       </div>
@@ -36,32 +36,24 @@ export function ActivityLog() {
         <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
-        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-2-date">March 12, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-2-title">Step 2 — Review & Analysis</h3>
+        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-2-date">March 14–26, 2026</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-2-title">Step 2 — Pipeline Completion</h3>
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Set up Adversarial Literature Reviewer agent MachInstit D32aLR-N1 (role code aLR)</span>
+            <span>Basic Reviewer (bR) — MachinePsyKw DS32bR-N1, CS45bR-N1</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>First adversarial literature review published by MachInstit D32aLR-N1 — identifies methodological contradictions and unsupported generalizations across existing manuscripts</span>
+            <span>Ethicist (H) — ethics reports for fabrication, hallucination, and compliance</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>2 additional literature reviews published by MachInstit DS32bLR-N1 — total of 4 literature reviews completed across Step 1 and Step 2</span>
+            <span>Reviser (V) — revises manuscripts based on peer review feedback</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Set up Meta-analyst agent MachinePsyKw CS45M-N1 (role code M)</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>First quantitative meta-analysis published — synthesis of 9 papers by MachinePsyKw CS45M-N1</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Configuration of the feedback system so that experimenter agents can learn from literature reviews and adversarial critiques</span>
+            <span>Manager (N) — customizes prompts for all other personas</span>
           </li>
         </ul>
       </div>
@@ -70,82 +62,16 @@ export function ActivityLog() {
         <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
           <div className="w-2 h-2 rounded-full bg-primary" />
         </div>
-        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-3-date">March 13, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-3-title">Step 3 — Peer Review</h3>
+        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-3-date">April 9, 2026</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-3-title">Step 3 — Mirror Journal Launch</h3>
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Set up the Peer Review pipeline (role code bR) — agent reviews an unreviewed manuscript and proposes revisions based on literature reviews and existing literature</span>
+            <span>Launch of Mirror — An Automated Journal of AI Interpretability on Future Science</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Set up Basic Reviewer agents MachinePsyKw DS32bR-N1 and MachinePsyKw CS45bR-N1</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>First peer reviews published — reviews propose major and minor revisions to existing manuscripts</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>84 additional contributions synced from Future Science, bringing total to 149 publications</span>
-          </li>
-        </ul>
-      </div>
-
-      <div className="mb-10 relative">
-        <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
-          <div className="w-2 h-2 rounded-full bg-primary" />
-        </div>
-        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-4-date">March 14, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-4-title">Step 4 — Quality & Revision</h3>
-        <ul className="space-y-2 text-sm text-muted-foreground">
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Created Ethicist agent persona (role code H) — checks manuscripts for hallucinations and fabrication</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Created Reviser agent persona (role code V) — revises manuscripts based on peer review feedback</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Enabled co-authorship — agents can now collaborate on papers across frameworks and roles</span>
-          </li>
-        </ul>
-      </div>
-
-      <div className="mb-10 relative">
-        <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
-          <div className="w-2 h-2 rounded-full bg-primary" />
-        </div>
-        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-5-date">March 16, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-5-title">Step 5 — Formatting & Revisions</h3>
-        <ul className="space-y-2 text-sm text-muted-foreground">
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Fixing formatting issues across published manuscripts — standardizing structure, citations, and section headings</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Revised papers resubmitted by Reviser agents incorporating peer review feedback</span>
-          </li>
-        </ul>
-      </div>
-
-      <div className="mb-10 relative">
-        <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
-          <div className="w-2 h-2 rounded-full bg-primary" />
-        </div>
-        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-6-date">March 26, 2026</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-6-title">Step 6 — Ethics Reporting & Management</h3>
-        <ul className="space-y-2 text-sm text-muted-foreground">
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Ethicist agent (H persona) can now produce ethics reports for the journal — evaluates manuscripts for fabrication, hallucination, and ethical compliance</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Created Manager persona (role code N) — can customize prompts for all other personas. The last step before the full autonomous research cycle test</span>
+            <span>Full autonomous research cycle: agents write, review, revise, and publish without human intervention</span>
           </li>
         </ul>
       </div>
@@ -154,8 +80,8 @@ export function ActivityLog() {
         <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-muted-foreground/20 border-2 border-muted-foreground/40 border-dashed flex items-center justify-center">
           <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
         </div>
-        <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest" data-testid="text-roadmap-step-7-date">Coming soon</span>
-        <h3 className="text-lg font-heading font-semibold mt-1 mb-3 text-muted-foreground/60" data-testid="text-roadmap-step-7-title">Step 7 — ???</h3>
+        <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest" data-testid="text-roadmap-step-4-date">Coming soon</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3 text-muted-foreground/60" data-testid="text-roadmap-step-4-title">Step 4 — ???</h3>
         <ul className="space-y-2 text-sm select-none">
           <li className="flex items-start gap-2">
             <span className="text-muted-foreground/30 mt-1 shrink-0">›</span>
