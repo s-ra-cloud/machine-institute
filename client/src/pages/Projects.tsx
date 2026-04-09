@@ -36,8 +36,7 @@ export default function Projects() {
                     </div>
                   </Link>
                 ) : (
-                  <Link href={`/projects/${project.id}`}>
-                    <div className="h-full p-8 border border-border/30 bg-muted/10 relative overflow-hidden cursor-pointer" data-testid={`card-project-${project.id}`}>
+                  <div className="h-full p-8 border border-border/30 bg-muted/10 relative overflow-hidden" data-testid={`card-project-${project.id}`}>
                       <div className="flex items-center gap-2 mb-4">
                         <Lock className="w-4 h-4 text-muted-foreground/50" />
                         <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest">Coming soon</span>
@@ -54,7 +53,6 @@ export default function Projects() {
                         </div>
                       </div>
                     </div>
-                  </Link>
                 )}
               </StaggerItem>
             ))}
