@@ -134,7 +134,7 @@ export default function Home() {
                     <div className="h-full p-8 border border-border/30 bg-background/50 relative overflow-hidden" data-testid={`card-project-${project.id}`}>
                       <div className="flex items-center gap-2 mb-4">
                         <Lock className="w-4 h-4 text-muted-foreground/50" />
-                        <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest">Classified</span>
+                        <span className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest">Coming soon</span>
                       </div>
                       <h3 className="text-xl font-heading font-semibold mb-3 text-muted-foreground/40">{project.title}</h3>
                       <p className="text-sm text-muted-foreground/30">{project.shortDescription}</p>
