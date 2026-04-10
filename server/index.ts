@@ -1,7 +1,9 @@
 import express, { type Request, Response, NextFunction } from "express";
+import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { seedDatabase } from "./seed";
+import { setupAuth } from "./auth";
 import { db } from "./db";
 import { editorials, projectPapers } from "@shared/schema";
 import { sql } from "drizzle-orm";
@@ -15,6 +17,8 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+app.use(cookieParser());
 
 app.use(
   express.json({
@@ -64,6 +68,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  setupAuth(app);
   await registerRoutes(httpServer, app);
 
   try {

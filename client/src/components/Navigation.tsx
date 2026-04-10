@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, Lock } from "lucide-react";
+import { Menu, X, Lock, LogIn, LogOut, User } from "lucide-react";
+import { useAuth } from "@/lib/auth";
 
 const navLinks = [
   { label: "Home", href: "/" },
@@ -14,6 +15,7 @@ export function Navigation() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [location] = useLocation();
+  const { authenticated, user, login, logout, isLoading } = useAuth();
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 50);
@@ -65,6 +67,33 @@ export function Navigation() {
               </Link>
             )
           )}
+
+          {!isLoading && (
+            authenticated ? (
+              <div className="flex items-center gap-3 ml-2 border-l border-border/30 pl-4">
+                <span className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground/60">
+                  <User className="w-3 h-3" />
+                  {user?.displayName || user?.email || "Researcher"}
+                </span>
+                <button
+                  onClick={logout}
+                  className="flex items-center gap-1 text-xs font-mono text-muted-foreground/40 hover:text-foreground transition-colors"
+                  data-testid="button-logout"
+                >
+                  <LogOut className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={login}
+                className="flex items-center gap-1.5 ml-2 border-l border-border/30 pl-4 text-xs font-mono text-muted-foreground hover:text-primary transition-colors"
+                data-testid="button-login"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                Sign in
+              </button>
+            )
+          )}
         </nav>
 
         <button
@@ -101,6 +130,30 @@ export function Navigation() {
                   {item.label}
                 </Link>
               )
+            )}
+
+            {!isLoading && (
+              <div className="border-t border-border/30 pt-3 mt-1">
+                {authenticated ? (
+                  <button
+                    onClick={logout}
+                    className="flex items-center gap-2 text-sm font-medium py-2 text-muted-foreground"
+                    data-testid="button-mobile-logout"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Sign out ({user?.displayName || user?.email || "Researcher"})
+                  </button>
+                ) : (
+                  <button
+                    onClick={login}
+                    className="flex items-center gap-2 text-sm font-medium py-2 text-muted-foreground hover:text-primary transition-colors"
+                    data-testid="button-mobile-login"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    Sign in with Future Science
+                  </button>
+                )}
+              </div>
             )}
           </nav>
         </div>

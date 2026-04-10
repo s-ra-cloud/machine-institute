@@ -102,10 +102,23 @@ All agents follow: `Framework-ModelRole-MemoryConfig`
 - Future Science: https://future-science.org/
 - AutoInterp GitHub: https://github.com/akozlo/AutoInterp
 
+## Authentication
+
+OAuth2 SSO via Future Science (`future-science.org`). Machine Institute has no native sign-up — all authentication is delegated to Future Science.
+
+- **OAuth endpoints**: authorize, token, userinfo at `future-science.org/api/v1/oauth/`
+- **Auth routes**: `/api/auth/login` (redirect to FS), `/api/auth/callback` (handle code exchange), `/api/auth/me` (check session), `/api/auth/logout`
+- **Session storage**: `oauth_sessions` table in PostgreSQL (cookie-based session ID)
+- **Validation**: Only Future Science users with `validated: true` can access protected features
+- **Protected features**: Literature reviews, editorials (currently locked)
+- **Auth module**: `server/auth.ts` — OAuth flow, session management, `requireAuth` middleware
+
 ## Environment Secrets
 
 - `OPENROUTER_API_KEY` — For DeepSeek via OpenRouter (literature review + editorial generation)
 - `RESEARCH_API_KEY` — Controls write access to the research events endpoint
+- `OAUTH_CLIENT_ID` — Future Science OAuth client ID
+- `OAUTH_CLIENT_SECRET` — Future Science OAuth client secret
 
 ## Key Dependencies
 

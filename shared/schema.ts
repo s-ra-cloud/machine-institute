@@ -185,6 +185,19 @@ export const researchEvents = pgTable("research_events", {
   timestamp: timestamp("timestamp").defaultNow().notNull(),
 });
 
+export const oauthSessions = pgTable("oauth_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accessToken: text("access_token").notNull(),
+  futureScienceUserId: text("future_science_user_id").notNull(),
+  email: text("email"),
+  displayName: text("display_name"),
+  validated: text("validated").notNull().default("false"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+export type OAuthSession = typeof oauthSessions.$inferSelect;
+
 export const insertResearchEventSchema = createInsertSchema(researchEvents).omit({
   id: true,
   timestamp: true,
