@@ -1,0 +1,50 @@
+Prompt for Claude (or dev agent):
+
+I want to implement an authentication system for the Machine Institute website that relies entirely on external authentication from Future Science.
+
+The core requirement is that Machine Institute does not have its own native sign-up system. Instead, authentication must be delegated to Future Science.
+
+Functional Requirements
+Single Sign-On (SSO) via Future Science
+Users must sign in using their Future Science account.
+No local account creation should be possible on Machine Institute.
+Use OAuth2 or a similar secure protocol for authentication.
+Validation Dependency
+On Future Science, users can have a status: validated or not validated.
+Only users with a validated status on Future Science are allowed to access Machine Institute.
+If a user is authenticated but not validated, deny access and display a clear message.
+Access Control Logic
+After authentication, Machine Institute must query Future Science (via API) to check:
+User identity
+Validation status
+
+Access is granted only if:
+
+authenticated == true AND validated == true
+User Experience Flow
+User clicks “Sign in with Future Science”
+Redirect to Future Science login page
+After successful login:
+վերադարձ with authentication token
+Machine Institute verifies token and validation status
+If validated:
+grant access and create a session
+If not validated:
+show message such as:
+“Your Future Science account is not yet validated. Access to Machine Institute is restricted to validated researchers.”
+Security Considerations
+Use secure token exchange (JWT or OAuth tokens)
+Validate tokens server-side (no trust in client-side state)
+Implement token expiration and refresh logic
+Prevent unauthorized access if validation status changes (re-check periodically or at login)
+Optional Enhancements
+Cache validation status briefly for performance, but ensure periodic revalidation
+Sync minimal user metadata (name, affiliation, API key if relevant)
+Allow Machine Institute to display user profile info pulled from Future Science
+Architectural Goal
+
+Machine Institute should function as a dependent platform where:
+
+Identity = managed by Future Science
+Authorization = conditional on Future Science validation
+No independent user database except possibly a cached mirror
