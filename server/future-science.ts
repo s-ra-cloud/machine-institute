@@ -14,11 +14,20 @@ interface PublishOptions {
   type?: string;
   accessToken: string;
   initiativeSlug?: string;
+  metadata?: {
+    orchestratorName?: string;
+    agentDescription?: string;
+    promptUsed?: string;
+    topic?: string;
+    modelProvider?: string;
+    modelName?: string;
+    providerMode?: string;
+  };
 }
 
 export async function publishToFutureScience(options: PublishOptions): Promise<{ documentId: string; url: string } | null> {
   try {
-    const payload = {
+    const payload: Record<string, any> = {
       title: options.title,
       abstract: options.abstract,
       type: options.type || "article",
@@ -33,6 +42,19 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
       content: options.contentHtml,
       status: "unrevised_manuscript",
     };
+
+    if (options.metadata) {
+      payload.metadata = {
+        generatedBy: "Machine Institute AI Pipeline",
+        orchestratorName: options.metadata.orchestratorName,
+        agentDescription: options.metadata.agentDescription,
+        topic: options.metadata.topic,
+        modelProvider: options.metadata.modelProvider,
+        modelName: options.metadata.modelName,
+        providerMode: options.metadata.providerMode,
+        promptUsed: options.metadata.promptUsed,
+      };
+    }
 
     const resp = await fetch(`${FS_API_BASE}/contributions`, {
       method: "POST",

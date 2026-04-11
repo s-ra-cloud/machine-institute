@@ -1,6 +1,6 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, inArray, and } from "drizzle-orm";
+import { eq, desc, gte, inArray, and, lte } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -50,6 +50,10 @@ export interface IStorage {
 
   getUserRateLimit(userId: string, resourceType: string): Promise<UserRateLimit | null>;
   incrementUserRateLimit(userId: string, resourceType: string, windowMs: number): Promise<UserRateLimit>;
+
+  storeUserApiKey(userId: string, provider: string, encryptedKey: string, expiresAt: Date): Promise<UserApiKey>;
+  getUserApiKey(userId: string, provider: string): Promise<UserApiKey | null>;
+  deleteExpiredApiKeys(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -274,6 +278,35 @@ export class DatabaseStorage implements IStorage {
       .values({ userId, resourceType, count: 1, windowStart: new Date() })
       .returning();
     return created;
+  }
+
+  async storeUserApiKey(userId: string, provider: string, encryptedKey: string, expiresAt: Date): Promise<UserApiKey> {
+    const existing = await this.getUserApiKey(userId, provider);
+    if (existing) {
+      const [updated] = await db.update(userApiKeys)
+        .set({ encryptedKey, expiresAt })
+        .where(eq(userApiKeys.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(userApiKeys)
+      .values({ userId, provider, encryptedKey, expiresAt })
+      .returning();
+    return created;
+  }
+
+  async getUserApiKey(userId: string, provider: string): Promise<UserApiKey | null> {
+    const [row] = await db.select().from(userApiKeys)
+      .where(and(
+        eq(userApiKeys.userId, userId),
+        eq(userApiKeys.provider, provider),
+        gte(userApiKeys.expiresAt, new Date()),
+      ));
+    return row ?? null;
+  }
+
+  async deleteExpiredApiKeys(): Promise<void> {
+    await db.delete(userApiKeys).where(lte(userApiKeys.expiresAt, new Date()));
   }
 }
 

@@ -796,21 +796,17 @@ I will now provide the papers.`;
 
   const reviewRateLimit = new Map<string, number>();
 
-  app.post("/api/literature-reviews", optionalAuth, async (req, res) => {
+  app.post("/api/literature-reviews", requireAuth, async (req, res) => {
     try {
       const { projectId, agentId, researchQuestion, prompt, topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription } = req.body;
 
       const user = (req as any).user;
-      const isAuthenticated = !!user;
-      const isPlatform = providerMode === "platform" || !providerMode;
+      const isPlatform = providerMode !== "byoc";
 
-      if (isPlatform && !isAuthenticated) {
+      if (isPlatform) {
         if (!process.env.OPENROUTER_API_KEY) {
           return res.status(503).json({ error: "Literature review generation is not configured. OPENROUTER_API_KEY is missing." });
         }
-      }
-
-      if (isPlatform && isAuthenticated) {
         const limitConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
         const currentLimit = await storage.getUserRateLimit(user.id, "literature-review");
         if (currentLimit) {
@@ -822,8 +818,16 @@ I will now provide the papers.`;
         }
       }
 
-      if (providerMode === "byoc" && !byocApiKey) {
-        return res.status(400).json({ error: "BYOC mode requires an API key." });
+      if (providerMode === "byoc") {
+        if (!byocApiKey) {
+          return res.status(400).json({ error: "BYOC mode requires an API key." });
+        }
+        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
+        if (!keyValidation.valid) {
+          return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
+        }
+        const sessionExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
+        await storage.storeUserApiKey(user.id, modelProvider || "openrouter", byocApiKey, sessionExpiry);
       }
 
       const clientIp = req.ip || "unknown";
@@ -865,7 +869,7 @@ I will now provide the papers.`;
 
       const review = await storage.createLiteratureReview(result.data);
 
-      if (isPlatform && isAuthenticated) {
+      if (isPlatform) {
         await storage.incrementUserRateLimit(user.id, "literature-review", PER_USER_PLATFORM_LIMITS["literature-review"].windowMs);
       }
 
@@ -1028,8 +1032,8 @@ I will now provide the papers.`;
       const userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}\n\nThe following are the papers from the project's publication log:\n\n${paperTexts.join("\n\n---\n\n")}`;
 
       const promptTrace = JSON.stringify({
-        systemPrompt: systemPrompt.substring(0, 500) + (systemPrompt.length > 500 ? "..." : ""),
-        userMessageLength: userMessage.length,
+        systemPrompt,
+        userMessage,
         model,
         provider: config.provider,
         providerMode: config.providerMode,
@@ -1038,10 +1042,10 @@ I will now provide the papers.`;
       });
 
       const sourceTrace = JSON.stringify({
-        projectPapersCount: projectPapersData.length,
-        futureScienceAbstractsCount: fsAbstracts.length,
-        futureScienceKeywordsCount: fsKeywords.length,
-        clusterCount: clusters.size,
+        projectPapers: projectPapersData.map(p => ({ title: p.title, authors: p.authors, sourceDocumentId: p.sourceDocumentId })),
+        futureScienceAbstracts: fsAbstracts.map(a => ({ title: a.title, documentId: a.documentId, authors: a.authors })),
+        futureScienceKeywords: fsKeywords,
+        clusters: [...clusters.entries()].map(([keyword, papers]) => ({ keyword, paperTitles: papers.map(p => p.title) })),
       });
 
       await storage.updateLiteratureReview(reviewId, { promptTrace, sourceTrace });
@@ -1081,6 +1085,15 @@ I will now provide the papers.`;
             type: "review",
             accessToken,
             initiativeSlug: "mirror-an-automated-journal-of-ai-interpretability",
+            metadata: {
+              orchestratorName: data.orchestratorName || data.agentId,
+              agentDescription: data.agentDescription || undefined,
+              promptUsed: data.prompt,
+              topic: data.topic || data.researchQuestion,
+              modelProvider: review?.modelProvider || config.provider,
+              modelName: model,
+              providerMode: config.providerMode,
+            },
           });
 
           if (pubResult) {
@@ -1248,21 +1261,17 @@ List every cited paper in Chicago author-date bibliography format:
     }
   });
 
-  app.post("/api/editorials/generate", optionalAuth, async (req, res) => {
+  app.post("/api/editorials/generate", requireAuth, async (req, res) => {
     try {
       const { topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, userPrompt } = req.body;
 
       const user = (req as any).user;
-      const isAuthenticated = !!user;
-      const isPlatform = providerMode === "platform" || !providerMode;
+      const isPlatform = providerMode !== "byoc";
 
-      if (isPlatform && !isAuthenticated) {
+      if (isPlatform) {
         if (!process.env.OPENROUTER_API_KEY) {
           return res.status(503).json({ error: "Editorial generation is not configured. OPENROUTER_API_KEY is missing." });
         }
-      }
-
-      if (isPlatform && isAuthenticated) {
         const limitConfig = PER_USER_PLATFORM_LIMITS["editorial"];
         const currentLimit = await storage.getUserRateLimit(user.id, "editorial");
         if (currentLimit) {
@@ -1277,8 +1286,16 @@ List every cited paper in Chicago author-date bibliography format:
         }
       }
 
-      if (providerMode === "byoc" && !byocApiKey) {
-        return res.status(400).json({ error: "BYOC mode requires an API key." });
+      if (providerMode === "byoc") {
+        if (!byocApiKey) {
+          return res.status(400).json({ error: "BYOC mode requires an API key." });
+        }
+        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
+        if (!keyValidation.valid) {
+          return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
+        }
+        const sessionExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
+        await storage.storeUserApiKey(user.id, modelProvider || "openrouter", byocApiKey, sessionExpiry);
       }
 
       const effectiveOrchestratorName = orchestratorName || (user?.displayName) || "MachInstit CS45O-N1";
@@ -1307,7 +1324,7 @@ List every cited paper in Chicago author-date bibliography format:
         userPrompt: userPrompt || null,
       });
 
-      if (isPlatform && isAuthenticated) {
+      if (isPlatform) {
         await storage.incrementUserRateLimit(user.id, "editorial", PER_USER_PLATFORM_LIMITS["editorial"].windowMs);
       }
 
@@ -1467,8 +1484,8 @@ ${previousEditorials.map((e, i) => `${i + 1}. "${e.title}" — ${e.excerpt}`).jo
 Pick a fresh perspective, a different subset of papers, or an underexplored theme from the corpus.` : ""}`;
 
       const promptTrace = JSON.stringify({
-        systemPrompt: DEFAULT_EDITORIAL_PROMPT.substring(0, 500) + "...",
-        userMessageLength: userMessage.length,
+        systemPrompt: DEFAULT_EDITORIAL_PROMPT,
+        userMessage,
         model,
         provider: config.provider,
         providerMode: config.providerMode,
@@ -1480,11 +1497,11 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
       });
 
       const sourceTrace = JSON.stringify({
-        projectPapersCount: allPapers.length,
-        futureScienceAbstractsCount: fsAbstracts.length,
-        reviewsUsed: completedReviews.length,
-        arxivResultsCount: arxivResults.length,
-        previousEditorialsCount: previousEditorials.length,
+        projectPapers: allPapers.map(p => ({ title: p.title, authors: p.authors, sourceDocumentId: p.sourceDocumentId })),
+        futureScienceAbstracts: fsAbstracts.map((a: any) => ({ title: a.title, documentId: a.documentId, authors: a.authors })),
+        reviews: completedReviews.map(r => ({ id: r.id, researchQuestion: r.researchQuestion, agentId: r.agentId })),
+        arxivResults: arxivResults.map(r => ({ title: r.title, authors: r.authors, published: r.published })),
+        previousEditorials: previousEditorials.map(e => ({ title: e.title })),
       });
 
       await storage.updateEditorial(editorialId, { promptTrace, sourceTrace });
@@ -1588,6 +1605,15 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
             type: "article",
             accessToken,
             initiativeSlug: "mirror-an-automated-journal-of-ai-interpretability",
+            metadata: {
+              orchestratorName: editorial?.orchestratorName || undefined,
+              agentDescription: editorial?.agentDescription || undefined,
+              promptUsed: DEFAULT_EDITORIAL_PROMPT,
+              topic: effectiveTopic,
+              modelProvider: editorial?.modelProvider || config.provider,
+              modelName: model,
+              providerMode: config.providerMode,
+            },
           });
 
           if (pubResult) {

@@ -15,17 +15,11 @@ export const PLATFORM_MODELS = [
 
 export const BYOC_PROVIDERS = [
   { id: "openai", label: "OpenAI", baseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o" },
-  { id: "anthropic", label: "Anthropic (via OpenAI compat)", baseURL: "https://api.anthropic.com/v1", defaultModel: "claude-sonnet-4-20250514" },
+  { id: "anthropic", label: "Anthropic (via OpenRouter)", baseURL: "https://openrouter.ai/api/v1", defaultModel: "anthropic/claude-sonnet-4", note: "Anthropic models routed through OpenRouter for OpenAI-compatible API" },
   { id: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", defaultModel: "deepseek/deepseek-chat" },
 ];
 
 const PROVIDER_BASE_URLS: Record<string, string> = {
-  openai: "https://api.openai.com/v1",
-  anthropic: "https://openrouter.ai/api/v1",
-  openrouter: "https://openrouter.ai/api/v1",
-};
-
-const BYOC_BASE_URLS: Record<string, string> = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://openrouter.ai/api/v1",
   openrouter: "https://openrouter.ai/api/v1",
@@ -47,7 +41,7 @@ export function createLLMClient(config: ModelProviderConfig): OpenAI {
     throw new Error("BYOC mode requires an API key.");
   }
 
-  const baseURL = BYOC_BASE_URLS[config.provider] || BYOC_BASE_URLS.openrouter;
+  const baseURL = PROVIDER_BASE_URLS[config.provider] || PROVIDER_BASE_URLS.openrouter;
   return new OpenAI({
     baseURL,
     apiKey: config.apiKey,
@@ -68,7 +62,7 @@ export function resolveModelName(config: ModelProviderConfig): string {
 
 export async function validateApiKey(provider: string, apiKey: string): Promise<{ valid: boolean; error?: string }> {
   try {
-    const baseURL = BYOC_BASE_URLS[provider];
+    const baseURL = PROVIDER_BASE_URLS[provider];
     if (!baseURL) {
       return { valid: false, error: `Unknown provider: ${provider}` };
     }
