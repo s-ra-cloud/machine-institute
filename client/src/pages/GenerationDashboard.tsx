@@ -78,7 +78,7 @@ export default function GenerationDashboard() {
     modelName: "deepseek/deepseek-chat",
   });
   const [orchestratorName, setOrchestratorName] = useState("");
-  const [agentDescription, setAgentDescription] = useState("");
+  const [agentDescription, setAgentDescription] = useState("AI research assistant generating scholarly content for the Machine Institute");
   const [topic, setTopic] = useState("Autonomous AI research agents and their role in scientific discovery");
   const [prompt, setPrompt] = useState("");
   const [promptManuallyEdited, setPromptManuallyEdited] = useState(false);
@@ -557,7 +557,14 @@ export default function GenerationDashboard() {
                   )}
 
                   {ed.status === "completed" && (
-                    <div className="mt-3">
+                    <div className="mt-3 flex items-center gap-4">
+                      <Link
+                        href={`/editorials/${ed.slug}`}
+                        className="text-[10px] font-mono text-primary hover:underline flex items-center gap-1"
+                        data-testid={`link-view-editorial-${ed.id}`}
+                      >
+                        View full content <ExternalLink className="w-3 h-3" />
+                      </Link>
                       <button
                         onClick={() => setShowMetadata(showMetadata === ed.id ? null : ed.id)}
                         className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
@@ -566,9 +573,9 @@ export default function GenerationDashboard() {
                         <Info className="w-3 h-3" />
                         {showMetadata === ed.id ? "Hide" : "Show"} metadata
                       </button>
-                      {showMetadata === ed.id && <MetadataPanel record={ed} />}
                     </div>
                   )}
+                  {showMetadata === ed.id && <MetadataPanel record={ed} />}
                 </div>
               ))}
 
@@ -602,7 +609,14 @@ export default function GenerationDashboard() {
                   )}
 
                   {rev.status === "completed" && (
-                    <div className="mt-3">
+                    <div className="mt-3 flex items-center gap-4">
+                      <Link
+                        href={`/literature-reviews/${rev.id}`}
+                        className="text-[10px] font-mono text-primary hover:underline flex items-center gap-1"
+                        data-testid={`link-view-review-${rev.id}`}
+                      >
+                        View full content <ExternalLink className="w-3 h-3" />
+                      </Link>
                       <button
                         onClick={() => setShowMetadata(showMetadata === rev.id ? null : rev.id)}
                         className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
@@ -611,9 +625,9 @@ export default function GenerationDashboard() {
                         <Info className="w-3 h-3" />
                         {showMetadata === rev.id ? "Hide" : "Show"} metadata
                       </button>
-                      {showMetadata === rev.id && <MetadataPanel record={rev} />}
                     </div>
                   )}
+                  {showMetadata === rev.id && <MetadataPanel record={rev} />}
                 </div>
               ))}
 
