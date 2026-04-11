@@ -971,7 +971,7 @@ I will now provide the papers.`;
 
   async function generateLiteratureReview(
     reviewId: string,
-    data: { projectId: string; agentId: string; researchQuestion: string; prompt: string; topic?: string; orchestratorName?: string | null; agentDescription?: string | null; userId?: number },
+    data: { projectId: string; agentId: string; researchQuestion: string; prompt: string; topic?: string; orchestratorName?: string | null; agentDescription?: string | null; userId?: string },
     modelConfig?: ModelProviderConfig,
     accessToken?: string | null,
   ) {
@@ -1012,6 +1012,17 @@ I will now provide the papers.`;
         clusterText = `\n\nIdentified topic clusters from the corpus:\n${clusterEntries.join("\n")}`;
       }
 
+      const trendsAnalysis = extractTrendsAndGaps(fsAbstracts);
+
+      const searchTerms = data.researchQuestion.split(/\s+/).filter(w => w.length > 4).slice(0, 6).join(" ");
+      console.log(`Literature review ${reviewId}: Second-pass arXiv retrieval for "${searchTerms}"`);
+      const arxivResults = await searchArxiv(searchTerms);
+      const arxivTexts = arxivResults.length > 0
+        ? arxivResults.map((r, i) =>
+            `External arXiv Paper ${i + 1}:\narXiv ID: ${r.arxivId}\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.published}\nSummary: ${r.summary}`
+          ).join("\n\n")
+        : "";
+
       const paperTexts = allPaperSources.map((p, i) =>
         `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
       );
@@ -1024,7 +1035,7 @@ I will now provide the papers.`;
       const model = resolveModelName(config);
 
       const systemPrompt = data.prompt;
-      const userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}\n\nThe following are the papers from the project's publication log:\n\n${paperTexts.join("\n\n---\n\n")}`;
+      const userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}\n\nThe following are the papers from the project's publication log:\n\n${paperTexts.join("\n\n---\n\n")}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}`;
 
       const promptTrace = JSON.stringify({
         systemPrompt,
@@ -1041,6 +1052,7 @@ I will now provide the papers.`;
         futureScienceAbstracts: fsAbstracts.map(a => ({ title: a.title, documentId: a.documentId, authors: a.authors })),
         futureScienceKeywords: fsKeywords,
         clusters: Array.from(clusters.entries()).map(([keyword, papers]) => ({ keyword, paperTitles: papers.map(p => p.title) })),
+        arxivResults: arxivResults.map(r => ({ arxivId: r.arxivId, title: r.title, authors: r.authors })),
       });
 
       await storage.updateLiteratureReview(reviewId, { promptTrace, sourceTrace });
@@ -1183,6 +1195,10 @@ List every cited paper in Chicago author-date bibliography format:
 - For Machine Institute papers: Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
 - For arXiv papers: Author(s). Date. "Full Paper Title." arXiv: ID.`;
 
+  app.get("/api/editorials/default-prompt", (_req, res) => {
+    res.json({ prompt: DEFAULT_EDITORIAL_PROMPT });
+  });
+
   app.get("/api/editorials/status", optionalAuth, async (req, res) => {
     try {
       const user = (req as any).user;
@@ -1253,7 +1269,7 @@ List every cited paper in Chicago author-date bibliography format:
 
   app.post("/api/editorials/generate", requireAuth, async (req, res) => {
     try {
-      const { topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, userPrompt } = req.body;
+      const { topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, userPrompt, prompt } = req.body;
 
       const user = (req as any).user;
       const isPlatform = providerMode !== "byoc";
@@ -1312,7 +1328,7 @@ List every cited paper in Chicago author-date bibliography format:
 
       const accessToken = await getAccessTokenForUser(req);
 
-      generateEditorial(editorial.id, modelConfig, effectiveTopic, userPrompt || null, accessToken).catch(err => {
+      generateEditorial(editorial.id, modelConfig, effectiveTopic, userPrompt || null, prompt || null, accessToken).catch(err => {
         console.error("Background editorial generation failed:", err);
       });
     } catch (err: any) {
@@ -1363,6 +1379,7 @@ List every cited paper in Chicago author-date bibliography format:
     modelConfig?: ModelProviderConfig,
     topic?: string,
     userPrompt?: string | null,
+    editablePrompt?: string | null,
     accessToken?: string | null,
   ) {
     try {
@@ -1447,6 +1464,7 @@ List every cited paper in Chicago author-date bibliography format:
       const model = resolveModelName(config);
 
       const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, machine psychology, and autonomous experimentation";
+      const effectiveSystemPrompt = editablePrompt || DEFAULT_EDITORIAL_PROMPT;
 
       const userMessage = `Topic: ${effectiveTopic} — based on the institute's current publication corpus.
 ${userPrompt ? `\nAdditional user instructions: ${userPrompt}` : ""}
@@ -1470,7 +1488,7 @@ ${previousEditorials.map((e, i) => `${i + 1}. "${e.title}" — ${e.excerpt}`).jo
 Pick a fresh perspective, a different subset of papers, or an underexplored theme from the corpus.` : ""}`;
 
       const promptTrace = JSON.stringify({
-        systemPrompt: DEFAULT_EDITORIAL_PROMPT,
+        systemPrompt: effectiveSystemPrompt,
         userMessage,
         model,
         provider: config.provider,
@@ -1493,7 +1511,7 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
       await storage.updateEditorial(editorialId, { promptTrace, sourceTrace });
 
       console.log(`Editorial ${editorialId}: Calling LLM (${model})...`);
-      const generationResult = await generateWithConfig(config, DEFAULT_EDITORIAL_PROMPT, userMessage, {
+      const generationResult = await generateWithConfig(config, effectiveSystemPrompt, userMessage, {
         maxTokens: 10000,
         temperature: 0.4,
       });
@@ -1589,7 +1607,7 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
             metadata: {
               orchestratorName: editorial?.orchestratorName || undefined,
               agentDescription: editorial?.agentDescription || undefined,
-              promptUsed: DEFAULT_EDITORIAL_PROMPT,
+              promptUsed: effectiveSystemPrompt,
               topic: effectiveTopic,
               modelProvider: editorial?.modelProvider || config.provider,
               modelName: model,
