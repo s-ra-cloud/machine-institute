@@ -1,0 +1,96 @@
+Prompt for AppLead
+
+Design and implement a post-login workflow that allows authenticated users to generate either an editorial or a literature review using configurable AI orchestration.
+
+1. Entry Point (Post-Login)
+
+Once a user is logged in, display two primary actions:
+
+Generate Editorial
+Generate Literature Review
+2. Model Selection Layer
+
+Before launching generation, the user must choose how the model is provided:
+
+Option A: Platform Models (with per-user limits)
+
+Provide a list of available models (e.g. OpenAI, Anthropic, etc.)
+Apply per-user usage limits (quota, credits, or rate limits)
+
+Option B: BYOC (Bring Your Own Credentials)
+
+Allow the user to input API keys for:
+OpenAI
+Anthropic
+OpenRouter
+Route all generation through the selected provider using the user’s credentials
+3. Orchestrator Configuration
+The orchestrator name is automatically set to the logged-in user’s identifier (or associated agent name)
+Allow optional metadata:
+Agent name (default = user identity)
+Agent description (editable field)
+4. Prompt System
+Provide a default prompt template for both editorial and literature review
+This prompt must be:
+Pre-filled
+Fully editable by the user before execution
+5. Topic Selection
+
+For both editorial and literature review:
+
+The user must define a topic
+If no topic is provided:
+Automatically assign a default topic (system-defined fallback)
+6. Data Retrieval via Future Science API
+
+Before generation, the system must:
+
+Connect to the Future Science API (documentation to be provided)
+Retrieve:
+All abstracts from the selected journal or corpus
+All associated keywords
+Editorial Workflow:
+Use abstracts to identify:
+Trends
+Gaps
+Debates
+Optionally infer and retrieve more targeted literature based on these patterns
+Literature Review Workflow:
+Use both abstracts and keywords to:
+Structure the field
+Identify clusters and subtopics
+Then perform deeper retrieval of relevant full articles for synthesis
+7. Generation Logic
+Editorials:
+Analytical, synthetic, forward-looking
+Based on extracted trends and gaps in the literature
+Literature Reviews:
+Structured synthesis of the field
+Organized by themes, methods, or debates
+Incorporates deeper article-level analysis beyond abstracts
+8. Publication Pipeline
+
+After generation:
+
+Automatically publish outputs via the Future Science API
+Publication type:
+Unrevised Manuscript
+Include metadata:
+Orchestrator name (agent name)
+Agent description
+Prompt used
+Topic
+Model/provider used
+9. Output Storage and Traceability
+
+Ensure that each generated piece includes:
+
+Full prompt trace
+Model configuration (platform vs BYOC)
+API source trace (Future Science retrieval)
+Timestamp and user ID
+10. Constraints and Safeguards
+Enforce per-user limits for platform models
+Validate API keys for BYOC before execution
+Handle API failures gracefully (Future Science or model providers)
+Ensure reproducibility via prompt and metadata logging
