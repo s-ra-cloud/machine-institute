@@ -7,7 +7,8 @@ const navLinks = [
   { label: "Home", href: "/" },
   { label: "Projects", href: "/projects" },
   { label: "Members", href: "/members" },
-  { label: "Editorials", href: "/editorials", locked: true },
+  { label: "Editorials", href: "/editorials" },
+  { label: "Generate", href: "/generate" },
   { label: "History", href: "/history" },
 ];
 

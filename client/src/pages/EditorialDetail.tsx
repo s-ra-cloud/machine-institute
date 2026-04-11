@@ -2,9 +2,10 @@ import { useParams, Link } from "wouter";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 interface EditorialRecord {
   id: string;
@@ -17,10 +18,18 @@ interface EditorialRecord {
   status: string;
   createdAt: string;
   completedAt: string | null;
+  orchestratorName: string | null;
+  modelProvider: string | null;
+  modelName: string | null;
+  providerMode: string | null;
+  publishedDocumentId: string | null;
+  promptTrace: string | null;
+  sourceTrace: string | null;
 }
 
 export default function EditorialDetail() {
   const { slug } = useParams<{ slug: string }>();
+  const [showMeta, setShowMeta] = useState(false);
 
   const { data: editorial, isLoading, error } = useQuery<EditorialRecord>({
     queryKey: ["/api/editorials", slug],
@@ -123,6 +132,84 @@ export default function EditorialDetail() {
               <p className="text-muted-foreground font-mono text-sm">
                 {editorial.status === "failed" ? "Editorial generation failed." : "No content available."}
               </p>
+            </FadeIn>
+          )}
+
+          {editorial.status === "completed" && (editorial.modelProvider || editorial.orchestratorName || editorial.publishedDocumentId) && (
+            <FadeIn delay={0.2}>
+              <div className="mt-12 border-t border-border/30 pt-6">
+                <button
+                  onClick={() => setShowMeta(!showMeta)}
+                  className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                  data-testid="button-toggle-metadata"
+                >
+                  <Info className="w-3 h-3" />
+                  {showMeta ? "Hide" : "Show"} generation metadata
+                </button>
+
+                {showMeta && (
+                  <div className="mt-4 border border-border/20 bg-muted/5 p-5 space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[10px] font-mono">
+                      {editorial.modelName && (
+                        <div>
+                          <span className="text-muted-foreground/40 block">Model</span>
+                          <span className="text-foreground/70">{editorial.modelName}</span>
+                        </div>
+                      )}
+                      {editorial.modelProvider && (
+                        <div>
+                          <span className="text-muted-foreground/40 block">Provider</span>
+                          <span className="text-foreground/70">{editorial.modelProvider}</span>
+                        </div>
+                      )}
+                      {editorial.providerMode && (
+                        <div>
+                          <span className="text-muted-foreground/40 block">Mode</span>
+                          <span className="text-foreground/70">{editorial.providerMode}</span>
+                        </div>
+                      )}
+                      {editorial.orchestratorName && (
+                        <div>
+                          <span className="text-muted-foreground/40 block">Orchestrator</span>
+                          <span className="text-foreground/70">{editorial.orchestratorName}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {editorial.publishedDocumentId && (
+                      <div>
+                        <a
+                          href={`https://future-science.org/papers/${editorial.publishedDocumentId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-mono text-primary hover:underline flex items-center gap-1"
+                          data-testid="link-publication"
+                        >
+                          View on Future Science <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
+
+                    {editorial.promptTrace && (
+                      <details className="text-[10px] font-mono text-foreground/50">
+                        <summary className="cursor-pointer hover:text-foreground/70">Prompt trace</summary>
+                        <pre className="mt-2 p-3 bg-background border border-border/20 overflow-x-auto max-h-48 text-[9px] whitespace-pre-wrap">
+                          {JSON.stringify(JSON.parse(editorial.promptTrace), null, 2)}
+                        </pre>
+                      </details>
+                    )}
+
+                    {editorial.sourceTrace && (
+                      <details className="text-[10px] font-mono text-foreground/50">
+                        <summary className="cursor-pointer hover:text-foreground/70">Source trace</summary>
+                        <pre className="mt-2 p-3 bg-background border border-border/20 overflow-x-auto max-h-48 text-[9px] whitespace-pre-wrap">
+                          {JSON.stringify(JSON.parse(editorial.sourceTrace), null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </div>
             </FadeIn>
           )}
         </div>
