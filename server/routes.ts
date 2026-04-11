@@ -801,6 +801,15 @@ I will now provide the papers.`;
     try {
       const { projectId, agentId, researchQuestion, prompt, topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription } = req.body;
 
+      const VALID_PROVIDER_MODES = ["platform", "byoc"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) {
+        return res.status(400).json({ error: `Invalid providerMode. Must be one of: ${VALID_PROVIDER_MODES.join(", ")}` });
+      }
+      if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) {
+        return res.status(400).json({ error: `Invalid modelProvider. Must be one of: ${VALID_PROVIDERS.join(", ")}` });
+      }
+
       const user = (req as any).user;
       const isPlatform = providerMode !== "byoc";
 
@@ -1270,6 +1279,15 @@ List every cited paper in Chicago author-date bibliography format:
   app.post("/api/editorials/generate", requireAuth, async (req, res) => {
     try {
       const { topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, userPrompt, prompt } = req.body;
+
+      const VALID_PROVIDER_MODES = ["platform", "byoc"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) {
+        return res.status(400).json({ error: `Invalid providerMode. Must be one of: ${VALID_PROVIDER_MODES.join(", ")}` });
+      }
+      if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) {
+        return res.status(400).json({ error: `Invalid modelProvider. Must be one of: ${VALID_PROVIDERS.join(", ")}` });
+      }
 
       const user = (req as any).user;
       const isPlatform = providerMode !== "byoc";
