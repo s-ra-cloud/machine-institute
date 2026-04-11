@@ -6,6 +6,7 @@ export interface ModelConfig {
   provider: string;
   modelName: string;
   apiKey?: string;
+  keyValidated?: boolean;
 }
 
 interface PlatformModel {
@@ -72,6 +73,7 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Pr
         provider: defaultProvider?.id || "openai",
         modelName: defaultProvider?.defaultModel || "gpt-4o",
         apiKey: "",
+        keyValidated: false,
       });
     }
     setApiKey("");
@@ -91,7 +93,7 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Pr
       const result = await res.json();
       setValidationResult(result);
       if (result.valid) {
-        onChange({ ...value, apiKey });
+        onChange({ ...value, apiKey, keyValidated: true });
       }
     } catch {
       setValidationResult({ valid: false, error: "Network error during validation" });

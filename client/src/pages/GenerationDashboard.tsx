@@ -5,7 +5,7 @@ import { FadeIn } from "@/components/ui/motion";
 import { useAuth } from "@/lib/auth";
 import { ModelSelector, type ModelConfig } from "@/components/ModelSelector";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useLocation, Link } from "wouter";
+import { Link } from "wouter";
 import {
   PenTool,
   BookOpen,
@@ -14,7 +14,6 @@ import {
   ChevronUp,
   RotateCcw,
   ExternalLink,
-  LogIn,
   Info,
   CheckCircle,
   XCircle,
@@ -70,7 +69,6 @@ interface LiteratureReviewRecord {
 
 export default function GenerationDashboard() {
   const { authenticated, user, login, isLoading: authLoading } = useAuth();
-  const [, navigate] = useLocation();
   const [activeType, setActiveType] = useState<GenerationType | null>(null);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     providerMode: "platform",
@@ -255,10 +253,11 @@ export default function GenerationDashboard() {
   const hasGeneratingEditorial = recentEditorials?.some(e => e.status === "pending" || e.status === "generating");
   const hasGeneratingReview = recentReviews?.some(r => r.status === "pending" || r.status === "generating");
 
-  const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial &&
-    (modelConfig.providerMode === "byoc" ? !!modelConfig.apiKey : (editorialStatus?.remaining ?? 1) > 0);
-  const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 &&
-    (modelConfig.providerMode === "byoc" ? !!modelConfig.apiKey : (reviewStatus?.remaining ?? 1) > 0);
+  const byocReady = modelConfig.providerMode === "byoc" ? !!modelConfig.keyValidated : true;
+  const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && byocReady &&
+    (modelConfig.providerMode === "byoc" || (editorialStatus?.remaining ?? 1) > 0);
+  const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && byocReady &&
+    (modelConfig.providerMode === "byoc" || (reviewStatus?.remaining ?? 1) > 0);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
