@@ -195,3 +195,25 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
   next();
 }
+
+export async function optionalAuth(req: Request, _res: Response, next: NextFunction) {
+  try {
+    const sessionId = req.cookies?.session_id;
+    if (!sessionId) return next();
+
+    const [session] = await db
+      .select()
+      .from(oauthSessions)
+      .where(eq(oauthSessions.id, sessionId))
+      .limit(1);
+
+    if (session && new Date(session.expiresAt) >= new Date() && session.validated === "true") {
+      (req as any).user = {
+        id: session.futureScienceUserId,
+        email: session.email,
+        displayName: session.displayName,
+      };
+    }
+  } catch {}
+  next();
+}

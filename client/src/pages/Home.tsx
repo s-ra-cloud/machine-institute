@@ -27,7 +27,8 @@ export default function Home() {
     queryKey: ["/api/editorials"],
     queryFn: async () => {
       const res = await fetch("/api/editorials");
-      return res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     },
   });
 

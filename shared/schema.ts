@@ -70,6 +70,16 @@ export const literatureReviews = pgTable("literature_reviews", {
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
+  topic: text("topic"),
+  userId: text("user_id"),
+  orchestratorName: text("orchestrator_name"),
+  agentDescription: text("agent_description"),
+  modelProvider: text("model_provider"),
+  modelName: text("model_name"),
+  providerMode: text("provider_mode"),
+  publishedDocumentId: text("published_document_id"),
+  promptTrace: text("prompt_trace"),
+  sourceTrace: text("source_trace"),
 });
 
 export const insertLiteratureReviewSchema = createInsertSchema(literatureReviews).omit({
@@ -83,6 +93,16 @@ export const insertLiteratureReviewSchema = createInsertSchema(literatureReviews
   agentId: z.string().min(1),
   researchQuestion: z.string().min(10, "Research question must be at least 10 characters"),
   prompt: z.string().min(1),
+  topic: z.string().nullable().optional(),
+  userId: z.string().nullable().optional(),
+  orchestratorName: z.string().nullable().optional(),
+  agentDescription: z.string().nullable().optional(),
+  modelProvider: z.string().nullable().optional(),
+  modelName: z.string().nullable().optional(),
+  providerMode: z.string().nullable().optional(),
+  publishedDocumentId: z.string().nullable().optional(),
+  promptTrace: z.string().nullable().optional(),
+  sourceTrace: z.string().nullable().optional(),
 });
 
 export type InsertLiteratureReview = z.infer<typeof insertLiteratureReviewSchema>;
@@ -126,6 +146,17 @@ export const editorials = pgTable("editorials", {
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
+  topic: text("topic"),
+  userId: text("user_id"),
+  orchestratorName: text("orchestrator_name"),
+  agentDescription: text("agent_description"),
+  modelProvider: text("model_provider"),
+  modelName: text("model_name"),
+  providerMode: text("provider_mode"),
+  publishedDocumentId: text("published_document_id"),
+  promptTrace: text("prompt_trace"),
+  sourceTrace: text("source_trace"),
+  userPrompt: text("user_prompt"),
 });
 
 export const insertEditorialSchema = createInsertSchema(editorials).omit({
@@ -140,6 +171,17 @@ export const insertEditorialSchema = createInsertSchema(editorials).omit({
   slug: z.string().min(1),
   agentId: z.string().min(1),
   tag: z.string().optional(),
+  topic: z.string().nullable().optional(),
+  userId: z.string().nullable().optional(),
+  orchestratorName: z.string().nullable().optional(),
+  agentDescription: z.string().nullable().optional(),
+  modelProvider: z.string().nullable().optional(),
+  modelName: z.string().nullable().optional(),
+  providerMode: z.string().nullable().optional(),
+  publishedDocumentId: z.string().nullable().optional(),
+  promptTrace: z.string().nullable().optional(),
+  sourceTrace: z.string().nullable().optional(),
+  userPrompt: z.string().nullable().optional(),
 });
 
 export type InsertEditorial = z.infer<typeof insertEditorialSchema>;
@@ -210,3 +252,13 @@ export const insertResearchEventSchema = createInsertSchema(researchEvents).omit
 
 export type InsertResearchEvent = z.infer<typeof insertResearchEventSchema>;
 export type ResearchEvent = typeof researchEvents.$inferSelect;
+
+export const userRateLimits = pgTable("user_rate_limits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
+  resourceType: text("resource_type").notNull(),
+  count: integer("count").notNull().default(0),
+  windowStart: timestamp("window_start").defaultNow().notNull(),
+});
+
+export type UserRateLimit = typeof userRateLimits.$inferSelect;

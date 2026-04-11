@@ -1,6 +1,6 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, inArray, or } from "drizzle-orm";
+import { eq, desc, gte, inArray, and } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -47,6 +47,9 @@ export interface IStorage {
 
   getLastSyncTime(key: string): Promise<Date | null>;
   setLastSyncTime(key: string, time: Date): Promise<void>;
+
+  getUserRateLimit(userId: string, resourceType: string): Promise<UserRateLimit | null>;
+  incrementUserRateLimit(userId: string, resourceType: string, windowMs: number): Promise<UserRateLimit>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -240,6 +243,37 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.insert(syncMetadata).values({ key, lastSyncedAt: time });
     }
+  }
+
+  async getUserRateLimit(userId: string, resourceType: string): Promise<UserRateLimit | null> {
+    const [row] = await db.select().from(userRateLimits)
+      .where(and(eq(userRateLimits.userId, userId), eq(userRateLimits.resourceType, resourceType)));
+    return row ?? null;
+  }
+
+  async incrementUserRateLimit(userId: string, resourceType: string, windowMs: number): Promise<UserRateLimit> {
+    const existing = await this.getUserRateLimit(userId, resourceType);
+
+    if (existing) {
+      const elapsed = Date.now() - existing.windowStart.getTime();
+      if (elapsed >= windowMs) {
+        const [updated] = await db.update(userRateLimits)
+          .set({ count: 1, windowStart: new Date() })
+          .where(eq(userRateLimits.id, existing.id))
+          .returning();
+        return updated;
+      }
+      const [updated] = await db.update(userRateLimits)
+        .set({ count: existing.count + 1 })
+        .where(eq(userRateLimits.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db.insert(userRateLimits)
+      .values({ userId, resourceType, count: 1, windowStart: new Date() })
+      .returning();
+    return created;
   }
 }
 

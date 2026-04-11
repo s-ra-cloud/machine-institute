@@ -50,18 +50,34 @@ Active status is true when events exist from the last 10 minutes.
 ### Literature Reviews API
 
 - `GET /api/literature-reviews/default-prompt` — Get the default BLR prompt
-- `POST /api/literature-reviews` — Submit a review request `{projectId, agentId, researchQuestion, prompt?, initiativeSlug?}`
+- `POST /api/literature-reviews` — Submit a review request. Supports configurable model selection.
+  - Body: `{projectId, agentId, researchQuestion, prompt?, topic?, modelProvider?, modelName?, providerMode?, byocApiKey?, orchestratorName?, agentDescription?}`
+  - `providerMode`: `"platform"` (default, uses OpenRouter) or `"byoc"` (bring your own credentials)
+  - `modelProvider`: `"openrouter"`, `"openai"`, or `"anthropic"`
+  - Per-user rate limiting: 10 reviews/24h for authenticated platform users
+  - Traceability: stores `promptTrace`, `sourceTrace`, model info, and user ID
+  - Publication pipeline: auto-publishes to Future Science if user has valid session
 - `GET /api/literature-reviews?projectId=X` — List reviews for a project
 - `GET /api/literature-reviews/:id` — Get a single review by ID
 
-Reviews are generated asynchronously using DeepSeek via OpenRouter. The agent uses the project's paper log (from `project_papers` table) as its corpus to produce a structured literature review.
+Reviews are generated asynchronously. The agent uses project papers + Future Science abstracts as corpus, with keyword clustering and trend analysis.
 
 ### Editorials API
 
 - `GET /api/editorials` — List all editorials (ordered by creation date, newest first)
 - `GET /api/editorials/:idOrSlug` — Get a single editorial by ID or slug
-- `GET /api/editorials/status` — Get rate limit status: `{remaining, resetAt, count}`
-- `POST /api/editorials/generate` — Generate a new editorial. Rate limited to 2 per 24 hours globally (across all users). The editorialist agent (MachInstit CS45O-N1) reads all project papers + literature reviews, searches arXiv for trends, and writes a Nature/Science-style op-ed. Generation is asynchronous — returns immediately with a pending editorial record.
+- `GET /api/editorials/status` — Get per-user rate limit status: `{remaining, resetAt, count}`
+- `POST /api/editorials/generate` — Generate a new editorial. Per-user rate limited (5/24h for authenticated platform users).
+  - Body: `{topic?, modelProvider?, modelName?, providerMode?, byocApiKey?, orchestratorName?, agentDescription?, userPrompt?}`
+  - Supports BYOC model selection (same as literature reviews)
+  - Full traceability: stores prompt trace, source trace, model info, user prompt
+  - Publication pipeline: auto-publishes to Future Science if user has valid session
+
+### AI Generation Config API
+
+- `GET /api/generation/config` — Get available platform models, BYOC providers, rate limits, and default topics
+- `POST /api/generation/validate-key` — Validate a BYOC API key: `{provider, apiKey}` → `{valid, error?}`
+- `GET /api/generation/rate-limit-status` — (Requires auth) Get per-user rate limits for all resource types
 
 ### Project Papers API (publication log per project)
 
@@ -111,7 +127,7 @@ OAuth2 SSO via Future Science (`future-science.org`). Machine Institute has no n
 - **Session storage**: `oauth_sessions` table in PostgreSQL (cookie-based session ID)
 - **Validation**: Only Future Science users with `validated: true` can access protected features
 - **Protected features**: Literature reviews, editorials (currently locked)
-- **Auth module**: `server/auth.ts` — OAuth flow, session management, `requireAuth` middleware
+- **Auth module**: `server/auth.ts` — OAuth flow, session management, `requireAuth` middleware (strict), `optionalAuth` middleware (populates user if session exists without blocking)
 
 ## Environment Secrets
 
