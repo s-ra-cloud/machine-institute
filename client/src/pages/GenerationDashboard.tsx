@@ -79,12 +79,13 @@ export default function GenerationDashboard() {
   });
   const [orchestratorName, setOrchestratorName] = useState("");
   const [agentDescription, setAgentDescription] = useState("");
-  const [topic, setTopic] = useState("");
+  const [topic, setTopic] = useState("Autonomous AI research agents and their role in scientific discovery");
   const [prompt, setPrompt] = useState("");
   const [promptManuallyEdited, setPromptManuallyEdited] = useState(false);
   const [researchQuestion, setResearchQuestion] = useState("");
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
+  const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
 
   const queryClient = useQueryClient();
 
@@ -124,10 +125,12 @@ export default function GenerationDashboard() {
     enabled: activeType === "editorial",
   });
 
+  const reviewAgentId = reviewMode === "adversarial" ? "aLR" : "bLR";
+
   const { data: defaultReviewPrompt } = useQuery<{ prompt: string }>({
-    queryKey: ["/api/literature-reviews/default-prompt"],
+    queryKey: ["/api/literature-reviews/default-prompt", reviewAgentId],
     queryFn: async () => {
-      const res = await fetch("/api/literature-reviews/default-prompt?agentId=");
+      const res = await fetch(`/api/literature-reviews/default-prompt?agentId=${reviewAgentId}`);
       return res.json();
     },
     enabled: activeType === "literature-review",
@@ -140,7 +143,7 @@ export default function GenerationDashboard() {
     if (activeType === "literature-review" && defaultReviewPrompt?.prompt && !promptManuallyEdited) {
       setPrompt(defaultReviewPrompt.prompt);
     }
-  }, [activeType, defaultEditorialPrompt, defaultReviewPrompt]);
+  }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, reviewMode]);
 
   const { data: recentEditorials } = useQuery<EditorialRecord[]>({
     queryKey: ["/api/editorials"],
@@ -198,7 +201,7 @@ export default function GenerationDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: "machine-psychology",
-          agentId: orchestratorName || user?.displayName || "ResearchAgent",
+          agentId: reviewAgentId,
           researchQuestion,
           prompt: prompt || undefined,
           topic: topic || undefined,
@@ -394,6 +397,43 @@ export default function GenerationDashboard() {
                     data-testid="input-topic"
                   />
                 </div>
+
+                {activeType === "literature-review" && (
+                  <div>
+                    <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                      Review Mode
+                    </label>
+                    <div className="flex gap-2 mb-4">
+                      <button
+                        onClick={() => { setReviewMode("basic"); setPromptManuallyEdited(false); }}
+                        className={`px-4 py-2 text-xs font-mono border transition-all ${
+                          reviewMode === "basic"
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border/50 text-muted-foreground hover:border-primary/30"
+                        }`}
+                        data-testid="button-review-mode-basic"
+                      >
+                        Basic Review
+                      </button>
+                      <button
+                        onClick={() => { setReviewMode("adversarial"); setPromptManuallyEdited(false); }}
+                        className={`px-4 py-2 text-xs font-mono border transition-all ${
+                          reviewMode === "adversarial"
+                            ? "border-red-500 bg-red-500/10 text-red-400"
+                            : "border-border/50 text-muted-foreground hover:border-red-500/30"
+                        }`}
+                        data-testid="button-review-mode-adversarial"
+                      >
+                        Adversarial Review
+                      </button>
+                    </div>
+                    <p className="text-[10px] font-mono text-muted-foreground/50 mb-4">
+                      {reviewMode === "basic"
+                        ? "Synthesizes literature constructively with balanced analysis."
+                        : "Critically examines literature for weaknesses, flaws, and contradictions."}
+                    </p>
+                  </div>
+                )}
 
                 {activeType === "literature-review" && (
                   <div>
