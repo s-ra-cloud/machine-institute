@@ -214,6 +214,8 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
         displayName: session.displayName,
       };
     }
-  } catch {}
+  } catch (err) {
+    console.error("optionalAuth: session lookup failed:", err);
+  }
   next();
 }

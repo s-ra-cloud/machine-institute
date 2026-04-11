@@ -12,6 +12,7 @@ import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth } from "./auth";
 import { createLLMClient, resolveModelName, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
 import { publishToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords } from "./future-science";
+import { storeEphemeralKey } from "./ephemeral-keys";
 
 function generateSlug(title: string): string {
   return title
@@ -826,8 +827,7 @@ I will now provide the papers.`;
         if (!keyValidation.valid) {
           return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         }
-        const sessionExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
-        await storage.storeUserApiKey(user.id, modelProvider || "openrouter", byocApiKey, sessionExpiry);
+        storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
 
       const clientIp = req.ip || "unknown";
@@ -1294,8 +1294,7 @@ List every cited paper in Chicago author-date bibliography format:
         if (!keyValidation.valid) {
           return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         }
-        const sessionExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
-        await storage.storeUserApiKey(user.id, modelProvider || "openrouter", byocApiKey, sessionExpiry);
+        storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
 
       const effectiveOrchestratorName = orchestratorName || (user?.displayName) || "MachInstit CS45O-N1";
@@ -1341,7 +1340,7 @@ List every cited paper in Chicago author-date bibliography format:
     }
   });
 
-  async function searchArxiv(query: string): Promise<Array<{ title: string; summary: string; authors: string; published: string }>> {
+  async function searchArxiv(query: string): Promise<Array<{ title: string; summary: string; authors: string; published: string; arxivId: string }>> {
     try {
       const encodedQuery = encodeURIComponent(query);
       const url = `http://export.arxiv.org/api/query?search_query=all:${encodedQuery}&start=0&max_results=10&sortBy=submittedDate&sortOrder=descending`;
@@ -1452,7 +1451,7 @@ List every cited paper in Chicago author-date bibliography format:
 
       const arxivTexts = arxivResults.length > 0
         ? arxivResults.map((r, i) =>
-            `arXiv Paper ${i + 1}:\narXiv ID: ${(r as any).arxivId}\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.published}\nSummary: ${r.summary}`
+            `arXiv Paper ${i + 1}:\narXiv ID: ${r.arxivId}\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.published}\nSummary: ${r.summary}`
           ).join("\n\n")
         : "No recent arXiv papers found for the current research topics.";
 
@@ -1498,9 +1497,9 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
 
       const sourceTrace = JSON.stringify({
         projectPapers: allPapers.map(p => ({ title: p.title, authors: p.authors, sourceDocumentId: p.sourceDocumentId })),
-        futureScienceAbstracts: fsAbstracts.map((a: any) => ({ title: a.title, documentId: a.documentId, authors: a.authors })),
+        futureScienceAbstracts: fsAbstracts.map((a: { title: string; documentId: string; authors: string }) => ({ title: a.title, documentId: a.documentId, authors: a.authors })),
         reviews: completedReviews.map(r => ({ id: r.id, researchQuestion: r.researchQuestion, agentId: r.agentId })),
-        arxivResults: arxivResults.map(r => ({ title: r.title, authors: r.authors, published: r.published })),
+        arxivResults: arxivResults.map(r => ({ title: r.title, authors: r.authors, published: r.published, arxivId: r.arxivId })),
         previousEditorials: previousEditorials.map(e => ({ title: e.title })),
       });
 
