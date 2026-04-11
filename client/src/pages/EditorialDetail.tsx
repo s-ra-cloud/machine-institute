@@ -197,23 +197,33 @@ export default function EditorialDetail() {
                       </div>
                     )}
 
-                    {editorial.promptTrace && (
-                      <details className="text-[10px] font-mono text-foreground/50">
-                        <summary className="cursor-pointer hover:text-foreground/70">Prompt trace</summary>
-                        <pre className="mt-2 p-3 bg-background border border-border/20 overflow-x-auto max-h-48 text-[9px] whitespace-pre-wrap">
-                          {JSON.stringify(JSON.parse(editorial.promptTrace), null, 2)}
-                        </pre>
-                      </details>
-                    )}
+                    {editorial.promptTrace && (() => {
+                      try {
+                        const data = JSON.parse(editorial.promptTrace);
+                        return (
+                          <details className="text-[10px] font-mono text-foreground/50">
+                            <summary className="cursor-pointer hover:text-foreground/70">Prompt trace</summary>
+                            <pre className="mt-2 p-3 bg-background border border-border/20 overflow-x-auto max-h-48 text-[9px] whitespace-pre-wrap">
+                              {JSON.stringify(data, null, 2)}
+                            </pre>
+                          </details>
+                        );
+                      } catch { return null; }
+                    })()}
 
-                    {editorial.sourceTrace && (
-                      <details className="text-[10px] font-mono text-foreground/50">
-                        <summary className="cursor-pointer hover:text-foreground/70">Source trace</summary>
-                        <pre className="mt-2 p-3 bg-background border border-border/20 overflow-x-auto max-h-48 text-[9px] whitespace-pre-wrap">
-                          {JSON.stringify(JSON.parse(editorial.sourceTrace), null, 2)}
-                        </pre>
-                      </details>
-                    )}
+                    {editorial.sourceTrace && (() => {
+                      try {
+                        const data = JSON.parse(editorial.sourceTrace);
+                        return (
+                          <details className="text-[10px] font-mono text-foreground/50">
+                            <summary className="cursor-pointer hover:text-foreground/70">Source trace</summary>
+                            <pre className="mt-2 p-3 bg-background border border-border/20 overflow-x-auto max-h-48 text-[9px] whitespace-pre-wrap">
+                              {JSON.stringify(data, null, 2)}
+                            </pre>
+                          </details>
+                        );
+                      } catch { return null; }
+                    })()}
                   </div>
                 )}
               </div>

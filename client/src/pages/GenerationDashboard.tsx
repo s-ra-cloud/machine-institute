@@ -222,37 +222,23 @@ export default function GenerationDashboard() {
     },
   });
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-background text-foreground">
-        <Navigation />
-        <div className="pt-28 text-center">
-          <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" />
-        </div>
-        <Footer />
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!authLoading && !authenticated) {
+      login();
+    }
+  }, [authLoading, authenticated, login]);
 
-  if (!authenticated) {
+  if (authLoading || !authenticated) {
     return (
       <div className="min-h-screen bg-background text-foreground">
         <Navigation />
         <main className="pt-28 pb-24">
           <div className="container mx-auto px-6 max-w-2xl text-center">
             <FadeIn>
-              <LogIn className="w-12 h-12 text-muted-foreground/30 mx-auto mb-6" />
-              <h1 className="text-3xl font-heading font-bold mb-4">Generation Dashboard</h1>
-              <p className="text-muted-foreground mb-8">
-                Sign in with Future Science to generate editorials and literature reviews.
+              <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-4" />
+              <p className="text-muted-foreground font-mono text-sm">
+                {authLoading ? "Loading..." : "Redirecting to sign in..."}
               </p>
-              <button
-                onClick={login}
-                className="px-8 py-3 bg-primary text-white font-mono text-sm tracking-widest hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(124,58,237,0.2)]"
-                data-testid="button-login-prompt"
-              >
-                Sign In
-              </button>
             </FadeIn>
           </div>
         </main>
@@ -269,7 +255,7 @@ export default function GenerationDashboard() {
   const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial &&
     (modelConfig.providerMode === "byoc" ? !!modelConfig.apiKey : (editorialStatus?.remaining ?? 1) > 0);
   const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 &&
-    (modelConfig.providerMode === "byoc" ? !!modelConfig.apiKey : true);
+    (modelConfig.providerMode === "byoc" ? !!modelConfig.apiKey : (reviewStatus?.remaining ?? 1) > 0);
 
   return (
     <div className="min-h-screen bg-background text-foreground">

@@ -152,42 +152,42 @@ export default function LiteratureReviewDetail() {
                 {showMeta && (
                   <div className="mt-4 border border-border/20 bg-muted/5 p-5 space-y-4">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[10px] font-mono">
-                      {(review as any).topic && (
+                      {review.topic && (
                         <div className="col-span-2 md:col-span-4">
                           <span className="text-muted-foreground/40 block">Topic</span>
-                          <span className="text-foreground/70">{(review as any).topic}</span>
+                          <span className="text-foreground/70">{review.topic}</span>
                         </div>
                       )}
-                      {(review as any).modelName && (
+                      {review.modelName && (
                         <div>
                           <span className="text-muted-foreground/40 block">Model</span>
-                          <span className="text-foreground/70">{(review as any).modelName}</span>
+                          <span className="text-foreground/70">{review.modelName}</span>
                         </div>
                       )}
-                      {(review as any).modelProvider && (
+                      {review.modelProvider && (
                         <div>
                           <span className="text-muted-foreground/40 block">Provider</span>
-                          <span className="text-foreground/70">{(review as any).modelProvider}</span>
+                          <span className="text-foreground/70">{review.modelProvider}</span>
                         </div>
                       )}
-                      {(review as any).providerMode && (
+                      {review.providerMode && (
                         <div>
                           <span className="text-muted-foreground/40 block">Mode</span>
-                          <span className="text-foreground/70">{(review as any).providerMode}</span>
+                          <span className="text-foreground/70">{review.providerMode}</span>
                         </div>
                       )}
-                      {(review as any).orchestratorName && (
+                      {review.orchestratorName && (
                         <div>
                           <span className="text-muted-foreground/40 block">Orchestrator</span>
-                          <span className="text-foreground/70">{(review as any).orchestratorName}</span>
+                          <span className="text-foreground/70">{review.orchestratorName}</span>
                         </div>
                       )}
                     </div>
 
-                    {(review as any).publishedDocumentId && (
+                    {review.publishedDocumentId && (
                       <div>
                         <a
-                          href={`https://future-science.org/papers/${(review as any).publishedDocumentId}`}
+                          href={`https://future-science.org/papers/${review.publishedDocumentId}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-xs font-mono text-primary hover:underline flex items-center gap-1"
@@ -198,9 +198,9 @@ export default function LiteratureReviewDetail() {
                       </div>
                     )}
 
-                    {(review as any).promptTrace && (() => {
+                    {review.promptTrace && (() => {
                       try {
-                        const data = JSON.parse((review as any).promptTrace);
+                        const data = JSON.parse(review.promptTrace);
                         return (
                           <details className="text-[10px] font-mono text-foreground/50">
                             <summary className="cursor-pointer hover:text-foreground/70">Prompt trace</summary>
@@ -212,9 +212,9 @@ export default function LiteratureReviewDetail() {
                       } catch { return null; }
                     })()}
 
-                    {(review as any).sourceTrace && (() => {
+                    {review.sourceTrace && (() => {
                       try {
-                        const data = JSON.parse((review as any).sourceTrace);
+                        const data = JSON.parse(review.sourceTrace);
                         return (
                           <details className="text-[10px] font-mono text-foreground/50">
                             <summary className="cursor-pointer hover:text-foreground/70">Source trace</summary>
