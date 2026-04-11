@@ -22,6 +22,7 @@ interface EditorialRecord {
   modelProvider: string | null;
   modelName: string | null;
   providerMode: string | null;
+  topic: string | null;
   publishedDocumentId: string | null;
   promptTrace: string | null;
   sourceTrace: string | null;
@@ -150,6 +151,12 @@ export default function EditorialDetail() {
                 {showMeta && (
                   <div className="mt-4 border border-border/20 bg-muted/5 p-5 space-y-4">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[10px] font-mono">
+                      {editorial.topic && (
+                        <div className="col-span-2 md:col-span-4">
+                          <span className="text-muted-foreground/40 block">Topic</span>
+                          <span className="text-foreground/70">{editorial.topic}</span>
+                        </div>
+                      )}
                       {editorial.modelName && (
                         <div>
                           <span className="text-muted-foreground/40 block">Model</span>

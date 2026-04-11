@@ -40,6 +40,7 @@ interface EditorialRecord {
   status: string;
   createdAt: string;
   completedAt: string | null;
+  topic: string | null;
   orchestratorName: string | null;
   modelProvider: string | null;
   modelName: string | null;
@@ -57,6 +58,7 @@ interface LiteratureReviewRecord {
   contentHtml: string | null;
   createdAt: string;
   completedAt: string | null;
+  topic: string | null;
   orchestratorName: string | null;
   modelProvider: string | null;
   modelName: string | null;
@@ -103,10 +105,11 @@ export default function GenerationDashboard() {
   });
 
   const { data: reviewStatus } = useQuery<RateLimitStatus>({
-    queryKey: ["/api/generation/rate-limit-status"],
+    queryKey: ["/api/generation/rate-limit-status", "literature-review"],
     queryFn: async () => {
       const res = await fetch("/api/generation/rate-limit-status");
-      return res.json();
+      const data = await res.json();
+      return data["literature-review"] as RateLimitStatus;
     },
     enabled: authenticated,
     refetchInterval: 10000,
@@ -315,7 +318,7 @@ export default function GenerationDashboard() {
                   </p>
                   {reviewStatus && (
                     <span className="text-[10px] font-mono text-muted-foreground/50">
-                      {reviewStatus.remaining ?? "∞"} platform uses remaining
+                      {reviewStatus.remaining} platform uses remaining
                     </span>
                   )}
                 </button>
@@ -645,6 +648,12 @@ function MetadataPanel({ record }: { record: EditorialRecord | LiteratureReviewR
   return (
     <div className="mt-3 border border-border/20 bg-background/50 p-4 space-y-3" data-testid="metadata-panel">
       <div className="grid grid-cols-2 gap-3 text-[10px] font-mono">
+        {record.topic && (
+          <div className="col-span-2">
+            <span className="text-muted-foreground/40 block">Topic</span>
+            <span className="text-foreground/70">{record.topic}</span>
+          </div>
+        )}
         <div>
           <span className="text-muted-foreground/40 block">Model</span>
           <span className="text-foreground/70">{record.modelName || "default"}</span>
