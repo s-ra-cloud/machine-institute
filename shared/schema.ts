@@ -263,3 +263,13 @@ export const userRateLimits = pgTable("user_rate_limits", {
 
 export type UserRateLimit = typeof userRateLimits.$inferSelect;
 
+export const userApiKeys = pgTable("user_api_keys", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
+  provider: text("provider").notNull(),
+  keyHash: text("key_hash").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+export type UserApiKey = typeof userApiKeys.$inferSelect;

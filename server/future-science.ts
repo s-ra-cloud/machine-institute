@@ -2,6 +2,46 @@ import { storage } from "./storage";
 
 const FS_API_BASE = "https://future-science.org/api/v1";
 
+export interface FutureScienceAbstract {
+  title: string;
+  abstract: string;
+  authors: string;
+  date: string;
+  keywords: string[];
+  documentId: string;
+}
+
+export interface FSPublishResult {
+  data?: { documentId?: string; slug?: string };
+  documentId?: string;
+  slug?: string;
+  id?: string;
+}
+
+export interface FSAuthor {
+  firstName?: string;
+  lastName?: string;
+  institution?: string;
+}
+
+export interface FSContribution {
+  title?: string;
+  subtitle?: string;
+  abstract?: string;
+  author?: FSAuthor | FSAuthor[];
+  keywords?: string[];
+  publishedAt?: string;
+  documentId?: string;
+  url?: string;
+  publicUrl?: string;
+  slug?: string;
+}
+
+export interface FSContributionsResponse {
+  data?: FSContribution[];
+  meta?: { pagination?: { pageCount?: number } };
+}
+
 interface PublishOptions {
   title: string;
   contentHtml: string;
@@ -71,7 +111,7 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
       return null;
     }
 
-    const result = await resp.json() as any;
+    const result: FSPublishResult = await resp.json() as FSPublishResult;
     const documentId = result?.data?.documentId || result?.documentId || result?.id;
     const slug = result?.data?.slug || result?.slug;
     const initiativeSlug = options.initiativeSlug || "papers";
@@ -89,13 +129,13 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
 }
 
 export async function fetchAbstractsAndKeywords(institutions: string[]): Promise<{
-  abstracts: Array<{ title: string; abstract: string; authors: string; date: string; keywords: string[]; documentId: string }>;
+  abstracts: FutureScienceAbstract[];
   allKeywords: string[];
 }> {
   const PAGE_SIZE = 25;
   let page = 1;
   let pageCount = 1;
-  const abstracts: Array<{ title: string; abstract: string; authors: string; date: string; keywords: string[]; documentId: string }> = [];
+  const abstracts: FutureScienceAbstract[] = [];
   const keywordSet = new Set<string>();
 
   while (page <= pageCount) {
@@ -103,27 +143,27 @@ export async function fetchAbstractsAndKeywords(institutions: string[]): Promise
     const resp = await fetch(url);
     if (!resp.ok) break;
 
-    const json = await resp.json() as any;
+    const json: FSContributionsResponse = await resp.json() as FSContributionsResponse;
     const items = json?.data || [];
     pageCount = json?.meta?.pagination?.pageCount || 1;
 
     for (const c of items) {
-      const authors = Array.isArray(c.author) ? c.author : (c.author ? [c.author] : []);
-      const matchesInstitution = institutions.length === 0 || authors.some((a: any) =>
+      const authors: FSAuthor[] = Array.isArray(c.author) ? c.author : (c.author ? [c.author] : []);
+      const matchesInstitution = institutions.length === 0 || authors.some((a) =>
         institutions.some(inst => (a.institution || "").includes(inst))
       );
 
       if (matchesInstitution) {
         const authorList = authors
-          .map((a: any) => `${a.firstName || ""} ${a.lastName || ""}`.trim())
-          .filter((s: string) => s.length > 0)
+          .map((a) => `${a.firstName || ""} ${a.lastName || ""}`.trim())
+          .filter((s) => s.length > 0)
           .join(", ");
 
         const keywords = Array.isArray(c.keywords) ? c.keywords : [];
         keywords.forEach((k: string) => keywordSet.add(k.toLowerCase()));
 
         abstracts.push({
-          title: c.subtitle ? `${c.title}: ${c.subtitle}` : c.title,
+          title: c.subtitle ? `${c.title || ""}: ${c.subtitle}` : (c.title || "Untitled"),
           abstract: c.abstract || "",
           authors: authorList || "Unknown",
           date: c.publishedAt ? c.publishedAt.split("T")[0] : "",

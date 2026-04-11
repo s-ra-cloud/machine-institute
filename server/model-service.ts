@@ -7,6 +7,12 @@ export interface ModelProviderConfig {
   apiKey?: string;
 }
 
+export interface GenerationResult {
+  content: string;
+  model: string;
+  provider: string;
+}
+
 export const PLATFORM_MODELS = [
   { provider: "openrouter", model: "deepseek/deepseek-chat", label: "DeepSeek Chat (via OpenRouter)", default: true },
   { provider: "openrouter", model: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4 (via OpenRouter)" },
@@ -15,17 +21,16 @@ export const PLATFORM_MODELS = [
 
 export const BYOC_PROVIDERS = [
   { id: "openai", label: "OpenAI", baseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o" },
-  { id: "anthropic", label: "Anthropic (via OpenRouter)", baseURL: "https://openrouter.ai/api/v1", defaultModel: "anthropic/claude-sonnet-4", note: "Anthropic models routed through OpenRouter for OpenAI-compatible API" },
+  { id: "anthropic", label: "Anthropic", baseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-20250514" },
   { id: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", defaultModel: "deepseek/deepseek-chat" },
 ];
 
-const PROVIDER_BASE_URLS: Record<string, string> = {
+const OPENAI_COMPAT_BASE_URLS: Record<string, string> = {
   openai: "https://api.openai.com/v1",
-  anthropic: "https://openrouter.ai/api/v1",
   openrouter: "https://openrouter.ai/api/v1",
 };
 
-export function createLLMClient(config: ModelProviderConfig): OpenAI {
+export function createLLMClient(config: ModelProviderConfig): OpenAI | null {
   if (config.providerMode === "platform") {
     const platformKey = process.env.OPENROUTER_API_KEY;
     if (!platformKey) {
@@ -41,11 +46,85 @@ export function createLLMClient(config: ModelProviderConfig): OpenAI {
     throw new Error("BYOC mode requires an API key.");
   }
 
-  const baseURL = PROVIDER_BASE_URLS[config.provider] || PROVIDER_BASE_URLS.openrouter;
+  if (config.provider === "anthropic") {
+    return null;
+  }
+
+  const baseURL = OPENAI_COMPAT_BASE_URLS[config.provider] || OPENAI_COMPAT_BASE_URLS.openrouter;
   return new OpenAI({
     baseURL,
     apiKey: config.apiKey,
   });
+}
+
+export async function generateWithConfig(
+  config: ModelProviderConfig,
+  systemPrompt: string,
+  userMessage: string,
+  options: { maxTokens?: number; temperature?: number } = {},
+): Promise<GenerationResult> {
+  const model = resolveModelName(config);
+  const maxTokens = options.maxTokens || 12000;
+  const temperature = options.temperature || 0.3;
+
+  if (config.provider === "anthropic" && config.providerMode === "byoc") {
+    if (!config.apiKey) {
+      throw new Error("BYOC Anthropic mode requires an API key.");
+    }
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": config.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Anthropic API error (${response.status}): ${errorText}`);
+    }
+
+    const result: AnthropicMessagesResponse = await response.json() as AnthropicMessagesResponse;
+    const textBlock = result.content?.find((block) => block.type === "text");
+    const content = textBlock?.text || "";
+
+    return { content, model, provider: "anthropic" };
+  }
+
+  const client = createLLMClient(config);
+  if (!client) {
+    throw new Error(`Could not create LLM client for provider: ${config.provider}`);
+  }
+
+  const completion = await client.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ],
+    max_tokens: maxTokens,
+    temperature,
+  });
+
+  const content = completion.choices[0]?.message?.content || "";
+  return { content, model, provider: config.provider };
+}
+
+interface AnthropicMessagesResponse {
+  id: string;
+  type: string;
+  role: string;
+  content: Array<{ type: string; text: string }>;
+  model: string;
+  stop_reason: string | null;
 }
 
 export function resolveModelName(config: ModelProviderConfig): string {
@@ -62,7 +141,28 @@ export function resolveModelName(config: ModelProviderConfig): string {
 
 export async function validateApiKey(provider: string, apiKey: string): Promise<{ valid: boolean; error?: string }> {
   try {
-    const baseURL = PROVIDER_BASE_URLS[provider];
+    if (provider === "anthropic") {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "test" }],
+        }),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        return { valid: false, error: "Invalid Anthropic API key. Please check your credentials." };
+      }
+      return { valid: true };
+    }
+
+    const baseURL = OPENAI_COMPAT_BASE_URLS[provider];
     if (!baseURL) {
       return { valid: false, error: `Unknown provider: ${provider}` };
     }

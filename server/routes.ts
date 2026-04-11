@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, type LiteratureReview, type EditorialRecord } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -10,9 +10,9 @@ import OpenAI from "openai";
 import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth } from "./auth";
-import { createLLMClient, resolveModelName, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
-import { publishToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords } from "./future-science";
-import { storeEphemeralKey } from "./ephemeral-keys";
+import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
+import { publishToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
+import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
 function generateSlug(title: string): string {
   return title
@@ -434,10 +434,10 @@ export async function registerRoutes(
 
   const SYNC_COOLDOWN_MS = 60 * 60 * 1000;
 
-  async function fetchAllContributions(institutions: string[]): Promise<any[]> {
+  async function fetchAllContributions(institutions: string[]): Promise<FSContribution[]> {
     const PAGE_SIZE = 25;
     let page = 1;
-    let all: any[] = [];
+    let all: FSContribution[] = [];
     let pageCount = 1;
 
     while (page <= pageCount) {
@@ -446,13 +446,13 @@ export async function registerRoutes(
       if (!resp.ok) {
         throw new Error(`Future Science API returned ${resp.status} on page ${page}`);
       }
-      const json = await resp.json() as any;
+      const json: FSContributionsResponse = await resp.json() as FSContributionsResponse;
       const items = json?.data || [];
       pageCount = json?.meta?.pagination?.pageCount || 1;
 
-      const filtered = items.filter((c: any) => {
-        const authors = Array.isArray(c.author) ? c.author : (c.author ? [c.author] : []);
-        return authors.some((a: any) =>
+      const filtered = items.filter((c) => {
+        const authors: FSAuthor[] = Array.isArray(c.author) ? c.author : (c.author ? [c.author] : []);
+        return authors.some((a) =>
           institutions.some(inst => (a.institution || "").includes(inst))
         );
       });
@@ -485,12 +485,12 @@ export async function registerRoutes(
         return res.json({ synced: true, message: "No contributions found.", newPapers: 0 });
       }
 
-      const sourceDocIds = contributions.map((c: any) => c.documentId);
+      const sourceDocIds = contributions.map((c) => c.documentId).filter((id): id is string => !!id);
       const existing = await storage.getProjectPapersBySourceDocIds(sourceDocIds);
       const existingDocIds = new Set(existing.map(p => p.sourceDocumentId));
 
       const initiativeSlug = INITIATIVE_SLUGS[projectId] || "papers";
-      const buildPaperUrl = (c: any) => {
+      const buildPaperUrl = (c: FSContribution) => {
         if (c.url) return c.url;
         if (c.publicUrl) return c.publicUrl;
         if (c.slug) return `https://future-science.org/${initiativeSlug}/${c.slug}`;
@@ -499,22 +499,22 @@ export async function registerRoutes(
       };
 
       const newPapers = contributions
-        .filter((c: any) => !existingDocIds.has(c.documentId))
-        .map((c: any) => {
+        .filter((c) => !existingDocIds.has(c.documentId))
+        .map((c) => {
           const authorRaw = c.author;
-          const authorArr = Array.isArray(authorRaw) ? authorRaw : (authorRaw ? [authorRaw] : []);
+          const authorArr: FSAuthor[] = Array.isArray(authorRaw) ? authorRaw : (authorRaw ? [authorRaw] : []);
           const authorList = authorArr
-            .map((a: any) => `${a.firstName || ""} ${a.lastName || ""}`.trim() + (a.institution ? ` (${a.institution})` : ""))
-            .filter((s: string) => s.length > 0)
+            .map((a) => `${a.firstName || ""} ${a.lastName || ""}`.trim() + (a.institution ? ` (${a.institution})` : ""))
+            .filter((s) => s.length > 0)
             .join(", ");
           return {
             projectId,
-            title: c.subtitle ? `${c.title}: ${c.subtitle}` : c.title,
+            title: c.subtitle ? `${c.title || ""}: ${c.subtitle}` : (c.title || "Untitled"),
             description: c.abstract || "No abstract available.",
             authors: authorList || "Unknown",
             date: c.publishedAt ? c.publishedAt.split("T")[0] : new Date().toISOString().split("T")[0],
-            type: (c.type || "article").toLowerCase(),
-            sourceDocumentId: c.documentId,
+            type: "article",
+            sourceDocumentId: c.documentId || "",
             url: buildPaperUrl(c),
           };
         });
@@ -524,7 +524,7 @@ export async function registerRoutes(
       }
 
       for (const c of contributions) {
-        if (existingDocIds.has(c.documentId)) {
+        if (c.documentId && existingDocIds.has(c.documentId)) {
           const paperUrl = buildPaperUrl(c);
           if (paperUrl) {
             await storage.updateProjectPaperUrl(c.documentId, paperUrl);
@@ -753,7 +753,7 @@ I will now provide the papers.`;
     });
   });
 
-  app.post("/api/generation/validate-key", async (req, res) => {
+  app.post("/api/generation/validate-key", requireAuth, async (req, res) => {
     try {
       const { provider, apiKey } = req.body;
       if (!provider || !apiKey) {
@@ -809,13 +809,9 @@ I will now provide the papers.`;
           return res.status(503).json({ error: "Literature review generation is not configured. OPENROUTER_API_KEY is missing." });
         }
         const limitConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
-        const currentLimit = await storage.getUserRateLimit(user.id, "literature-review");
-        if (currentLimit) {
-          const elapsed = Date.now() - currentLimit.windowStart.getTime();
-          if (elapsed < limitConfig.windowMs && currentLimit.count >= limitConfig.max) {
-            const resetIn = Math.ceil((limitConfig.windowMs - elapsed) / 60000);
-            return res.status(429).json({ error: `Review generation limit reached (${limitConfig.max} per 24 hours). Try again in ${resetIn} minutes.` });
-          }
+        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "literature-review", limitConfig.max, limitConfig.windowMs);
+        if (!rateCheck.allowed) {
+          return res.status(429).json({ error: `Review generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
         }
       }
 
@@ -827,7 +823,7 @@ I will now provide the papers.`;
         if (!keyValidation.valid) {
           return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         }
-        storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
+        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
 
       const clientIp = req.ip || "unknown";
@@ -869,15 +865,11 @@ I will now provide the papers.`;
 
       const review = await storage.createLiteratureReview(result.data);
 
-      if (isPlatform) {
-        await storage.incrementUserRateLimit(user.id, "literature-review", PER_USER_PLATFORM_LIMITS["literature-review"].windowMs);
-      }
-
       res.status(201).json(review);
 
       const accessToken = await getAccessTokenForUser(req);
 
-      generateLiteratureReview(review.id, { ...result.data, topic: effectiveTopic }, modelConfig, accessToken).catch(err => {
+      generateLiteratureReview(review.id, { ...result.data, topic: effectiveTopic, userId: user.id }, modelConfig, accessToken).catch(err => {
         console.error("Background review generation failed:", err);
       });
     } catch (err: any) {
@@ -979,7 +971,7 @@ I will now provide the papers.`;
 
   async function generateLiteratureReview(
     reviewId: string,
-    data: { projectId: string; agentId: string; researchQuestion: string; prompt: string; topic?: string; orchestratorName?: string | null; agentDescription?: string | null },
+    data: { projectId: string; agentId: string; researchQuestion: string; prompt: string; topic?: string; orchestratorName?: string | null; agentDescription?: string | null; userId?: number },
     modelConfig?: ModelProviderConfig,
     accessToken?: string | null,
   ) {
@@ -988,7 +980,7 @@ I will now provide the papers.`;
 
       const projectPapersData = await storage.getProjectPapers(data.projectId);
 
-      let fsAbstracts: any[] = [];
+      let fsAbstracts: FutureScienceAbstract[] = [];
       let fsKeywords: string[] = [];
       try {
         const fsData = await fetchAbstractsAndKeywords(["Machine Institute"]);
@@ -1014,7 +1006,7 @@ I will now provide the papers.`;
       const clusters = clusterByKeywords(fsAbstracts);
       let clusterText = "";
       if (clusters.size > 0) {
-        const clusterEntries = [...clusters.entries()].map(([keyword, papers]) =>
+        const clusterEntries = Array.from(clusters.entries()).map(([keyword, papers]) =>
           `Cluster "${keyword}" (${papers.length} papers): ${papers.map(p => p.title).join("; ")}`
         );
         clusterText = `\n\nIdentified topic clusters from the corpus:\n${clusterEntries.join("\n")}`;
@@ -1025,7 +1017,10 @@ I will now provide the papers.`;
       );
 
       const config = modelConfig || { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
-      const client = createLLMClient(config);
+      if (config.providerMode === "byoc" && !config.apiKey && data.userId) {
+        const storedKey = getEphemeralKey(data.userId, config.provider);
+        if (storedKey) config.apiKey = storedKey;
+      }
       const model = resolveModelName(config);
 
       const systemPrompt = data.prompt;
@@ -1045,26 +1040,21 @@ I will now provide the papers.`;
         projectPapers: projectPapersData.map(p => ({ title: p.title, authors: p.authors, sourceDocumentId: p.sourceDocumentId })),
         futureScienceAbstracts: fsAbstracts.map(a => ({ title: a.title, documentId: a.documentId, authors: a.authors })),
         futureScienceKeywords: fsKeywords,
-        clusters: [...clusters.entries()].map(([keyword, papers]) => ({ keyword, paperTitles: papers.map(p => p.title) })),
+        clusters: Array.from(clusters.entries()).map(([keyword, papers]) => ({ keyword, paperTitles: papers.map(p => p.title) })),
       });
 
       await storage.updateLiteratureReview(reviewId, { promptTrace, sourceTrace });
 
-      const completion = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-        max_tokens: 12000,
+      const generationResult = await generateWithConfig(config, systemPrompt, userMessage, {
+        maxTokens: 12000,
         temperature: 0.3,
       });
 
-      const reviewText = completion.choices[0]?.message?.content || "";
+      const reviewText = generationResult.content;
       const rawHtml = markdownToHtml(reviewText);
       const safeHtml = sanitizeHtml(rawHtml);
 
-      const updates: any = {
+      const updates: Partial<LiteratureReview> = {
         contentHtml: safeHtml,
         status: "completed",
         completedAt: new Date(),
@@ -1273,16 +1263,11 @@ List every cited paper in Chicago author-date bibliography format:
           return res.status(503).json({ error: "Editorial generation is not configured. OPENROUTER_API_KEY is missing." });
         }
         const limitConfig = PER_USER_PLATFORM_LIMITS["editorial"];
-        const currentLimit = await storage.getUserRateLimit(user.id, "editorial");
-        if (currentLimit) {
-          const elapsed = Date.now() - currentLimit.windowStart.getTime();
-          if (elapsed < limitConfig.windowMs && currentLimit.count >= limitConfig.max) {
-            const resetIn = Math.ceil((limitConfig.windowMs - elapsed) / 60000);
-            return res.status(429).json({
-              error: `Editorial generation limit reached (${limitConfig.max} per 24 hours). Try again in ${resetIn} minutes.`,
-              resetAt: currentLimit.windowStart.getTime() + limitConfig.windowMs,
-            });
-          }
+        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "editorial", limitConfig.max, limitConfig.windowMs);
+        if (!rateCheck.allowed) {
+          return res.status(429).json({
+            error: `Editorial generation limit reached (${limitConfig.max} per 24 hours). Try again later.`,
+          });
         }
       }
 
@@ -1294,7 +1279,7 @@ List every cited paper in Chicago author-date bibliography format:
         if (!keyValidation.valid) {
           return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         }
-        storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
+        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
 
       const effectiveOrchestratorName = orchestratorName || (user?.displayName) || "MachInstit CS45O-N1";
@@ -1322,10 +1307,6 @@ List every cited paper in Chicago author-date bibliography format:
         providerMode: modelConfig.providerMode,
         userPrompt: userPrompt || null,
       });
-
-      if (isPlatform) {
-        await storage.incrementUserRateLimit(user.id, "editorial", PER_USER_PLATFORM_LIMITS["editorial"].windowMs);
-      }
 
       res.status(201).json(editorial);
 
@@ -1399,7 +1380,7 @@ List every cited paper in Chicago author-date bibliography format:
           excerpt: e.excerpt || "",
         }));
 
-      let fsAbstracts: any[] = [];
+      let fsAbstracts: FutureScienceAbstract[] = [];
       try {
         const fsData = await fetchAbstractsAndKeywords(["Machine Institute"]);
         fsAbstracts = fsData.abstracts;
@@ -1456,7 +1437,13 @@ List every cited paper in Chicago author-date bibliography format:
         : "No recent arXiv papers found for the current research topics.";
 
       const config = modelConfig || { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
-      const client = createLLMClient(config);
+      if (config.providerMode === "byoc" && !config.apiKey) {
+        const editorialForKey = await storage.getEditorialById(editorialId);
+        if (editorialForKey?.userId) {
+          const storedKey = getEphemeralKey(editorialForKey.userId, config.provider);
+          if (storedKey) config.apiKey = storedKey;
+        }
+      }
       const model = resolveModelName(config);
 
       const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, machine psychology, and autonomous experimentation";
@@ -1506,17 +1493,12 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
       await storage.updateEditorial(editorialId, { promptTrace, sourceTrace });
 
       console.log(`Editorial ${editorialId}: Calling LLM (${model})...`);
-      const completion = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: "system", content: DEFAULT_EDITORIAL_PROMPT },
-          { role: "user", content: userMessage },
-        ],
-        max_tokens: 10000,
+      const generationResult = await generateWithConfig(config, DEFAULT_EDITORIAL_PROMPT, userMessage, {
+        maxTokens: 10000,
         temperature: 0.4,
       });
 
-      let editorialText = completion.choices[0]?.message?.content || "";
+      let editorialText = generationResult.content;
 
       const titleMatch = editorialText.match(/^#+\s*\*{0,2}(?:Title:\s*)?(.+?)\*{0,2}\s*$/m)
         || editorialText.match(/^\*{2}(?:Title:\s*)?(.+?)\*{2}\s*$/m)
@@ -1581,7 +1563,7 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
       const rawHtml = markdownToHtml(editorialText);
       const safeHtml = sanitizeHtml(rawHtml);
 
-      const updates: any = {
+      const updates: Partial<EditorialRecord> = {
         title: extractedTitle,
         excerpt: excerptText || "A synthesized editorial on current research trends.",
         contentHtml: safeHtml,

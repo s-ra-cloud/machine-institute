@@ -1,6 +1,6 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, inArray, and } from "drizzle-orm";
+import { eq, desc, gte, lte, inArray, and } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -50,6 +50,11 @@ export interface IStorage {
 
   getUserRateLimit(userId: string, resourceType: string): Promise<UserRateLimit | null>;
   incrementUserRateLimit(userId: string, resourceType: string, windowMs: number): Promise<UserRateLimit>;
+  checkAndIncrementRateLimit(userId: string, resourceType: string, maxCount: number, windowMs: number): Promise<{ allowed: boolean; currentCount: number; limit: number }>;
+
+  storeUserApiKeyRecord(userId: string, provider: string, keyHash: string, expiresAt: Date): Promise<UserApiKey>;
+  getUserApiKeyRecord(userId: string, provider: string): Promise<UserApiKey | null>;
+  deleteExpiredApiKeys(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -252,28 +257,90 @@ export class DatabaseStorage implements IStorage {
   }
 
   async incrementUserRateLimit(userId: string, resourceType: string, windowMs: number): Promise<UserRateLimit> {
-    const existing = await this.getUserRateLimit(userId, resourceType);
+    return await db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(userRateLimits)
+        .where(and(eq(userRateLimits.userId, userId), eq(userRateLimits.resourceType, resourceType)));
 
-    if (existing) {
-      const elapsed = Date.now() - existing.windowStart.getTime();
-      if (elapsed >= windowMs) {
-        const [updated] = await db.update(userRateLimits)
-          .set({ count: 1, windowStart: new Date() })
+      if (existing) {
+        const elapsed = Date.now() - existing.windowStart.getTime();
+        if (elapsed >= windowMs) {
+          const [updated] = await tx.update(userRateLimits)
+            .set({ count: 1, windowStart: new Date() })
+            .where(eq(userRateLimits.id, existing.id))
+            .returning();
+          return updated;
+        }
+        const [updated] = await tx.update(userRateLimits)
+          .set({ count: existing.count + 1 })
           .where(eq(userRateLimits.id, existing.id))
           .returning();
         return updated;
       }
-      const [updated] = await db.update(userRateLimits)
+
+      const [created] = await tx.insert(userRateLimits)
+        .values({ userId, resourceType, count: 1, windowStart: new Date() })
+        .returning();
+      return created;
+    });
+  }
+
+  async checkAndIncrementRateLimit(userId: string, resourceType: string, maxCount: number, windowMs: number): Promise<{ allowed: boolean; currentCount: number; limit: number }> {
+    return await db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(userRateLimits)
+        .where(and(eq(userRateLimits.userId, userId), eq(userRateLimits.resourceType, resourceType)));
+
+      if (!existing) {
+        await tx.insert(userRateLimits)
+          .values({ userId, resourceType, count: 1, windowStart: new Date() });
+        return { allowed: true, currentCount: 1, limit: maxCount };
+      }
+
+      const elapsed = Date.now() - existing.windowStart.getTime();
+      if (elapsed >= windowMs) {
+        await tx.update(userRateLimits)
+          .set({ count: 1, windowStart: new Date() })
+          .where(eq(userRateLimits.id, existing.id));
+        return { allowed: true, currentCount: 1, limit: maxCount };
+      }
+
+      if (existing.count >= maxCount) {
+        return { allowed: false, currentCount: existing.count, limit: maxCount };
+      }
+
+      await tx.update(userRateLimits)
         .set({ count: existing.count + 1 })
-        .where(eq(userRateLimits.id, existing.id))
+        .where(eq(userRateLimits.id, existing.id));
+      return { allowed: true, currentCount: existing.count + 1, limit: maxCount };
+    });
+  }
+
+  async storeUserApiKeyRecord(userId: string, provider: string, keyHash: string, expiresAt: Date): Promise<UserApiKey> {
+    const existing = await this.getUserApiKeyRecord(userId, provider);
+    if (existing) {
+      const [updated] = await db.update(userApiKeys)
+        .set({ keyHash, expiresAt, createdAt: new Date() })
+        .where(eq(userApiKeys.id, existing.id))
         .returning();
       return updated;
     }
-
-    const [created] = await db.insert(userRateLimits)
-      .values({ userId, resourceType, count: 1, windowStart: new Date() })
+    const [created] = await db.insert(userApiKeys)
+      .values({ userId, provider, keyHash, expiresAt })
       .returning();
     return created;
+  }
+
+  async getUserApiKeyRecord(userId: string, provider: string): Promise<UserApiKey | null> {
+    const [row] = await db.select().from(userApiKeys)
+      .where(and(
+        eq(userApiKeys.userId, userId),
+        eq(userApiKeys.provider, provider),
+        gte(userApiKeys.expiresAt, new Date()),
+      ));
+    return row ?? null;
+  }
+
+  async deleteExpiredApiKeys(): Promise<void> {
+    await db.delete(userApiKeys).where(lte(userApiKeys.expiresAt, new Date()));
   }
 
 }
