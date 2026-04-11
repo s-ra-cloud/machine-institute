@@ -177,6 +177,7 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Pr
                     provider: e.target.value,
                     modelName: provider?.defaultModel || "",
                     apiKey: "",
+                    keyValidated: false,
                   });
                   setApiKey("");
                   setValidationResult(null);
@@ -197,7 +198,10 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Pr
               <input
                 type="text"
                 value={value.modelName}
-                onChange={(e) => onChange({ ...value, modelName: e.target.value })}
+                onChange={(e) => {
+                  onChange({ ...value, modelName: e.target.value, keyValidated: false });
+                  setValidationResult(null);
+                }}
                 className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
                 placeholder="e.g. gpt-4o, claude-sonnet-4-20250514"
                 data-testid="input-model-name"
@@ -215,7 +219,7 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Pr
                   onChange={(e) => {
                     setApiKey(e.target.value);
                     setValidationResult(null);
-                    onChange({ ...value, apiKey: e.target.value });
+                    onChange({ ...value, apiKey: e.target.value, keyValidated: false });
                   }}
                   className="flex-1 bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
                   placeholder="sk-..."
