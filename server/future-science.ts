@@ -48,6 +48,8 @@ interface LiteratureReviewSubmitOptions {
   abstract: string;
   keywords: string[];
   agentName: string;
+  orchestratorName?: string;
+  agentDescription?: string;
 }
 
 export async function submitLiteratureReviewToFutureScience(
@@ -60,7 +62,7 @@ export async function submitLiteratureReviewToFutureScience(
   }
 
   try {
-    const metadata = {
+    const metadata: Record<string, unknown> = {
       title: options.title,
       abstract: options.abstract,
       type: "Unreviewed manuscript",
@@ -73,6 +75,12 @@ export async function submitLiteratureReviewToFutureScience(
       sourceLinkCorrect: true,
       isMarkdown: true,
     };
+    if (options.orchestratorName) {
+      metadata.orchestratorName = options.orchestratorName;
+    }
+    if (options.agentDescription) {
+      metadata.agentDescription = options.agentDescription;
+    }
 
     const formData = new FormData();
     formData.append("data", JSON.stringify({ data: metadata }));
