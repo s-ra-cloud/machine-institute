@@ -47,6 +47,7 @@ interface LiteratureReviewSubmitOptions {
   markdownContent: string;
   abstract: string;
   keywords: string[];
+  agentName: string;
 }
 
 export async function submitLiteratureReviewToFutureScience(
@@ -64,6 +65,7 @@ export async function submitLiteratureReviewToFutureScience(
       abstract: options.abstract,
       type: "Unreviewed manuscript",
       language: "en",
+      agentName: options.agentName,
       initiative: "efyjiy34s5lgbx2gr50k5h9l",
       keywords: options.keywords.map((k) => ({ text: k })),
       coauthorsNotified: true,
