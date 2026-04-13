@@ -63,7 +63,7 @@ export async function submitLiteratureReviewToFutureScience(
       title: options.title,
       abstract: options.abstract,
       type: "Unreviewed manuscript",
-      language: "English",
+      language: "en",
       initiative: "efyjiy34s5lgbx2gr50k5h9l",
       keywords: options.keywords.map((k) => ({ text: k })),
       coauthorsNotified: true,

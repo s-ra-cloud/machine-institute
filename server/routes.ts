@@ -874,7 +874,8 @@ I will now provide the papers.`;
       reviewRateLimit.set(clientIp, Date.now());
 
       const defaultPrompt = (agentId && agentId.includes("aLR")) ? DEFAULT_ALR_PROMPT : DEFAULT_BLR_PROMPT;
-      const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", agentId || "bLR");
+      const rawAgentId = agentId && agentId.includes("MachInstit") ? (agentId.includes("aLR") ? "aLR" : "bLR") : (agentId || "bLR");
+      const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", rawAgentId);
       const effectiveTopic = topic || "Autonomous AI research agents and their role in scientific discovery";
 
       const modelConfig: ModelProviderConfig = {
@@ -1014,6 +1015,7 @@ I will now provide the papers.`;
     reviewId: string,
     data: { projectId: string; agentId: string; researchQuestion: string; prompt: string; topic?: string; orchestratorName?: string | null; agentDescription?: string | null; userId?: string; journalId?: string },
     modelConfig?: ModelProviderConfig,
+    accessToken?: string | null,
   ) {
     const lrAgentId = data.agentId;
     let LR_SOURCE: string;
@@ -1027,8 +1029,9 @@ I will now provide the papers.`;
     async function emitLREvent(phase: string, message: string) {
       try {
         await storage.createResearchEvent({ source: LR_SOURCE, agentId: lrAgentId, phase, message });
+        console.log(`[LR ${reviewId}] Event emitted — phase=${phase} source=${LR_SOURCE} agentId=${lrAgentId}`);
       } catch (e) {
-        console.error("Failed to emit LR research event:", e);
+        console.error(`[LR ${reviewId}] Failed to emit research event phase=${phase}:`, e);
       }
     }
 
