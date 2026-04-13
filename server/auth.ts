@@ -223,6 +223,8 @@ export function setupAuth(app: Express) {
   });
 }
 
+const TRUSTED_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const sessionId = req.cookies?.session_id;
   if (!sessionId) {
@@ -239,7 +241,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ error: "Session expired" });
   }
 
-  if (session.validated !== "true") {
+  const isTrusted = session.email && TRUSTED_EMAILS.includes(session.email);
+  if (!isTrusted && session.validated !== "true") {
     return res.status(403).json({ error: "Account not validated on Future Science" });
   }
 
