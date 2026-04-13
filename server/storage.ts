@@ -30,6 +30,7 @@ export interface IStorage {
   createProjectPaper(paper: InsertProjectPaper): Promise<ProjectPaper>;
   createProjectPapers(papers: InsertProjectPaper[]): Promise<ProjectPaper[]>;
   getProjectPapersBySourceDocIds(docIds: string[]): Promise<ProjectPaper[]>;
+  deleteAllProjectPapers(): Promise<number>;
 
   createEditorial(editorial: InsertEditorial): Promise<EditorialRecord>;
   getEditorialById(id: string): Promise<EditorialRecord | undefined>;
@@ -163,6 +164,11 @@ export class DatabaseStorage implements IStorage {
   async getProjectPapersBySourceDocIds(docIds: string[]): Promise<ProjectPaper[]> {
     if (docIds.length === 0) return [];
     return db.select().from(projectPapers).where(inArray(projectPapers.sourceDocumentId, docIds));
+  }
+
+  async deleteAllProjectPapers(): Promise<number> {
+    const deleted = await db.delete(projectPapers).returning({ id: projectPapers.id });
+    return deleted.length;
   }
 
   async createEditorial(editorial: InsertEditorial): Promise<EditorialRecord> {
