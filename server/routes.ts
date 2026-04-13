@@ -14,6 +14,21 @@ import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, 
 import { publishToFutureScience, submitLiteratureReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
+function buildConventionName(modelName: string, agentId: string): string {
+  const m = (modelName || "").toLowerCase();
+  let initials: string;
+  if (m.includes("deepseek-r1")) initials = "DSR1";
+  else if (m.includes("deepseek")) initials = "DS32";
+  else if (m.includes("claude-sonnet-4-5") || m.includes("sonnet-4-5")) initials = "CS45";
+  else if (m.includes("claude-sonnet-4") || m.includes("sonnet-4")) initials = "CS4";
+  else if (m.includes("claude-opus")) initials = "CO";
+  else if (m.includes("claude-haiku")) initials = "CH";
+  else if (m.includes("gpt-4o")) initials = "G4O";
+  else if (m.includes("gpt-4")) initials = "G4";
+  else initials = "ML";
+  return `MachInstit ${initials}${agentId}-N1`;
+}
+
 function generateSlug(title: string): string {
   return title
     .toLowerCase()
@@ -859,7 +874,7 @@ I will now provide the papers.`;
       reviewRateLimit.set(clientIp, Date.now());
 
       const defaultPrompt = (agentId && agentId.includes("aLR")) ? DEFAULT_ALR_PROMPT : DEFAULT_BLR_PROMPT;
-      const effectiveOrchestratorName = orchestratorName || agentId;
+      const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", agentId || "bLR");
       const effectiveTopic = topic || "Autonomous AI research agents and their role in scientific discovery";
 
       const modelConfig: ModelProviderConfig = {
@@ -1360,7 +1375,7 @@ List every cited paper in Chicago author-date bibliography format:
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
 
-      const effectiveOrchestratorName = orchestratorName || "MachInstit CS45O-N1";
+      const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", "O");
       const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, machine psychology, and autonomous experimentation";
 
       const modelConfig: ModelProviderConfig = {

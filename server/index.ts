@@ -95,10 +95,9 @@ app.use((req, res, next) => {
 
   try {
     const BAD_SOURCES = ["Sacha Raoult", "LiteratureReview"];
-    const deleted = await db.delete(researchEvents).where(inArray(researchEvents.source, BAD_SOURCES));
-    const deletedCount = (deleted as any).rowCount ?? 0;
-    if (deletedCount > 0) {
-      console.log(`Purged ${deletedCount} research event(s) with non-convention source names.`);
+    const purged = await db.delete(researchEvents).where(inArray(researchEvents.source, BAD_SOURCES)).returning({ id: researchEvents.id });
+    if (purged.length > 0) {
+      console.log(`Purged ${purged.length} research event(s) with non-convention source names.`);
     }
   } catch (err) {
     console.error("Research event source purge failed (non-fatal):", err);
