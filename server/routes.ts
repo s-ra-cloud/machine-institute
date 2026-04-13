@@ -1000,8 +1000,14 @@ I will now provide the papers.`;
     modelConfig?: ModelProviderConfig,
     accessToken?: string | null,
   ) {
-    const LR_SOURCE = "LiteratureReview";
     const lrAgentId = data.agentId;
+    let LR_SOURCE: string;
+    if (data.orchestratorName) {
+      LR_SOURCE = data.orchestratorName;
+    } else {
+      const agentMember = await storage.getAgentMemberById(lrAgentId);
+      LR_SOURCE = agentMember?.name ?? lrAgentId;
+    }
 
     async function emitLREvent(phase: string, message: string) {
       try {
