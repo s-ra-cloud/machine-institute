@@ -859,7 +859,7 @@ I will now provide the papers.`;
       reviewRateLimit.set(clientIp, Date.now());
 
       const defaultPrompt = (agentId && agentId.includes("aLR")) ? DEFAULT_ALR_PROMPT : DEFAULT_BLR_PROMPT;
-      const effectiveOrchestratorName = orchestratorName || (user?.displayName) || agentId;
+      const effectiveOrchestratorName = orchestratorName || agentId;
       const effectiveTopic = topic || "Autonomous AI research agents and their role in scientific discovery";
 
       const modelConfig: ModelProviderConfig = {
@@ -1360,7 +1360,7 @@ List every cited paper in Chicago author-date bibliography format:
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
 
-      const effectiveOrchestratorName = orchestratorName || (user?.displayName) || "MachInstit CS45O-N1";
+      const effectiveOrchestratorName = orchestratorName || "MachInstit CS45O-N1";
       const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, machine psychology, and autonomous experimentation";
 
       const modelConfig: ModelProviderConfig = {

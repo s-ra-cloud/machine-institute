@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
@@ -70,6 +70,24 @@ interface LiteratureReviewRecord {
 
 const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
 
+function deriveModelInitials(modelName: string): string {
+  const m = (modelName || "").toLowerCase();
+  if (m.includes("deepseek-r1")) return "DSR1";
+  if (m.includes("deepseek")) return "DS32";
+  if (m.includes("claude-sonnet-4-5") || m.includes("sonnet-4-5")) return "CS45";
+  if (m.includes("claude-sonnet-4") || m.includes("sonnet-4")) return "CS4";
+  if (m.includes("claude-opus")) return "CO";
+  if (m.includes("claude-haiku")) return "CH";
+  if (m.includes("gpt-4o")) return "G4O";
+  if (m.includes("gpt-4")) return "G4";
+  return "ML";
+}
+
+function deriveAgentName(modelConfig: ModelConfig, agentSuffix: string): string {
+  const initials = deriveModelInitials(modelConfig.modelName);
+  return `MachInstit ${initials}${agentSuffix}-N1`;
+}
+
 export default function GenerationDashboard() {
   const { authenticated, user, login, isLoading: authLoading } = useAuth();
   const hasPlatformAccess = PLATFORM_ACCESS_EMAILS.includes(user?.email ?? "");
@@ -89,14 +107,9 @@ export default function GenerationDashboard() {
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
   const [selectedJournal, setSelectedJournal] = useState<string>("autonomous-journal-xai");
+  const orchestratorNameCustomized = useRef(false);
 
   const queryClient = useQueryClient();
-
-  useEffect(() => {
-    if (user?.displayName && !orchestratorName) {
-      setOrchestratorName(user.displayName);
-    }
-  }, [user]);
 
   const { data: editorialStatus } = useQuery<RateLimitStatus>({
     queryKey: ["/api/editorials/status"],
@@ -147,6 +160,12 @@ export default function GenerationDashboard() {
       setPrompt(defaultReviewPrompt.prompt);
     }
   }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, reviewMode]);
+
+  useEffect(() => {
+    if (orchestratorNameCustomized.current) return;
+    const agentSuffix = activeType === "editorial" ? "O" : reviewAgentId;
+    setOrchestratorName(deriveAgentName(modelConfig, agentSuffix));
+  }, [modelConfig, activeType, reviewAgentId]);
 
   const { data: recentEditorials } = useQuery<EditorialRecord[]>({
     queryKey: ["/api/editorials"],
@@ -436,9 +455,12 @@ export default function GenerationDashboard() {
                     <input
                       type="text"
                       value={orchestratorName}
-                      onChange={(e) => setOrchestratorName(e.target.value)}
+                      onChange={(e) => {
+                        orchestratorNameCustomized.current = true;
+                        setOrchestratorName(e.target.value);
+                      }}
                       className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
-                      placeholder={user?.displayName || "Your name"}
+                      placeholder="MachInstit DS32bLR-N1"
                       data-testid="input-orchestrator-name"
                     />
                   </div>

@@ -5,7 +5,8 @@ import { serveStatic } from "./static";
 import { seedDatabase } from "./seed";
 import { setupAuth } from "./auth";
 import { db } from "./db";
-import { editorials, projectPapers } from "@shared/schema";
+import { editorials, projectPapers, researchEvents } from "@shared/schema";
+import { inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { createServer } from "http";
 
@@ -90,6 +91,17 @@ app.use((req, res, next) => {
     }
   } catch (err) {
     console.error("Editorial cleanup failed (non-fatal):", err);
+  }
+
+  try {
+    const BAD_SOURCES = ["Sacha Raoult", "LiteratureReview"];
+    const deleted = await db.delete(researchEvents).where(inArray(researchEvents.source, BAD_SOURCES));
+    const deletedCount = (deleted as any).rowCount ?? 0;
+    if (deletedCount > 0) {
+      console.log(`Purged ${deletedCount} research event(s) with non-convention source names.`);
+    }
+  } catch (err) {
+    console.error("Research event source purge failed (non-fatal):", err);
   }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
