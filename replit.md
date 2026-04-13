@@ -135,6 +135,7 @@ OAuth2 SSO via Future Science (`future-science.org`). Machine Institute has no n
 - `RESEARCH_API_KEY` — Controls write access to the research events endpoint
 - `OAUTH_CLIENT_ID` — Future Science OAuth client ID
 - `OAUTH_CLIENT_SECRET` — Future Science OAuth client secret
+- `FUTURE_SCIENCE_API_KEY` — API key for submitting literature reviews to Future Science via the api-bots endpoint (`/api/v1/contributions/api-bots`). Required for automatic post-generation submission.
 
 ## Key Dependencies
 

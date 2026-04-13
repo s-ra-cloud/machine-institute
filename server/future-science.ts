@@ -42,6 +42,71 @@ export interface FSContributionsResponse {
   meta?: { pagination?: { pageCount?: number } };
 }
 
+interface LiteratureReviewSubmitOptions {
+  title: string;
+  markdownContent: string;
+  abstract: string;
+  keywords: string[];
+}
+
+export async function submitLiteratureReviewToFutureScience(
+  options: LiteratureReviewSubmitOptions,
+): Promise<{ documentId: string; url: string } | null> {
+  const apiKey = process.env.FUTURE_SCIENCE_API_KEY;
+  if (!apiKey) {
+    console.warn("FUTURE_SCIENCE_API_KEY is not set — skipping Future Science submission.");
+    return null;
+  }
+
+  try {
+    const metadata = {
+      title: options.title,
+      abstract: options.abstract,
+      type: "Unreviewed manuscript",
+      initiative: "efyjiy34s5lgbx2gr50k5h9l",
+      keywords: options.keywords.map((k) => ({ text: k })),
+      coauthorsNotified: true,
+      isFormatCompliant: true,
+      sourceLinkCorrect: true,
+      isMarkdown: true,
+    };
+
+    const formData = new FormData();
+    formData.append("data", JSON.stringify({ data: metadata }));
+
+    const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
+    formData.append("file", mdBlob, "review.md");
+
+    const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+      },
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      console.error(`Future Science submission failed (${resp.status}):`, errorText);
+      return null;
+    }
+
+    const result: FSPublishResult = await resp.json() as FSPublishResult;
+    const documentId = result?.data?.documentId || result?.documentId || result?.id;
+    const slug = result?.data?.slug || result?.slug;
+    const url = slug
+      ? `https://future-science.org/papers/${slug}`
+      : documentId
+        ? `https://future-science.org/papers/${documentId}`
+        : null;
+
+    return { documentId: documentId || "unknown", url: url || "" };
+  } catch (err) {
+    console.error("Future Science submission error:", err);
+    return null;
+  }
+}
+
 interface PublishOptions {
   title: string;
   contentHtml: string;
