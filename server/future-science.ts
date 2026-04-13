@@ -193,7 +193,7 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
   }
 }
 
-export async function fetchAbstractsAndKeywords(institutions: string[]): Promise<{
+export async function fetchAbstractsAndKeywords(institutions: string[], initiativeDocId?: string): Promise<{
   abstracts: FutureScienceAbstract[];
   allKeywords: string[];
 }> {
@@ -204,7 +204,10 @@ export async function fetchAbstractsAndKeywords(institutions: string[]): Promise
   const keywordSet = new Set<string>();
 
   while (page <= pageCount) {
-    const url = `${FS_API_BASE}/public/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+    let url = `${FS_API_BASE}/public/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+    if (initiativeDocId) {
+      url += `&filters[initiative]=${encodeURIComponent(initiativeDocId)}`;
+    }
     const resp = await fetch(url);
     if (!resp.ok) break;
 

@@ -18,6 +18,7 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  Lock,
 } from "lucide-react";
 
 type GenerationType = "editorial" | "literature-review";
@@ -87,6 +88,7 @@ export default function GenerationDashboard() {
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
+  const [selectedJournal, setSelectedJournal] = useState<string>("autonomous-journal-xai");
 
   const queryClient = useQueryClient();
 
@@ -181,6 +183,7 @@ export default function GenerationDashboard() {
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
           byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
+          journalId: selectedJournal,
         }),
       });
       if (!res.ok) {
@@ -212,6 +215,7 @@ export default function GenerationDashboard() {
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
           byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
+          journalId: selectedJournal,
         }),
       });
       if (!res.ok) {
@@ -357,7 +361,63 @@ export default function GenerationDashboard() {
 
                 <div>
                   <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
-                    1. Model Selection
+                    1. Journal
+                  </label>
+                  <div className="grid grid-cols-3 gap-3">
+                    <button
+                      onClick={() => setSelectedJournal("autonomous-journal-xai")}
+                      className={`p-4 border text-left transition-all ${
+                        selectedJournal === "autonomous-journal-xai"
+                          ? "border-primary bg-primary/10"
+                          : "border-border/50 bg-muted/5 hover:border-primary/40 hover:bg-muted/10"
+                      }`}
+                      data-testid="button-journal-mirror"
+                    >
+                      <div className="text-xs font-heading font-semibold mb-1">Mirror</div>
+                      <div className="text-[10px] font-mono text-muted-foreground leading-relaxed">
+                        Automated Journal of AI Interpretability
+                      </div>
+                      {selectedJournal === "autonomous-journal-xai" && (
+                        <div className="mt-2 flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3 text-primary" />
+                          <span className="text-[10px] font-mono text-primary">Selected</span>
+                        </div>
+                      )}
+                    </button>
+
+                    <div
+                      className="p-4 border border-border/30 bg-muted/5 opacity-50 cursor-not-allowed relative"
+                      data-testid="card-journal-locked-1"
+                    >
+                      <Lock className="w-3 h-3 text-muted-foreground/40 absolute top-3 right-3" />
+                      <div className="text-xs font-heading font-semibold mb-1 text-muted-foreground">Project 02</div>
+                      <div className="text-[10px] font-mono text-muted-foreground/50 leading-relaxed">
+                        Classification pending.
+                      </div>
+                      <div className="mt-2">
+                        <span className="text-[10px] font-mono text-muted-foreground/40">Coming Soon</span>
+                      </div>
+                    </div>
+
+                    <div
+                      className="p-4 border border-border/30 bg-muted/5 opacity-50 cursor-not-allowed relative"
+                      data-testid="card-journal-locked-2"
+                    >
+                      <Lock className="w-3 h-3 text-muted-foreground/40 absolute top-3 right-3" />
+                      <div className="text-xs font-heading font-semibold mb-1 text-muted-foreground">Project 03</div>
+                      <div className="text-[10px] font-mono text-muted-foreground/50 leading-relaxed">
+                        Classification pending.
+                      </div>
+                      <div className="mt-2">
+                        <span className="text-[10px] font-mono text-muted-foreground/40">Coming Soon</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
+                    2. Model Selection
                   </label>
                   <ModelSelector
                     value={modelConfig}
@@ -371,7 +431,7 @@ export default function GenerationDashboard() {
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
                     <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
-                      2. Orchestrator Name
+                      3. Orchestrator Name
                     </label>
                     <input
                       type="text"
@@ -399,7 +459,7 @@ export default function GenerationDashboard() {
 
                 <div>
                   <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
-                    3. Topic
+                    4. Topic
                   </label>
                   <input
                     type="text"
@@ -475,7 +535,7 @@ export default function GenerationDashboard() {
                     data-testid="button-toggle-prompt"
                   >
                     {promptExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                    4. System Prompt (editable)
+                    5. System Prompt (editable)
                   </button>
                   {promptExpanded && (
                     <div className="space-y-2">

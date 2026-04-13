@@ -810,7 +810,7 @@ I will now provide the papers.`;
 
   app.post("/api/literature-reviews", requireAuth, async (req, res) => {
     try {
-      const { projectId, agentId, researchQuestion, prompt, topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription } = req.body;
+      const { projectId, agentId, researchQuestion, prompt, topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, journalId } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
       const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
@@ -892,7 +892,10 @@ I will now provide the papers.`;
 
       res.status(201).json(review);
 
-      generateLiteratureReview(review.id, { ...result.data, topic: effectiveTopic, userId: user.id }, modelConfig).catch(err => {
+      const accessToken = await getAccessTokenForUser(req);
+
+      const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "autonomous-journal-xai";
+      generateLiteratureReview(review.id, { ...result.data, topic: effectiveTopic, userId: user.id, journalId: effectiveJournalId }, modelConfig, accessToken).catch(err => {
         console.error("Background review generation failed:", err);
       });
     } catch (err: any) {
@@ -994,7 +997,7 @@ I will now provide the papers.`;
 
   async function generateLiteratureReview(
     reviewId: string,
-    data: { projectId: string; agentId: string; researchQuestion: string; prompt: string; topic?: string; orchestratorName?: string | null; agentDescription?: string | null; userId?: string },
+    data: { projectId: string; agentId: string; researchQuestion: string; prompt: string; topic?: string; orchestratorName?: string | null; agentDescription?: string | null; userId?: string; journalId?: string },
     modelConfig?: ModelProviderConfig,
   ) {
     const lrAgentId = data.agentId;
@@ -1020,10 +1023,14 @@ I will now provide the papers.`;
 
       const projectPapersData = await storage.getProjectPapers(data.projectId);
 
+      const lrJournalId = data.journalId || "autonomous-journal-xai";
+      const lrInstitutions = INITIATIVE_INSTITUTIONS[lrJournalId] || ["Machine Institute"];
+      const lrInitiativeDocId = INITIATIVE_DOC_IDS[lrJournalId];
+
       let fsAbstracts: FutureScienceAbstract[] = [];
       let fsKeywords: string[] = [];
       try {
-        const fsData = await fetchAbstractsAndKeywords(["Machine Institute"]);
+        const fsData = await fetchAbstractsAndKeywords(lrInstitutions, lrInitiativeDocId);
         fsAbstracts = fsData.abstracts;
         fsKeywords = fsData.allKeywords;
       } catch (err) {
@@ -1310,7 +1317,7 @@ List every cited paper in Chicago author-date bibliography format:
 
   app.post("/api/editorials/generate", requireAuth, async (req, res) => {
     try {
-      const { topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, userPrompt, prompt } = req.body;
+      const { topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, userPrompt, prompt, journalId } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
       const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
@@ -1383,7 +1390,8 @@ List every cited paper in Chicago author-date bibliography format:
 
       const accessToken = await getAccessTokenForUser(req);
 
-      generateEditorial(editorial.id, modelConfig, effectiveTopic, userPrompt || null, prompt || null, accessToken).catch(err => {
+      const effectiveEditorialJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "autonomous-journal-xai";
+      generateEditorial(editorial.id, modelConfig, effectiveTopic, userPrompt || null, prompt || null, accessToken, effectiveEditorialJournalId).catch(err => {
         console.error("Background editorial generation failed:", err);
       });
     } catch (err: any) {
@@ -1436,6 +1444,7 @@ List every cited paper in Chicago author-date bibliography format:
     userPrompt?: string | null,
     editablePrompt?: string | null,
     accessToken?: string | null,
+    journalId?: string,
   ) {
     const ED_SOURCE = "Editorial";
 
@@ -1467,9 +1476,13 @@ List every cited paper in Chicago author-date bibliography format:
           excerpt: e.excerpt || "",
         }));
 
+      const edJournalId = journalId || "autonomous-journal-xai";
+      const edInstitutions = INITIATIVE_INSTITUTIONS[edJournalId] || ["Machine Institute"];
+      const edInitiativeDocId = INITIATIVE_DOC_IDS[edJournalId];
+
       let fsAbstracts: FutureScienceAbstract[] = [];
       try {
-        const fsData = await fetchAbstractsAndKeywords(["Machine Institute"]);
+        const fsData = await fetchAbstractsAndKeywords(edInstitutions, edInitiativeDocId);
         fsAbstracts = fsData.abstracts;
       } catch (err) {
         console.error("Future Science data retrieval for editorial failed (non-fatal):", err);
