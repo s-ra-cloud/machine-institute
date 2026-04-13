@@ -536,7 +536,7 @@ export default function GenerationDashboard() {
           <FadeIn className="mt-16">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-heading font-semibold">Recent Generations</h2>
-              {((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0)) > 0 && (
+              {user?.email === "sacharaoult@gmail.com" && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0)) > 0 && (
                 <button
                   onClick={() => {
                     if (confirm("Clear all generation history? This cannot be undone.")) {

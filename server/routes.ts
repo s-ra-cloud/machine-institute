@@ -767,6 +767,10 @@ I will now provide the papers.`;
   });
 
   app.delete("/api/generation/history", requireAuth, async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    if (user?.email !== "sacharaoult@gmail.com") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     try {
       await storage.deleteAllLiteratureReviews();
       await storage.deleteAllEditorials();
