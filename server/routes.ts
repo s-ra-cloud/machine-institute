@@ -1037,15 +1037,6 @@ I will now provide the papers.`;
 
       await emitLREvent("paper-fetch", `Fetched ${allPaperSources.length} paper(s) from project log and Future Science (${projectPapersData.length} project, ${fsAbstracts.length} FS).`);
 
-      if (allPaperSources.length === 0) {
-        await emitLREvent("failure", "No papers found in the project log or Future Science. Cannot generate literature review.");
-        await storage.updateLiteratureReview(reviewId, {
-          status: "failed",
-          contentHtml: `<p>No papers found in the project log or Future Science. Add papers before requesting a literature review.</p>`,
-        });
-        return;
-      }
-
       const clusters = clusterByKeywords(fsAbstracts);
       let clusterText = "";
       if (clusters.size > 0) {
@@ -1059,7 +1050,7 @@ I will now provide the papers.`;
       await emitLREvent("trend-analysis", `Clustered corpus into ${clusters.size} topic cluster(s) and extracted trend/gap analysis.`);
 
       const searchTerms = data.researchQuestion.split(/\s+/).filter(w => w.length > 4).slice(0, 6).join(" ");
-      console.log(`Literature review ${reviewId}: Second-pass arXiv retrieval for "${searchTerms}"`);
+      console.log(`Literature review ${reviewId}: arXiv retrieval for "${searchTerms}"`);
       await emitLREvent("arxiv-search", `Searching arXiv for recent papers matching: "${searchTerms}"`);
       const arxivResults = await searchArxiv(searchTerms);
       await emitLREvent("arxiv-search", `arXiv search returned ${arxivResults.length} result(s).`);
@@ -1068,6 +1059,15 @@ I will now provide the papers.`;
             `External arXiv Paper ${i + 1}:\narXiv ID: ${r.arxivId}\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.published}\nSummary: ${r.summary}`
           ).join("\n\n")
         : "";
+
+      if (allPaperSources.length === 0 && arxivResults.length === 0) {
+        await emitLREvent("failure", "No papers found in the project log, Future Science, or arXiv. Cannot generate literature review.");
+        await storage.updateLiteratureReview(reviewId, {
+          status: "failed",
+          contentHtml: `<p>No papers found in the project log, Future Science, or arXiv. Add papers or try a different research question.</p>`,
+        });
+        return;
+      }
 
       const paperTexts = allPaperSources.map((p, i) =>
         `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
