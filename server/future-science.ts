@@ -159,7 +159,7 @@ export async function fetchAbstractsAndKeywords(institutions: string[]): Promise
           .filter((s) => s.length > 0)
           .join(", ");
 
-        const keywords = Array.isArray(c.keywords) ? c.keywords : [];
+        const keywords = (Array.isArray(c.keywords) ? c.keywords : []).filter((k: unknown) => typeof k === "string" && k.length > 0);
         keywords.forEach((k: string) => keywordSet.add(k.toLowerCase()));
 
         abstracts.push({
@@ -182,6 +182,7 @@ export function extractTrendsAndGaps(abstracts: Array<{ title: string; abstract:
   const keywordFreq = new Map<string, number>();
   for (const a of abstracts) {
     for (const k of a.keywords) {
+      if (typeof k !== "string") continue;
       const lower = k.toLowerCase();
       keywordFreq.set(lower, (keywordFreq.get(lower) || 0) + 1);
     }
@@ -215,6 +216,7 @@ export function clusterByKeywords(abstracts: Array<{ title: string; abstract: st
 
   for (const a of abstracts) {
     for (const k of a.keywords) {
+      if (typeof k !== "string") continue;
       const lower = k.toLowerCase();
       if (!clusters.has(lower)) clusters.set(lower, []);
       clusters.get(lower)!.push({ title: a.title, abstract: a.abstract });
