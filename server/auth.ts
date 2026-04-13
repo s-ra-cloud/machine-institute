@@ -87,6 +87,18 @@ export function setupAuth(app: Express) {
       }
 
       const userInfo = await userInfoRes.json();
+      console.log("[OAuth] userInfo from Future Science:", JSON.stringify(userInfo));
+
+      const rawValidated = userInfo.validated;
+      const isValidated = rawValidated === true
+        || rawValidated === "true"
+        || rawValidated === 1
+        || rawValidated === "1"
+        || rawValidated === "True"
+        || rawValidated === "yes"
+        || rawValidated === "Yes"
+        || (typeof rawValidated === "string" && rawValidated.toLowerCase() === "true");
+      console.log(`[OAuth] validated field raw=${JSON.stringify(rawValidated)}, parsed=${isValidated}`);
 
       const sessionId = crypto.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -97,7 +109,7 @@ export function setupAuth(app: Express) {
         futureScienceUserId: userInfo.sub || userInfo.id || "unknown",
         email: userInfo.email || null,
         displayName: userInfo.name || userInfo.display_name || null,
-        validated: String(userInfo.validated === true || userInfo.validated === "true"),
+        validated: String(isValidated),
         expiresAt,
       });
 
@@ -149,6 +161,50 @@ export function setupAuth(app: Express) {
     } catch (err) {
       console.error("Auth check error:", err);
       return res.json({ authenticated: false });
+    }
+  });
+
+  app.post("/api/auth/refresh", async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.cookies?.session_id;
+      if (!sessionId) return res.status(401).json({ error: "Not authenticated" });
+
+      const [session] = await db.select().from(oauthSessions).where(eq(oauthSessions.id, sessionId)).limit(1);
+      if (!session || new Date(session.expiresAt) < new Date()) {
+        return res.status(401).json({ error: "Session expired" });
+      }
+
+      const userInfoRes = await fetch(FS_USERINFO_URL, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      });
+
+      if (!userInfoRes.ok) {
+        console.error("[refresh] userinfo failed:", userInfoRes.status);
+        return res.status(502).json({ error: "Failed to refresh from Future Science" });
+      }
+
+      const userInfo = await userInfoRes.json();
+      console.log("[refresh] userInfo:", JSON.stringify(userInfo));
+
+      const rawValidated = userInfo.validated;
+      const isValidated = rawValidated === true
+        || rawValidated === "true"
+        || rawValidated === 1
+        || rawValidated === "1"
+        || rawValidated === "True"
+        || rawValidated === "yes"
+        || rawValidated === "Yes"
+        || (typeof rawValidated === "string" && rawValidated.toLowerCase() === "true");
+
+      await db
+        .update(oauthSessions)
+        .set({ validated: String(isValidated) })
+        .where(eq(oauthSessions.id, sessionId));
+
+      return res.json({ validated: isValidated, rawValidated });
+    } catch (err) {
+      console.error("Session refresh error:", err);
+      return res.status(500).json({ error: "Internal server error" });
     }
   });
 

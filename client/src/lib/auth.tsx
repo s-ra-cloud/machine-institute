@@ -1,4 +1,4 @@
-import { createContext, useContext, useCallback } from "react";
+import { createContext, useContext, useCallback, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface AuthUser {
@@ -41,6 +41,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     staleTime: 60_000,
     retry: false,
   });
+
+  useEffect(() => {
+    if (!isLoading && data?.authenticated && data?.validated === false) {
+      fetch("/api/auth/refresh", { method: "POST" })
+        .then(r => r.ok ? r.json() : null)
+        .then(result => {
+          if (result?.validated) {
+            queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isLoading, data?.authenticated, data?.validated, queryClient]);
 
   const login = useCallback(() => {
     window.location.href = "/api/auth/login";

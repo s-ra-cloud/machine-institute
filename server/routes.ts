@@ -753,7 +753,7 @@ I will now provide the papers.`;
     });
   });
 
-  app.post("/api/generation/validate-key", requireSession, async (req, res) => {
+  app.post("/api/generation/validate-key", requireAuth, async (req, res) => {
     try {
       const { provider, apiKey } = req.body;
       if (!provider || !apiKey) {
@@ -777,7 +777,7 @@ I will now provide the papers.`;
     }
   });
 
-  app.get("/api/generation/rate-limit-status", requireSession, async (req: Request, res: Response) => {
+  app.get("/api/generation/rate-limit-status", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const editorialLimit = await storage.getUserRateLimit(user.id, "editorial");
@@ -808,7 +808,7 @@ I will now provide the papers.`;
 
   const reviewRateLimit = new Map<string, number>();
 
-  app.post("/api/literature-reviews", requireSession, async (req, res) => {
+  app.post("/api/literature-reviews", requireAuth, async (req, res) => {
     try {
       const { projectId, agentId, researchQuestion, prompt, topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription } = req.body;
 
@@ -1292,7 +1292,7 @@ List every cited paper in Chicago author-date bibliography format:
     }
   });
 
-  app.post("/api/editorials/generate", requireSession, async (req, res) => {
+  app.post("/api/editorials/generate", requireAuth, async (req, res) => {
     try {
       const { topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, userPrompt, prompt } = req.body;
 
