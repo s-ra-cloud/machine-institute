@@ -933,6 +933,21 @@ I will now provide the papers.`;
     }
   });
 
+  app.get("/api/initiative-publications", async (req, res) => {
+    try {
+      const url = "https://future-science.org/api/v1/public/contributions?filters[initiative]=efyjiy34s5lgbx2gr50k5h9l&pagination[pageSize]=5&sort[0]=publishedAt:desc";
+      const response = await fetch(url);
+      if (!response.ok) {
+        return res.status(502).json({ error: "Failed to fetch publications from Future Science" });
+      }
+      const data = await response.json();
+      return res.json(data);
+    } catch (err: any) {
+      console.error("Error fetching initiative publications:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/literature-reviews/:id", async (req, res) => {
     try {
       const review = await storage.getLiteratureReviewById(req.params.id);
