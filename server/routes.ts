@@ -1000,8 +1000,20 @@ I will now provide the papers.`;
     modelConfig?: ModelProviderConfig,
     accessToken?: string | null,
   ) {
+    const LR_SOURCE = "LiteratureReview";
+    const lrAgentId = data.agentId;
+
+    async function emitLREvent(phase: string, message: string) {
+      try {
+        await storage.createResearchEvent({ source: LR_SOURCE, agentId: lrAgentId, phase, message });
+      } catch (e) {
+        console.error("Failed to emit LR research event:", e);
+      }
+    }
+
     try {
       await storage.updateLiteratureReview(reviewId, { status: "generating" });
+      await emitLREvent("initialization", `Literature review started for: "${data.researchQuestion}"`);
 
       const projectPapersData = await storage.getProjectPapers(data.projectId);
 
@@ -1020,7 +1032,10 @@ I will now provide the papers.`;
         ...fsAbstracts.filter(a => !projectPapersData.some(p => p.title === a.title)).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract })),
       ];
 
+      await emitLREvent("paper-fetch", `Fetched ${allPaperSources.length} paper(s) from project log and Future Science (${projectPapersData.length} project, ${fsAbstracts.length} FS).`);
+
       if (allPaperSources.length === 0) {
+        await emitLREvent("failure", "No papers found in the project log or Future Science. Cannot generate literature review.");
         await storage.updateLiteratureReview(reviewId, {
           status: "failed",
           contentHtml: `<p>No papers found in the project log or Future Science. Add papers before requesting a literature review.</p>`,
@@ -1038,10 +1053,13 @@ I will now provide the papers.`;
       }
 
       const trendsAnalysis = extractTrendsAndGaps(fsAbstracts);
+      await emitLREvent("trend-analysis", `Clustered corpus into ${clusters.size} topic cluster(s) and extracted trend/gap analysis.`);
 
       const searchTerms = data.researchQuestion.split(/\s+/).filter(w => w.length > 4).slice(0, 6).join(" ");
       console.log(`Literature review ${reviewId}: Second-pass arXiv retrieval for "${searchTerms}"`);
+      await emitLREvent("arxiv-search", `Searching arXiv for recent papers matching: "${searchTerms}"`);
       const arxivResults = await searchArxiv(searchTerms);
+      await emitLREvent("arxiv-search", `arXiv search returned ${arxivResults.length} result(s).`);
       const arxivTexts = arxivResults.length > 0
         ? arxivResults.map((r, i) =>
             `External arXiv Paper ${i + 1}:\narXiv ID: ${r.arxivId}\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.published}\nSummary: ${r.summary}`
@@ -1082,10 +1100,12 @@ I will now provide the papers.`;
 
       await storage.updateLiteratureReview(reviewId, { promptTrace, sourceTrace });
 
+      await emitLREvent("llm-start", `Calling LLM (${model}) to synthesize literature review from ${allPaperSources.length} paper(s) and ${arxivResults.length} arXiv result(s).`);
       const generationResult = await generateWithConfig(config, systemPrompt, userMessage, {
         maxTokens: 12000,
         temperature: 0.3,
       });
+      await emitLREvent("llm-complete", `LLM synthesis complete. Formatting and saving review.`);
 
       const reviewText = generationResult.content;
       const rawHtml = markdownToHtml(reviewText);
@@ -1133,11 +1153,13 @@ I will now provide the papers.`;
       }
 
       await storage.updateLiteratureReview(reviewId, updates);
+      await emitLREvent("completed", `Literature review published successfully: "${data.researchQuestion}"`);
 
       console.log(`Literature review ${reviewId} completed successfully.`);
     } catch (err: any) {
       console.error(`Literature review ${reviewId} generation failed:`, err);
       const safeError = (err.message || "Unknown error").replace(/[<>&"']/g, "");
+      await emitLREvent("failure", `Literature review generation failed: ${safeError}`);
       await storage.updateLiteratureReview(reviewId, {
         status: "failed",
         contentHtml: `<p>Generation failed: ${safeError}</p>`,
@@ -1421,8 +1443,23 @@ List every cited paper in Chicago author-date bibliography format:
     editablePrompt?: string | null,
     accessToken?: string | null,
   ) {
+    const ED_SOURCE = "Editorial";
+
+    async function emitEDEvent(agentId: string, phase: string, message: string) {
+      try {
+        await storage.createResearchEvent({ source: ED_SOURCE, agentId, phase, message });
+      } catch (e) {
+        console.error("Failed to emit editorial research event:", e);
+      }
+    }
+
     try {
       await storage.updateEditorial(editorialId, { status: "generating" });
+
+      const editorialRecord = await storage.getEditorialById(editorialId);
+      const edAgentId = editorialRecord?.agentId || "editorial-agent";
+
+      await emitEDEvent(edAgentId, "initialization", `Editorial generation started${topic ? ` for topic: "${topic}"` : ""}.`);
 
       const allPapers = await storage.getAllProjectPapers();
       const allReviews = await storage.getAllLiteratureReviews();
@@ -1449,7 +1486,11 @@ List every cited paper in Chicago author-date bibliography format:
         ...fsAbstracts.filter(a => !allPapers.some(p => p.title === a.title)).map(a => ({ title: a.title, authors: a.authors, date: a.date, description: a.abstract })),
       ];
 
+      await emitEDEvent(edAgentId, "context-building", `Gathered ${allPaperSources.length} paper(s) (${allPapers.length} project, ${fsAbstracts.length} FS).`);
+      await emitEDEvent(edAgentId, "review-loading", `Loaded ${completedReviews.length} completed literature review(s) and ${previousEditorials.length} previously published editorial(s) for context.`);
+
       if (allPaperSources.length === 0) {
+        await emitEDEvent(edAgentId, "failure", "No papers found in the publication log or Future Science. Cannot generate editorial.");
         await storage.updateEditorial(editorialId, {
           status: "failed",
           title: "Editorial generation failed",
@@ -1484,7 +1525,9 @@ List every cited paper in Chicago author-date bibliography format:
       const searchQuery = [...new Set(topicKeywords)].slice(0, 8).join(" ");
 
       console.log(`Editorial ${editorialId}: Searching arXiv for "${searchQuery}"`);
+      await emitEDEvent(edAgentId, "arxiv-search", `Searching arXiv for hot topics matching: "${searchQuery}"`);
       const arxivResults = await searchArxiv(searchQuery);
+      await emitEDEvent(edAgentId, "arxiv-search", `arXiv search returned ${arxivResults.length} hot-topic result(s).`);
 
       const arxivTexts = arxivResults.length > 0
         ? arxivResults.map((r, i) =>
@@ -1550,10 +1593,12 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
       await storage.updateEditorial(editorialId, { promptTrace, sourceTrace });
 
       console.log(`Editorial ${editorialId}: Calling LLM (${model})...`);
+      await emitEDEvent(edAgentId, "llm-start", `Calling LLM (${model}) to write editorial from ${allPaperSources.length} paper(s), ${completedReviews.length} review(s), and ${arxivResults.length} arXiv result(s).`);
       const generationResult = await generateWithConfig(config, effectiveSystemPrompt, userMessage, {
         maxTokens: 10000,
         temperature: 0.4,
       });
+      await emitEDEvent(edAgentId, "llm-response", `LLM response received. Processing and extracting editorial content.`);
 
       let editorialText = generationResult.content;
 
@@ -1664,11 +1709,15 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
       }
 
       await storage.updateEditorial(editorialId, updates);
+      await emitEDEvent(edAgentId, "completed", `Editorial published successfully: "${extractedTitle}"`);
 
       console.log(`Editorial ${editorialId} completed: "${extractedTitle}"`);
     } catch (err: any) {
       console.error(`Editorial ${editorialId} generation failed:`, err);
       const safeError = (err.message || "Unknown error").replace(/[<>&"']/g, "");
+      const editorialForErr = await storage.getEditorialById(editorialId).catch(() => null);
+      const errAgentId = editorialForErr?.agentId || "editorial-agent";
+      await emitEDEvent(errAgentId, "failure", `Editorial generation failed: ${safeError}`);
       await storage.updateEditorial(editorialId, {
         status: "failed",
         title: "Editorial generation failed",
