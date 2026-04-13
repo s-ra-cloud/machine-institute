@@ -9,7 +9,7 @@ import fs from "fs";
 import OpenAI from "openai";
 import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
-import { requireAuth, optionalAuth } from "./auth";
+import { requireAuth, optionalAuth, adminAuth } from "./auth";
 import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
 import { publishToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
@@ -766,11 +766,7 @@ I will now provide the papers.`;
     }
   });
 
-  app.delete("/api/generation/history", requireAuth, async (req: Request, res: Response) => {
-    const user = (req as any).user;
-    if (user?.email !== "sacharaoult@gmail.com") {
-      return res.status(403).json({ error: "Forbidden" });
-    }
+  app.delete("/api/generation/history", adminAuth, async (req: Request, res: Response) => {
     try {
       await storage.deleteAllLiteratureReviews();
       await storage.deleteAllEditorials();
