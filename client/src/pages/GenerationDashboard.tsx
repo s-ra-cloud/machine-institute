@@ -67,8 +67,11 @@ interface LiteratureReviewRecord {
   sourceTrace: string | null;
 }
 
+const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
+
 export default function GenerationDashboard() {
   const { authenticated, user, login, isLoading: authLoading } = useAuth();
+  const hasPlatformAccess = PLATFORM_ACCESS_EMAILS.includes(user?.email ?? "");
   const [activeType, setActiveType] = useState<GenerationType | null>(null);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     providerMode: "platform",
@@ -361,6 +364,7 @@ export default function GenerationDashboard() {
                     onChange={setModelConfig}
                     rateLimitInfo={activeType === "editorial" ? editorialStatus : reviewStatus}
                     limitLabel={activeType === "editorial" ? "editorial generations" : "review generations"}
+                    hasPlatformAccess={hasPlatformAccess}
                   />
                 </div>
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Loader2, Check, AlertCircle, Key, Cpu } from "lucide-react";
+import { Loader2, Check, AlertCircle, Key, Cpu, Lock } from "lucide-react";
 
 export interface ModelConfig {
   providerMode: "platform" | "byoc";
@@ -33,10 +33,13 @@ interface Props {
   onChange: (config: ModelConfig) => void;
   rateLimitInfo?: { remaining: number; resetAt: number | null; count: number } | null;
   limitLabel?: string;
+  hasPlatformAccess?: boolean;
 }
 
-export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Props) {
-  const [tab, setTab] = useState<"platform" | "byoc">(value.providerMode);
+export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasPlatformAccess = true }: Props) {
+  const [tab, setTab] = useState<"platform" | "byoc">(
+    hasPlatformAccess ? value.providerMode : "byoc"
+  );
   const [apiKey, setApiKey] = useState("");
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<{ valid: boolean; error?: string } | null>(null);
@@ -47,7 +50,21 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Pr
   const byocProviders = configData?.byocProviders || [];
 
   useEffect(() => {
-    if (tab === "platform" && platformModels.length > 0 && !value.modelName) {
+    if (!hasPlatformAccess && value.providerMode === "platform") {
+      const defaultProvider = byocProviders[0];
+      onChange({
+        providerMode: "byoc",
+        provider: defaultProvider?.id || "openai",
+        modelName: defaultProvider?.defaultModel || "gpt-4o",
+        apiKey: "",
+        keyValidated: false,
+      });
+      setTab("byoc");
+    }
+  }, [hasPlatformAccess, byocProviders.length]);
+
+  useEffect(() => {
+    if (tab === "platform" && hasPlatformAccess && platformModels.length > 0 && !value.modelName) {
       const defaultModel = platformModels.find(m => m.default) || platformModels[0];
       onChange({
         providerMode: "platform",
@@ -58,6 +75,7 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Pr
   }, [tab, platformModels]);
 
   const handleTabChange = (newTab: "platform" | "byoc") => {
+    if (newTab === "platform" && !hasPlatformAccess) return;
     setTab(newTab);
     if (newTab === "platform") {
       const defaultModel = platformModels.find(m => m.default) || platformModels[0];
@@ -107,13 +125,23 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Pr
       <div className="flex border-b border-border/30">
         <button
           onClick={() => handleTabChange("platform")}
+          disabled={!hasPlatformAccess}
           className={`flex-1 px-4 py-3 text-xs font-mono uppercase tracking-widest transition-colors flex items-center justify-center gap-2 ${
-            tab === "platform" ? "bg-primary/10 text-primary border-b-2 border-primary" : "text-muted-foreground/50 hover:text-muted-foreground"
+            !hasPlatformAccess
+              ? "text-muted-foreground/25 cursor-not-allowed"
+              : tab === "platform"
+              ? "bg-primary/10 text-primary border-b-2 border-primary"
+              : "text-muted-foreground/50 hover:text-muted-foreground"
           }`}
           data-testid="tab-platform"
         >
-          <Cpu className="w-3.5 h-3.5" />
+          {hasPlatformAccess ? <Cpu className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
           Platform Models
+          {!hasPlatformAccess && (
+            <span className="ml-1 text-[9px] font-mono bg-muted/30 px-1.5 py-0.5 rounded-sm text-muted-foreground/40 normal-case tracking-normal">
+              Restricted
+            </span>
+          )}
         </button>
         <button
           onClick={() => handleTabChange("byoc")}
@@ -126,6 +154,15 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel }: Pr
           Bring Your Own Key
         </button>
       </div>
+
+      {!hasPlatformAccess && tab === "byoc" && (
+        <div className="px-5 pt-4 pb-0">
+          <div className="flex items-start gap-2 text-[10px] font-mono text-muted-foreground/50 border border-border/20 bg-muted/5 px-3 py-2.5" data-testid="platform-locked-notice">
+            <Lock className="w-3 h-3 mt-0.5 shrink-0 text-muted-foreground/30" />
+            <span>Platform models are restricted to institute members. Bring your own API key to generate content.</span>
+          </div>
+        </div>
+      )}
 
       <div className="p-5 space-y-4">
         {tab === "platform" ? (

@@ -821,8 +821,13 @@ I will now provide the papers.`;
         return res.status(400).json({ error: `Invalid modelProvider. Must be one of: ${VALID_PROVIDERS.join(", ")}` });
       }
 
+      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
       const user = (req as any).user;
       const isPlatform = providerMode !== "byoc";
+
+      if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
+      }
 
       if (isPlatform) {
         if (!process.env.OPENROUTER_API_KEY) {
@@ -1300,8 +1305,13 @@ List every cited paper in Chicago author-date bibliography format:
         return res.status(400).json({ error: `Invalid modelProvider. Must be one of: ${VALID_PROVIDERS.join(", ")}` });
       }
 
+      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
       const user = (req as any).user;
       const isPlatform = providerMode !== "byoc";
+
+      if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
+      }
 
       if (isPlatform) {
         if (!process.env.OPENROUTER_API_KEY) {
