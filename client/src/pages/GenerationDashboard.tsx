@@ -223,6 +223,18 @@ export default function GenerationDashboard() {
     },
   });
 
+  const clearHistoryMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/generation/history", { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to clear history");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/editorials"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/literature-reviews-all"] });
+    },
+  });
+
   useEffect(() => {
     if (!authLoading && !authenticated) {
       login();
@@ -522,7 +534,28 @@ export default function GenerationDashboard() {
           )}
 
           <FadeIn className="mt-16">
-            <h2 className="text-2xl font-heading font-semibold mb-6">Recent Generations</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-heading font-semibold">Recent Generations</h2>
+              {((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0)) > 0 && (
+                <button
+                  onClick={() => {
+                    if (confirm("Clear all generation history? This cannot be undone.")) {
+                      clearHistoryMutation.mutate();
+                    }
+                  }}
+                  disabled={clearHistoryMutation.isPending}
+                  className="text-[10px] font-mono text-muted-foreground/40 hover:text-red-400 transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                  data-testid="button-clear-history"
+                >
+                  {clearHistoryMutation.isPending ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-3 h-3" />
+                  )}
+                  Clear history
+                </button>
+              )}
+            </div>
 
             <div className="space-y-4">
               {(recentEditorials || []).slice(0, 5).map((ed) => (

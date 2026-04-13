@@ -766,6 +766,17 @@ I will now provide the papers.`;
     }
   });
 
+  app.delete("/api/generation/history", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteAllLiteratureReviews();
+      await storage.deleteAllEditorials();
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error clearing generation history:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/generation/rate-limit-status", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;

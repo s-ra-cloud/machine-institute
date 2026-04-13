@@ -36,6 +36,7 @@ export interface IStorage {
   getEditorialBySlug(slug: string): Promise<EditorialRecord | undefined>;
   getAllEditorials(): Promise<EditorialRecord[]>;
   deleteAllEditorials(): Promise<void>;
+  deleteAllLiteratureReviews(): Promise<void>;
   updateEditorial(id: string, updates: Partial<EditorialRecord>): Promise<EditorialRecord>;
 
   getAllAgentMembers(): Promise<AgentMember[]>;
@@ -185,6 +186,10 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllEditorials(): Promise<void> {
     await db.delete(editorials);
+  }
+
+  async deleteAllLiteratureReviews(): Promise<void> {
+    await db.delete(literatureReviews);
   }
 
   async updateEditorial(id: string, updates: Partial<EditorialRecord>): Promise<EditorialRecord> {
