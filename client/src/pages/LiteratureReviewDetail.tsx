@@ -62,7 +62,7 @@ export default function LiteratureReviewDetail() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Navigation />
-      <main className="pt-28 pb-24 flex-1">
+      <main className="pt-28 pb-24">
         <div className="container mx-auto px-6 max-w-4xl">
           <FadeIn>
             <Link href={`/projects/${review.projectId}`}>

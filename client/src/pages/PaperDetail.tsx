@@ -53,7 +53,7 @@ export default function PaperDetail() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <div className="container mx-auto px-6 py-12 max-w-4xl flex-1">
+      <div className="container mx-auto px-6 py-12 max-w-4xl">
         <FadeIn>
           <Link href="/">
             <Button variant="ghost" className="mb-8 font-mono text-xs text-muted-foreground hover:text-foreground" data-testid="button-back">

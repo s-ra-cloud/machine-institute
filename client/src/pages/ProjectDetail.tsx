@@ -78,7 +78,7 @@ export default function ProjectDetail() {
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col">
         <Navigation />
-        <div className="pt-28 container mx-auto px-6 text-center flex-1">
+        <div className="pt-28 container mx-auto px-6 text-center">
           <p className="text-muted-foreground font-mono">Project not found.</p>
           <Link href="/projects">
             <Button variant="outline" className="mt-4 rounded-none font-mono text-xs" data-testid="button-back">
@@ -95,7 +95,7 @@ export default function ProjectDetail() {
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col">
         <Navigation />
-        <main className="pt-28 pb-24 flex-1">
+        <main className="pt-28 pb-24">
           <div className="container mx-auto px-6 max-w-3xl">
             <Link href="/projects">
               <Button variant="ghost" className="mb-8 font-mono text-xs text-muted-foreground" data-testid="button-back">
@@ -136,7 +136,7 @@ export default function ProjectDetail() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Navigation />
-      <main className="pt-28 pb-24 flex-1">
+      <main className="pt-28 pb-24">
         <div className="container mx-auto px-6 max-w-4xl">
           <Link href="/projects">
             <Button variant="ghost" className="mb-8 font-mono text-xs text-muted-foreground" data-testid="button-back">

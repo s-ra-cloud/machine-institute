@@ -2,7 +2,7 @@ import { Link } from "wouter";
 
 export function Footer() {
   return (
-    <footer className="py-8 bg-background border-t border-border/30">
+    <footer className="py-8 bg-background border-t border-border/30 mt-auto">
       <div className="container mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <img src="/logo.png" alt="Machine Institute" className="h-5 w-5 object-contain" />

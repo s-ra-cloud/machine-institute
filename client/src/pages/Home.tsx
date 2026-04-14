@@ -37,7 +37,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background text-foreground relative flex flex-col">
       <Navigation />
-      <main className="flex-1">
+      <main>
         <Hero />
 
         <section className="py-24 bg-background border-t border-border/50" id="roadmap">
