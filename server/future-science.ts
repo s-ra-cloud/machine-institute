@@ -106,10 +106,11 @@ export async function submitLiteratureReviewToFutureScience(
     const result: FSPublishResult = await resp.json() as FSPublishResult;
     const documentId = result?.data?.documentId || result?.documentId || result?.id;
     const slug = result?.data?.slug || result?.slug;
+    const FS_INITIATIVE = "mirror-an-automated-journal-of-ai-interpretability";
     const url = slug
-      ? `https://future-science.org/papers/${slug}`
+      ? `https://future-science.org/${FS_INITIATIVE}/papers/${slug}`
       : documentId
-        ? `https://future-science.org/papers/${documentId}`
+        ? `https://future-science.org/${FS_INITIATIVE}/papers/${documentId}`
         : null;
 
     return { documentId: documentId || "unknown", url: url || "" };
@@ -191,11 +192,11 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
     const result: FSPublishResult = await resp.json() as FSPublishResult;
     const documentId = result?.data?.documentId || result?.documentId || result?.id;
     const slug = result?.data?.slug || result?.slug;
-    const initiativeSlug = options.initiativeSlug || "papers";
+    const initiativeSlug = options.initiativeSlug || "mirror-an-automated-journal-of-ai-interpretability";
     const url = slug
-      ? `https://future-science.org/${initiativeSlug}/${slug}`
+      ? `https://future-science.org/${initiativeSlug}/papers/${slug}`
       : documentId
-        ? `https://future-science.org/${initiativeSlug}/${documentId}`
+        ? `https://future-science.org/${initiativeSlug}/papers/${documentId}`
         : null;
 
     return { documentId: documentId || "unknown", url: url || "" };

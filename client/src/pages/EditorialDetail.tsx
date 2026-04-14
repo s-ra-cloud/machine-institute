@@ -186,7 +186,7 @@ export default function EditorialDetail() {
                     {editorial.publishedDocumentId && (
                       <div>
                         <a
-                          href={`https://future-science.org/papers/${editorial.publishedDocumentId}`}
+                          href={`https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/papers/${editorial.publishedDocumentId}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-xs font-mono text-primary hover:underline flex items-center gap-1"
