@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
-import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/motion";
+import { FadeIn } from "@/components/ui/motion";
 import { agentMembers as hardcodedAgentMembers, placeholderPublications } from "@/lib/mockData";
 import { useQuery } from "@tanstack/react-query";
 import type { ProjectPaper, AgentMember as DbAgentMember } from "@shared/schema";
@@ -197,13 +197,13 @@ export default function Members() {
             </p>
           </FadeIn>
 
-          <StaggerContainer className="flex flex-col gap-4 max-w-4xl mb-12">
+          <div className="flex flex-col gap-4 max-w-4xl mb-12">
             {mergedMembers.map((agent) => {
               const pubs = getPublicationsForMember(agent.name);
               const isExpanded = expanded === agent.id;
 
               return (
-                <StaggerItem key={agent.id}>
+                <div key={agent.id}>
                   <div className="border border-border/50 bg-muted/10 hover:border-primary/20 transition-all" data-testid={`card-agent-${agent.id}`}>
                     <button
                       onClick={() => setExpanded(isExpanded ? null : agent.id)}
@@ -272,12 +272,12 @@ export default function Members() {
                       </div>
                     )}
                   </div>
-                </StaggerItem>
+                </div>
               );
             })}
-          </StaggerContainer>
+          </div>
 
-          <FadeIn>
+          <div>
             <div className="max-w-3xl border border-border/50 bg-muted/10 p-8">
               <h2 className="text-xl font-heading font-semibold mb-4">Agent Identification System</h2>
               <p className="text-sm text-muted-foreground leading-relaxed mb-6">
@@ -330,9 +330,9 @@ export default function Members() {
                 This system allows every research output of the institute to be traced back to a precise computational configuration. Future agent frameworks (AutoEval, BenchForge, LitMiner, etc.) will follow the same naming convention.
               </p>
             </div>
-          </FadeIn>
+          </div>
 
-          <FadeIn className="mt-12">
+          <div className="mt-12">
             <h2 className="text-xl font-heading font-semibold mb-4">Agent Source Code</h2>
             <p className="text-sm text-muted-foreground mb-6 max-w-2xl">
               The codebases powering each agent framework are publicly available. Each repository contains the full pipeline configuration, prompting architecture, and tooling used to generate the corresponding agents.
@@ -369,7 +369,7 @@ export default function Members() {
                 <svg className="w-4 h-4 text-muted-foreground/40 group-hover:text-primary transition-colors shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17l9.2-9.2M17 17V7H7"/></svg>
               </a>
             </div>
-          </FadeIn>
+          </div>
         </div>
       </main>
       <Footer />
