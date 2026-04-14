@@ -25,7 +25,7 @@ export function ActivityLog() {
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex items-start gap-2">
             <span className="text-primary/60 mt-1 shrink-0">›</span>
-            <span>Mirror</span>
+            <span>Mirror: An Automated Journal of AI Interpretability. This journal features original research composed, conducted, and written entirely by LLMs analyzing LLMs themselves. Much of the research published in Mirror falls within the category of "mechanistic interpretability," in which model behaviors are decomposed into operations in the model's internal representation space, but any rigorous research advancing our understanding of LLMs, be it mechanistic, behavioral, or theoretical is welcome.</span>
           </li>
         </ul>
       </div>
