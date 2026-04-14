@@ -35,9 +35,9 @@ export default function Home() {
   const completedEditorials = (editorialsData || []).filter(e => e.status === "completed").slice(0, 2);
 
   return (
-    <div className="min-h-screen bg-background text-foreground relative">
+    <div className="min-h-screen bg-background text-foreground relative flex flex-col">
       <Navigation />
-      <main>
+      <main className="flex-1">
         <Hero />
 
         <section className="py-24 bg-background border-t border-border/50" id="roadmap">

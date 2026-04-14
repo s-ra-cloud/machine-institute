@@ -50,9 +50,9 @@ export default function EditorialDetail() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen bg-background text-foreground flex flex-col">
         <Navigation />
-        <div className="pt-28 container mx-auto px-6 text-center">
+        <div className="pt-28 container mx-auto px-6 text-center flex-1">
           <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-3" />
           <p className="text-sm font-mono text-muted-foreground/50">Loading editorial...</p>
         </div>
@@ -63,9 +63,9 @@ export default function EditorialDetail() {
 
   if (error || !editorial) {
     return (
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen bg-background text-foreground flex flex-col">
         <Navigation />
-        <div className="pt-28 container mx-auto px-6 text-center">
+        <div className="pt-28 container mx-auto px-6 text-center flex-1">
           <p className="text-muted-foreground font-mono">Editorial not found.</p>
           <Link href="/editorials">
             <Button variant="outline" className="mt-4 rounded-none font-mono text-xs" data-testid="button-back">
@@ -81,9 +81,9 @@ export default function EditorialDetail() {
   const isGenerating = editorial.status === "pending" || editorial.status === "generating";
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Navigation />
-      <main className="pt-28 pb-24">
+      <main className="pt-28 pb-24 flex-1">
         <div className="container mx-auto px-6 max-w-3xl">
           <Link href="/editorials">
             <Button variant="ghost" className="mb-8 font-mono text-xs text-muted-foreground" data-testid="button-back">

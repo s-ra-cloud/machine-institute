@@ -7,9 +7,9 @@ import { ArrowRight, Lock } from "lucide-react";
 
 export default function Projects() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Navigation />
-      <main className="pt-28 pb-24">
+      <main className="pt-28 pb-24 flex-1">
         <div className="container mx-auto px-6">
           <FadeIn className="mb-12">
             <h1 className="text-4xl md:text-5xl font-heading font-bold mb-4">Projects</h1>

@@ -28,17 +28,21 @@ export default function LiteratureReviewDetail() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-muted-foreground font-mono text-sm">Loading...</p>
+      <div className="min-h-screen bg-background flex flex-col">
+        <Navigation />
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-muted-foreground font-mono text-sm">Loading...</p>
+        </div>
+        <Footer />
       </div>
     );
   }
 
   if (!review) {
     return (
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen bg-background text-foreground flex flex-col">
         <Navigation />
-        <div className="flex flex-col items-center justify-center gap-6 pt-28">
+        <div className="flex flex-col items-center justify-center gap-6 pt-28 flex-1">
           <p className="text-muted-foreground font-mono text-sm">Literature review not found.</p>
           <Link href="/">
             <Button variant="outline" className="rounded-none font-mono text-xs" data-testid="button-back-home">
@@ -56,9 +60,9 @@ export default function LiteratureReviewDetail() {
   const durationSec = completedDate ? Math.round((completedDate.getTime() - createdDate.getTime()) / 1000) : null;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Navigation />
-      <main className="pt-28 pb-24">
+      <main className="pt-28 pb-24 flex-1">
         <div className="container mx-auto px-6 max-w-4xl">
           <FadeIn>
             <Link href={`/projects/${review.projectId}`}>

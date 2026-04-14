@@ -269,9 +269,9 @@ export default function GenerationDashboard() {
 
   if (authLoading || !authenticated) {
     return (
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen bg-background text-foreground flex flex-col">
         <Navigation />
-        <main className="pt-28 pb-24">
+        <main className="pt-28 pb-24 flex-1">
           <div className="container mx-auto px-6 max-w-2xl text-center">
             <FadeIn>
               <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-4" />
@@ -298,9 +298,9 @@ export default function GenerationDashboard() {
     (modelConfig.providerMode === "byoc" || (reviewStatus?.remaining ?? 1) > 0);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Navigation />
-      <main className="pt-28 pb-24">
+      <main className="pt-28 pb-24 flex-1">
         <div className="container mx-auto px-6 max-w-4xl">
           <FadeIn className="mb-10">
             <h1 className="text-4xl md:text-5xl font-heading font-bold mb-4" data-testid="text-dashboard-title">

@@ -19,21 +19,25 @@ export default function PaperDetail() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-muted-foreground font-mono text-sm">Loading...</p>
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-muted-foreground font-mono text-sm">Loading...</p>
+        </div>
       </div>
     );
   }
 
   if (error || !paper) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6">
-        <p className="text-muted-foreground font-mono text-sm">Paper not found.</p>
-        <Link href="/">
-          <Button variant="outline" className="rounded-none font-mono text-xs" data-testid="button-back-home">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Home
-          </Button>
-        </Link>
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="flex-1 flex flex-col items-center justify-center gap-6">
+          <p className="text-muted-foreground font-mono text-sm">Paper not found.</p>
+          <Link href="/">
+            <Button variant="outline" className="rounded-none font-mono text-xs" data-testid="button-back-home">
+              <ArrowLeft className="mr-2 h-4 w-4" /> Back to Home
+            </Button>
+          </Link>
+        </div>
       </div>
     );
   }
@@ -48,8 +52,8 @@ export default function PaperDetail() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="container mx-auto px-6 py-12 max-w-4xl">
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
+      <div className="container mx-auto px-6 py-12 max-w-4xl flex-1">
         <FadeIn>
           <Link href="/">
             <Button variant="ghost" className="mb-8 font-mono text-xs text-muted-foreground hover:text-foreground" data-testid="button-back">
