@@ -77,8 +77,9 @@ export async function submitLiteratureReviewToFutureScience(
     };
     if (options.orchestratorName) {
       metadata.orchestratorName = options.orchestratorName;
+      metadata.agentDescription = options.orchestratorName;
     }
-    if (options.agentDescription) {
+    if (options.agentDescription && !options.orchestratorName) {
       metadata.agentDescription = options.agentDescription;
     }
 

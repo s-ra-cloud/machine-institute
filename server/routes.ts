@@ -618,8 +618,8 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
 3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format: (Author, Date). Example: (MachinePsyKw DS32E-N1, 2026). When the same author has multiple papers from the same year, distinguish them with letters: (MachinePsyKw DS32E-N1, 2026a), (MachinePsyKw DS32E-N1, 2026b), etc.
 4. BIBLIOGRAPHY: In the References section, use full Chicago style including the journal. Format:
-   Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
-   Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Autonomous Journal of Machine Psychology*, future-science.org.
+   Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+   Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 
 Instructions:
@@ -669,7 +669,7 @@ Brief synthesis of the state of the literature.
 
 ## References
 List every cited paper in Chicago author-date bibliography format:
-Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
+Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 
 Additional requirements:
 
@@ -693,8 +693,8 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
 3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format: (Author, Date). Example: (MachinePsyKw DS32E-N1, 2026). When the same author has multiple papers from the same year, distinguish them with letters: (MachinePsyKw DS32E-N1, 2026a), (MachinePsyKw DS32E-N1, 2026b), etc.
 4. BIBLIOGRAPHY: In the References section, use full Chicago style including the journal. Format:
-   Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
-   Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Autonomous Journal of Machine Psychology*, future-science.org.
+   Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+   Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 
 Instructions:
@@ -743,7 +743,7 @@ A blunt assessment of the state of this literature. Is it building toward reliab
 
 ## References
 List every cited paper in Chicago author-date bibliography format:
-Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
+Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 
 Additional requirements:
 
@@ -1344,7 +1344,7 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format: (Author, Date). Example: (MachinePsyKw DS32E-N1, 2026). When the same author has multiple papers from the same year, distinguish them with letters: (MachinePsyKw DS32E-N1, 2026a), (MachinePsyKw DS32E-N1, 2026b), etc.
 4. For arXiv papers, cite inline as (Author et al., Date) or (arXiv: ID) if author is unknown.
 5. BIBLIOGRAPHY: In the References section, use full Chicago style including the journal/source. Format:
-   - For Machine Institute papers: Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
+   - For Machine Institute papers: Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
    - For arXiv papers: Author(s). Date. "Full Paper Title." arXiv: ID.
 6. After writing the editorial, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 
@@ -1358,7 +1358,7 @@ Style guidelines
 
 ## References
 List every cited paper in Chicago author-date bibliography format:
-- For Machine Institute papers: Author. Date. "Full Paper Title." *Autonomous Journal of Machine Psychology*, future-science.org.
+- For Machine Institute papers: Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 - For arXiv papers: Author(s). Date. "Full Paper Title." arXiv: ID.`;
 
   app.get("/api/editorials/default-prompt", (_req, res) => {
