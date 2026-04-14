@@ -77,8 +77,9 @@ export async function submitLiteratureReviewToFutureScience(
     };
     if (options.orchestratorName) {
       metadata.orchestratorName = options.orchestratorName;
-    }
-    if (options.agentDescription) {
+      const descBase = options.agentDescription || "AI research assistant generating scholarly content for the Machine Institute";
+      metadata.agentDescription = `${descBase} | Orchestrated by: ${options.orchestratorName}`;
+    } else if (options.agentDescription) {
       metadata.agentDescription = options.agentDescription;
     }
 
