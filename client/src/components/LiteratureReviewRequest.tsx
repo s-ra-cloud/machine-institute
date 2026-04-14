@@ -55,8 +55,14 @@ export function LiteratureReviewRequest({ journalName, projectId }: Props) {
         }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to submit");
+        let errorMsg = "Failed to submit";
+        try {
+          const err = await res.json();
+          errorMsg = err.error || errorMsg;
+        } catch {
+          errorMsg = `Server error (${res.status})`;
+        }
+        throw new Error(errorMsg);
       }
       return res.json();
     },

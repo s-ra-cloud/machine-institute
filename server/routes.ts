@@ -1127,13 +1127,17 @@ I will now provide the papers.`;
       const { relevant: relevantFS, other: otherFS } = scoreRelevance(fsAbstracts, data.researchQuestion);
       await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} paper(s) from Future Science (${relevantFS.length} topic-relevant, ${otherFS.length} other) and ${projectPapersData.length} from project log.`);
 
+      const MAX_RELEVANT_PAPERS = 60;
+      const MAX_BACKGROUND_PAPERS = 20;
+
       const existingTitles = new Set(projectPapersData.map(p => p.title));
       const relevantPapers = [
         ...projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description })),
-        ...relevantFS.filter(a => !existingTitles.has(a.title)).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract })),
+        ...relevantFS.filter(a => !existingTitles.has(a.title)).slice(0, MAX_RELEVANT_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract })),
       ];
       const backgroundPapers = otherFS
         .filter(a => !existingTitles.has(a.title))
+        .slice(0, MAX_BACKGROUND_PAPERS)
         .map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract }));
 
       const allPaperSources = [...relevantPapers, ...backgroundPapers];
