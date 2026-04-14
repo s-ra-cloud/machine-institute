@@ -11,7 +11,7 @@ import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
 import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
-import { publishToFutureScience, submitLiteratureReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
+import { publishToFutureScience, submitLiteratureReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, scoreRelevance, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
 function buildConventionName(modelName: string, agentId: string): string {
@@ -1112,25 +1112,31 @@ I will now provide the papers.`;
       const projectPapersData = await storage.getProjectPapers(data.projectId);
 
       const lrJournalId = data.journalId || "autonomous-journal-xai";
-      const lrInstitutions = INITIATIVE_INSTITUTIONS[lrJournalId] || ["Machine Institute"];
       const lrInitiativeDocId = INITIATIVE_DOC_IDS[lrJournalId];
 
       let fsAbstracts: FutureScienceAbstract[] = [];
       let fsKeywords: string[] = [];
       try {
-        const fsData = await fetchAbstractsAndKeywords(lrInstitutions, lrInitiativeDocId);
+        const fsData = await fetchAbstractsAndKeywords([], lrInitiativeDocId);
         fsAbstracts = fsData.abstracts;
         fsKeywords = fsData.allKeywords;
       } catch (err) {
         console.error("Future Science data retrieval failed (non-fatal):", err);
       }
 
-      const allPaperSources = [
-        ...projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description })),
-        ...fsAbstracts.filter(a => !projectPapersData.some(p => p.title === a.title)).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract })),
-      ];
+      const { relevant: relevantFS, other: otherFS } = scoreRelevance(fsAbstracts, data.researchQuestion);
+      await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} paper(s) from Future Science (${relevantFS.length} topic-relevant, ${otherFS.length} other) and ${projectPapersData.length} from project log.`);
 
-      await emitLREvent("paper-fetch", `Fetched ${allPaperSources.length} paper(s) from project log and Future Science (${projectPapersData.length} project, ${fsAbstracts.length} FS).`);
+      const existingTitles = new Set(projectPapersData.map(p => p.title));
+      const relevantPapers = [
+        ...projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description })),
+        ...relevantFS.filter(a => !existingTitles.has(a.title)).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract })),
+      ];
+      const backgroundPapers = otherFS
+        .filter(a => !existingTitles.has(a.title))
+        .map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract }));
+
+      const allPaperSources = [...relevantPapers, ...backgroundPapers];
 
       const clusters = clusterByKeywords(fsAbstracts);
       let clusterText = "";
@@ -1164,8 +1170,11 @@ I will now provide the papers.`;
         return;
       }
 
-      const paperTexts = allPaperSources.map((p, i) =>
+      const relevantTexts = relevantPapers.map((p, i) =>
         `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
+      );
+      const backgroundTexts = backgroundPapers.map((p, i) =>
+        `Paper ${relevantPapers.length + i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
       );
 
       const config = modelConfig || { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
@@ -1176,7 +1185,14 @@ I will now provide the papers.`;
       const model = resolveModelName(config);
 
       const systemPrompt = data.prompt;
-      const userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}\n\nThe following are the papers from the project's publication log:\n\n${paperTexts.join("\n\n---\n\n")}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}`;
+      let papersSection = "";
+      if (relevantTexts.length > 0) {
+        papersSection += `\n\nPAPERS DIRECTLY RELEVANT TO YOUR RESEARCH QUESTION (these must be prioritized in the review):\n\n${relevantTexts.join("\n\n---\n\n")}`;
+      }
+      if (backgroundTexts.length > 0) {
+        papersSection += `\n\n---\n\nADDITIONAL PAPERS FROM THE JOURNAL CORPUS (use these for broader context if relevant):\n\n${backgroundTexts.join("\n\n---\n\n")}`;
+      }
+      const userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}`;
 
       const promptTrace = JSON.stringify({
         systemPrompt,

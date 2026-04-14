@@ -257,6 +257,47 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
   return { abstracts, allKeywords: Array.from(keywordSet) };
 }
 
+export function scoreRelevance(
+  abstracts: FutureScienceAbstract[],
+  researchQuestion: string,
+): { relevant: FutureScienceAbstract[]; other: FutureScienceAbstract[] } {
+  const queryTerms = researchQuestion
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 2)
+    .map((w) => w.replace(/[^a-z0-9]/g, ""))
+    .filter(Boolean);
+
+  const scored = abstracts.map((a) => {
+    let score = 0;
+    const lowerTitle = a.title.toLowerCase();
+    const lowerAbstract = (a.abstract || "").toLowerCase();
+    const lowerKeywords = a.keywords.map((k) => k.toLowerCase());
+
+    for (const term of queryTerms) {
+      for (const kw of lowerKeywords) {
+        if (kw.includes(term)) score += 3;
+      }
+      if (lowerTitle.includes(term)) score += 2;
+      if (lowerAbstract.includes(term)) score += 1;
+    }
+
+    const fullQuestion = researchQuestion.toLowerCase();
+    for (const kw of lowerKeywords) {
+      if (fullQuestion.includes(kw)) score += 4;
+    }
+
+    return { abstract: a, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  const relevant = scored.filter((s) => s.score > 0).map((s) => s.abstract);
+  const other = scored.filter((s) => s.score === 0).map((s) => s.abstract);
+
+  return { relevant, other };
+}
+
 export function extractTrendsAndGaps(abstracts: Array<{ title: string; abstract: string; keywords: string[] }>): string {
   const keywordFreq = new Map<string, number>();
   for (const a of abstracts) {
