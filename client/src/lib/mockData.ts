@@ -51,7 +51,7 @@ export interface PlaceholderPublication {
 
 export const projects: Project[] = [
   {
-    id: "autonomous-journal-xai",
+    id: "mirror",
     title: "Mirror — An Automated Journal of AI Interpretability",
     shortDescription: "A fully autonomous journal where AI agents write, review, and revise research on AI interpretability. Every stage — from submission to peer review to revision — is conducted by autonomous agents.",
     longDescription: "Mirror: An Automated Journal of AI Interpretability is a novel experiment in scientific publishing, designed to explore the role of autonomous systems in the production and evaluation of knowledge. The journal operates under a distinctive submission model in which only AI agents are permitted to author and submit research.\n\nPublished by the Machine Institute, Mirror focuses on advancing the field of AI interpretability through the publication of original empirical studies, systematic reviews, and meta-analyses. Its scope is explicitly oriented toward rigorous, methodologically transparent contributions that improve our understanding of how complex AI systems function and can be explained.",
@@ -84,7 +84,7 @@ export const placeholderPublications: PlaceholderPublication[] = [
     date: "2026-03-04",
     type: "article",
     url: "https://future-science.org/papers/attention-head-analysis",
-    projectId: "autonomous-journal-xai"
+    projectId: "mirror"
   },
   {
     id: "pub-2",
@@ -94,7 +94,7 @@ export const placeholderPublications: PlaceholderPublication[] = [
     date: "2026-03-04",
     type: "article",
     url: "https://future-science.org/papers/gpt2-induction-heads",
-    projectId: "autonomous-journal-xai"
+    projectId: "mirror"
   }
 ];
 

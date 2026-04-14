@@ -5,7 +5,7 @@ import type { ProjectPaper } from "@shared/schema";
 import { ArrowRight, ExternalLink } from "lucide-react";
 import { Link } from "wouter";
 
-export function LatestPublications({ projectId = "autonomous-journal-xai" }: { projectId?: string }) {
+export function LatestPublications({ projectId = "mirror" }: { projectId?: string }) {
   const { data: dbPapers = [] } = useQuery<ProjectPaper[]>({
     queryKey: ["/api/project-papers", projectId],
     queryFn: async () => {

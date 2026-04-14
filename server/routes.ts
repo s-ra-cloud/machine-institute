@@ -365,15 +365,15 @@ export async function registerRoutes(
   });
 
   const INITIATIVE_DOC_IDS: Record<string, string> = {
-    "autonomous-journal-xai": "efyjiy34s5lgbx2gr50k5h9l",
+    "mirror": "efyjiy34s5lgbx2gr50k5h9l",
   };
 
   const INITIATIVE_INSTITUTIONS: Record<string, string[]> = {
-    "autonomous-journal-xai": ["Machine Institute"],
+    "mirror": ["Machine Institute"],
   };
 
   const INITIATIVE_SLUGS: Record<string, string> = {
-    "autonomous-journal-xai": "mirror-an-automated-journal-of-ai-interpretability",
+    "mirror": "mirror-an-automated-journal-of-ai-interpretability",
   };
 
   const ROLE_CODES: Record<string, string> = {
@@ -917,7 +917,7 @@ I will now provide the papers.`;
 
       const accessToken = await getAccessTokenForUser(req);
 
-      const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "autonomous-journal-xai";
+      const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
       generateLiteratureReview(review.id, { ...result.data, topic: effectiveTopic, userId: user.id, journalId: effectiveJournalId }, modelConfig, accessToken).catch(err => {
         console.error("Background review generation failed:", err);
       });
@@ -1118,7 +1118,7 @@ I will now provide the papers.`;
 
       const projectPapersData = await storage.getProjectPapers(data.projectId);
 
-      const lrJournalId = data.journalId || "autonomous-journal-xai";
+      const lrJournalId = data.journalId || "mirror";
       const lrInitiativeDocId = INITIATIVE_DOC_IDS[lrJournalId];
 
       let fsAbstracts: FutureScienceAbstract[] = [];
@@ -1508,7 +1508,7 @@ List every cited paper in Chicago author-date bibliography format:
 
       const accessToken = await getAccessTokenForUser(req);
 
-      const effectiveEditorialJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "autonomous-journal-xai";
+      const effectiveEditorialJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
       generateEditorial(editorial.id, modelConfig, effectiveTopic, userPrompt || null, prompt || null, accessToken, effectiveEditorialJournalId).catch(err => {
         console.error("Background editorial generation failed:", err);
       });
@@ -1594,7 +1594,7 @@ List every cited paper in Chicago author-date bibliography format:
           excerpt: e.excerpt || "",
         }));
 
-      const edJournalId = journalId || "autonomous-journal-xai";
+      const edJournalId = journalId || "mirror";
       const edInstitutions = INITIATIVE_INSTITUTIONS[edJournalId] || ["Machine Institute"];
       const edInitiativeDocId = INITIATIVE_DOC_IDS[edJournalId];
 

@@ -106,7 +106,7 @@ export default function GenerationDashboard() {
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
-  const [selectedJournal, setSelectedJournal] = useState<string>("autonomous-journal-xai");
+  const [selectedJournal, setSelectedJournal] = useState<string>("mirror");
   const orchestratorNameCustomized = useRef(false);
 
   const queryClient = useQueryClient();
@@ -384,9 +384,9 @@ export default function GenerationDashboard() {
                   </label>
                   <div className="grid grid-cols-3 gap-3">
                     <button
-                      onClick={() => setSelectedJournal("autonomous-journal-xai")}
+                      onClick={() => setSelectedJournal("mirror")}
                       className={`p-4 border text-left transition-all ${
-                        selectedJournal === "autonomous-journal-xai"
+                        selectedJournal === "mirror"
                           ? "border-primary bg-primary/10"
                           : "border-border/50 bg-muted/5 hover:border-primary/40 hover:bg-muted/10"
                       }`}
@@ -396,7 +396,7 @@ export default function GenerationDashboard() {
                       <div className="text-[10px] font-mono text-muted-foreground leading-relaxed">
                         Automated Journal of AI Interpretability
                       </div>
-                      {selectedJournal === "autonomous-journal-xai" && (
+                      {selectedJournal === "mirror" && (
                         <div className="mt-2 flex items-center gap-1">
                           <CheckCircle className="w-3 h-3 text-primary" />
                           <span className="text-[10px] font-mono text-primary">Selected</span>

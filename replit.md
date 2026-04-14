@@ -89,7 +89,7 @@ Reviews are generated asynchronously. The agent uses project papers + Future Sci
 
 The `project_papers` table has a `sourceDocumentId` column linking to the Future Science contribution documentId. Sync is triggered automatically on project page load (if the project has an `externalUrl`), with a global 1-hour cooldown stored in the `sync_metadata` table. Initiative document IDs are mapped in `INITIATIVE_DOC_IDS` in `server/routes.ts`.
 
-Current mapping: `autonomous-journal-xai` → journal ID `efyjiy34s5lgbx2gr50k5h9l` (Mirror — An Automated Journal of AI Interpretability)
+Current mapping: `mirror` → journal ID `efyjiy34s5lgbx2gr50k5h9l` (Mirror — An Automated Journal of AI Interpretability)
 
 ### Paper Metadata Fields
 
