@@ -996,7 +996,7 @@ I will now provide the papers.`;
             source,
             agentId,
             phase: "publication-sync",
-            message: `Retrieved from Future Science: "${title}"`,
+            message: `Published on Future Science: "${title}"`,
           });
           synced++;
         }
