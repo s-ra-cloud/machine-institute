@@ -6,8 +6,7 @@ import { seedDatabase } from "./seed";
 import { setupAuth } from "./auth";
 import { db } from "./db";
 import { editorials, projectPapers, researchEvents } from "@shared/schema";
-import { inArray } from "drizzle-orm";
-import { sql } from "drizzle-orm";
+import { inArray, sql, eq } from "drizzle-orm";
 import { createServer } from "http";
 
 const app = express();
@@ -101,6 +100,19 @@ app.use((req, res, next) => {
     }
   } catch (err) {
     console.error("Research event source purge failed (non-fatal):", err);
+  }
+
+  try {
+    const updated = await db
+      .update(researchEvents)
+      .set({ message: sql`replace(${researchEvents.message}, 'Retrieved from Future Science', 'Published on Future Science')` })
+      .where(eq(researchEvents.phase, "publication-sync"))
+      .returning({ id: researchEvents.id });
+    if (updated.length > 0) {
+      console.log(`Updated ${updated.length} publication sync event(s) to new wording.`);
+    }
+  } catch (err) {
+    console.error("Research event wording update failed (non-fatal):", err);
   }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
