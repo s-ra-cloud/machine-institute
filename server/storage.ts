@@ -1,6 +1,6 @@
 import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, lte, inArray, and } from "drizzle-orm";
+import { eq, desc, gte, lt, lte, inArray, and } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -17,6 +17,7 @@ export interface IStorage {
   createResearchEvents(events: InsertResearchEvent[]): Promise<ResearchEvent[]>;
   getRecentEvents(limit: number): Promise<ResearchEvent[]>;
   getEventsSince(since: Date): Promise<ResearchEvent[]>;
+  getEventsBefore(before: Date, limit: number): Promise<ResearchEvent[]>;
   getActiveEvents(minutesAgo: number): Promise<ResearchEvent[]>;
 
   createLiteratureReview(review: InsertLiteratureReview): Promise<LiteratureReview>;
@@ -113,6 +114,10 @@ export class DatabaseStorage implements IStorage {
 
   async getEventsSince(since: Date): Promise<ResearchEvent[]> {
     return db.select().from(researchEvents).where(gte(researchEvents.timestamp, since)).orderBy(desc(researchEvents.timestamp));
+  }
+
+  async getEventsBefore(before: Date, limit: number = 200): Promise<ResearchEvent[]> {
+    return db.select().from(researchEvents).where(lt(researchEvents.timestamp, before)).orderBy(desc(researchEvents.timestamp)).limit(limit);
   }
 
   async getActiveEvents(minutesAgo: number = 10): Promise<ResearchEvent[]> {

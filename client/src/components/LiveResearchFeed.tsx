@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 interface ResearchEvent {
@@ -13,6 +13,7 @@ interface ResearchEvent {
 interface EventsResponse {
   active: boolean;
   events: ResearchEvent[];
+  hasMore?: boolean;
 }
 
 function formatTime(ts: string) {
@@ -28,30 +29,76 @@ function formatDate(ts: string) {
 export function LiveResearchFeed() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [atTop, setAtTop] = useState(false);
+  const [olderEvents, setOlderEvents] = useState<ResearchEvent[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [noMoreOlder, setNoMoreOlder] = useState(false);
 
   const { data } = useQuery<EventsResponse>({
     queryKey: ["/api/research/events"],
     queryFn: async () => {
-      const res = await fetch("/api/research/events?since=2026-03-11T00:00:00.000Z");
+      const res = await fetch("/api/research/events?limit=200");
       return res.json();
     },
     refetchInterval: 15000,
   });
 
   const active = data?.active ?? false;
-  const events = data?.events ?? [];
+  const recentEvents = data?.events ?? [];
+
+  const allEvents: ResearchEvent[] = (() => {
+    const seen = new Set<string>();
+    const merged: ResearchEvent[] = [];
+    for (const e of [...olderEvents, ...recentEvents]) {
+      if (!seen.has(e.id)) {
+        seen.add(e.id);
+        merged.push(e);
+      }
+    }
+    merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return merged;
+  })();
 
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [events, autoScroll]);
+  }, [allEvents, autoScroll]);
 
   const handleScroll = () => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     setAutoScroll(scrollHeight - scrollTop - clientHeight < 40);
+    setAtTop(scrollTop < 40);
   };
+
+  const loadEarlier = useCallback(async () => {
+    const oldest = allEvents[0];
+    if (!oldest || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(`/api/research/events?before=${encodeURIComponent(oldest.timestamp)}&limit=200`);
+      const json: EventsResponse = await res.json();
+      if (json.events.length === 0) {
+        setNoMoreOlder(true);
+      } else {
+        const prevScrollHeight = scrollRef.current?.scrollHeight ?? 0;
+        setOlderEvents(prev => {
+          const seen = new Set(prev.map(e => e.id));
+          const newOnes = json.events.filter(e => !seen.has(e.id));
+          return [...newOnes, ...prev];
+        });
+        requestAnimationFrame(() => {
+          if (scrollRef.current) {
+            const newScrollHeight = scrollRef.current.scrollHeight;
+            scrollRef.current.scrollTop = newScrollHeight - prevScrollHeight;
+          }
+        });
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [allEvents, loadingMore]);
 
   let lastDate = "";
 
@@ -84,7 +131,7 @@ export function LiveResearchFeed() {
         onScroll={handleScroll}
         className="h-72 overflow-y-auto p-4 font-mono text-xs leading-relaxed"
       >
-        {events.length === 0 ? (
+        {allEvents.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <p className="text-muted-foreground/40 text-sm mb-1">No research sessions recorded</p>
@@ -93,7 +140,25 @@ export function LiveResearchFeed() {
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {events.map((event) => {
+            {atTop && !noMoreOlder && (
+              <div className="flex justify-center mb-2">
+                <button
+                  onClick={loadEarlier}
+                  disabled={loadingMore}
+                  data-testid="button-load-earlier"
+                  className="text-[10px] font-mono text-muted-foreground/50 hover:text-primary border border-border/40 hover:border-primary/30 px-3 py-1 transition-colors disabled:opacity-40"
+                >
+                  {loadingMore ? "Loading…" : "↑ Load earlier events"}
+                </button>
+              </div>
+            )}
+            {noMoreOlder && atTop && (
+              <div className="text-center mb-2">
+                <span className="text-[10px] font-mono text-muted-foreground/30">— beginning of log —</span>
+              </div>
+            )}
+
+            {allEvents.map((event) => {
               const eventDate = formatDate(event.timestamp);
               const showDateSeparator = eventDate !== lastDate;
               lastDate = eventDate;

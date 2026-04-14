@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, type LiteratureReview, type EditorialRecord } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -291,16 +291,23 @@ export async function registerRoutes(
   app.get("/api/research/events", async (req, res) => {
     try {
       const since = req.query.since as string | undefined;
-      const limit = req.query.limit ? Math.max(1, parseInt(req.query.limit as string) || 500) : undefined;
-      const events = since
-        ? await storage.getEventsSince(new Date(since))
-        : await storage.getRecentEvents(limit || 500);
+      const before = req.query.before as string | undefined;
+      const limit = req.query.limit ? Math.max(1, parseInt(req.query.limit as string) || 200) : 200;
+      let events: ResearchEvent[];
+      if (before) {
+        events = await storage.getEventsBefore(new Date(before), limit);
+      } else if (since) {
+        events = await storage.getEventsSince(new Date(since));
+      } else {
+        events = await storage.getRecentEvents(limit);
+      }
       const activeEvents = await storage.getActiveEvents(10);
       const active = activeEvents.length > 0;
 
       return res.json({
         active,
         events: events.reverse(),
+        hasMore: before ? events.length === limit : false,
       });
     } catch (err: any) {
       console.error("Error fetching research events:", err);

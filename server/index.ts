@@ -5,7 +5,7 @@ import { serveStatic } from "./static";
 import { seedDatabase } from "./seed";
 import { setupAuth } from "./auth";
 import { db } from "./db";
-import { editorials, projectPapers, researchEvents } from "@shared/schema";
+import { researchEvents } from "@shared/schema";
 import { inArray, sql, eq } from "drizzle-orm";
 import { createServer } from "http";
 
@@ -75,21 +75,6 @@ app.use((req, res, next) => {
     await seedDatabase();
   } catch (err) {
     console.error("Seed failed (non-fatal):", err);
-  }
-
-  try {
-    const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(editorials);
-    if (Number(count) > 0) {
-      await db.delete(editorials);
-      console.log(`Cleaned up ${count} old editorials on startup.`);
-    }
-    const [{ ppCount }] = await db.select({ ppCount: sql<number>`count(*)` }).from(projectPapers);
-    if (Number(ppCount) > 0) {
-      await db.delete(projectPapers);
-      console.log(`Cleaned up ${ppCount} old project papers on startup.`);
-    }
-  } catch (err) {
-    console.error("Editorial cleanup failed (non-fatal):", err);
   }
 
   try {
