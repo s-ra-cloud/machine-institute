@@ -131,7 +131,7 @@ export default function ProjectDetail() {
   }
 
   const completedReviews = (literatureReviews || []).filter((r) => r.status === "completed");
-  const latestPublication = publicationsData?.data?.[0] ?? null;
+  const allPublications = publicationsData?.data ?? [];
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -234,64 +234,68 @@ export default function ProjectDetail() {
             </div>
             {pubsLoading ? (
               <p className="text-sm text-muted-foreground font-mono" data-testid="status-pubs-loading">Loading publications…</p>
-            ) : !latestPublication ? (
+            ) : allPublications.length === 0 ? (
               <div className="border border-border/20 bg-muted/5 p-8 text-center" data-testid="empty-state-publications">
                 <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground font-mono">No publications found for this initiative.</p>
               </div>
             ) : (
-              <div
-                className="border border-border/20 bg-muted/5 p-4"
-                data-testid="card-latest-publication"
-              >
-                {(() => {
-                  const authors: FSAuthor[] = Array.isArray(latestPublication.author)
-                    ? latestPublication.author
-                    : latestPublication.author
-                    ? [latestPublication.author]
+              <div className="space-y-2" data-testid="list-publications">
+                {allPublications.map((pub, idx) => {
+                  const authors: FSAuthor[] = Array.isArray(pub.author)
+                    ? pub.author
+                    : pub.author
+                    ? [pub.author]
                     : [];
                   const authorList = authors
                     .map((a) => `${a.firstName || ""} ${a.lastName || ""}`.trim())
                     .filter((s) => s.length > 0)
                     .join(", ");
-                  const title = latestPublication.subtitle
-                    ? `${latestPublication.title || ""}: ${latestPublication.subtitle}`
-                    : latestPublication.title || "Untitled";
-                  const date = latestPublication.publishedAt
-                    ? new Date(latestPublication.publishedAt).toLocaleDateString()
+                  const title = pub.subtitle
+                    ? `${pub.title || ""}: ${pub.subtitle}`
+                    : pub.title || "Untitled";
+                  const date = pub.publishedAt
+                    ? new Date(pub.publishedAt).toLocaleDateString()
                     : null;
-                  const paperUrl = latestPublication.slug
-                    ? `https://future-science.org/papers/${latestPublication.slug}`
-                    : latestPublication.documentId
-                    ? `https://future-science.org/papers/${latestPublication.documentId}`
+                  const paperUrl = pub.slug
+                    ? `https://future-science.org/papers/${pub.slug}`
+                    : pub.documentId
+                    ? `https://future-science.org/papers/${pub.documentId}`
                     : null;
+                  const key = pub.documentId || pub.slug || String(idx);
 
                   return (
-                    <>
-                      <p className="text-sm font-medium" data-testid="text-publication-title">{title}</p>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground font-mono">
-                        {authorList && (
-                          <>
-                            <span data-testid="text-publication-authors">{authorList}</span>
-                            <span>·</span>
-                          </>
-                        )}
-                        {date && <span data-testid="text-publication-date">{date}</span>}
+                    <div
+                      key={key}
+                      className="border border-border/20 bg-muted/5 p-4 flex items-start justify-between gap-4"
+                      data-testid={`card-publication-${key}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium" data-testid={`text-publication-title-${key}`}>{title}</p>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground font-mono">
+                          {authorList && (
+                            <>
+                              <span data-testid={`text-publication-authors-${key}`}>{authorList}</span>
+                              <span>·</span>
+                            </>
+                          )}
+                          {date && <span data-testid={`text-publication-date-${key}`}>{date}</span>}
+                        </div>
                       </div>
                       {paperUrl && (
                         <a
                           href={paperUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="mt-2 inline-flex items-center gap-1 text-xs font-mono text-primary hover:underline"
-                          data-testid="link-publication-paper"
+                          className="whitespace-nowrap flex items-center gap-1 text-xs font-mono text-primary hover:underline"
+                          data-testid={`link-publication-${key}`}
                         >
-                          View paper <ExternalLink className="w-3 h-3" />
+                          View <ExternalLink className="w-3 h-3" />
                         </a>
                       )}
-                    </>
+                    </div>
                   );
-                })()}
+                })}
               </div>
             )}
           </FadeIn>

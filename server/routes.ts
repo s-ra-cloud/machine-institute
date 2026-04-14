@@ -935,13 +935,23 @@ I will now provide the papers.`;
 
   app.get("/api/initiative-publications", async (req, res) => {
     try {
-      const url = "https://future-science.org/api/v1/public/contributions?filters[initiative]=efyjiy34s5lgbx2gr50k5h9l&pagination[pageSize]=5&sort[0]=publishedAt:desc";
-      const response = await fetch(url);
-      if (!response.ok) {
-        return res.status(502).json({ error: "Failed to fetch publications from Future Science" });
+      const PAGE_SIZE = 25;
+      const INITIATIVE = "efyjiy34s5lgbx2gr50k5h9l";
+      const BASE = "https://future-science.org/api/v1";
+      let page = 1;
+      let pageCount = 1;
+      const all: unknown[] = [];
+      while (page <= pageCount) {
+        const url = `${BASE}/public/contributions?filters[initiative]=${INITIATIVE}&pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}&sort[0]=publishedAt:desc`;
+        const response = await fetch(url);
+        if (!response.ok) break;
+        const data = await response.json() as { data?: unknown[]; meta?: { pagination?: { pageCount?: number } } };
+        const items = data?.data || [];
+        all.push(...items);
+        pageCount = data?.meta?.pagination?.pageCount || 1;
+        page++;
       }
-      const data = await response.json();
-      return res.json(data);
+      return res.json({ data: all });
     } catch (err: any) {
       console.error("Error fetching initiative publications:", err);
       return res.status(500).json({ error: "Internal server error" });
@@ -950,42 +960,46 @@ I will now provide the papers.`;
 
   app.post("/api/initiative-publications/sync", requireAuth, async (req, res) => {
     try {
-      const url = "https://future-science.org/api/v1/public/contributions?filters[initiative]=efyjiy34s5lgbx2gr50k5h9l&pagination[pageSize]=5&sort[0]=publishedAt:desc";
-      const response = await fetch(url);
-      if (!response.ok) {
-        return res.status(502).json({ error: "Failed to fetch publications from Future Science" });
-      }
-      const data = await response.json() as { data?: Array<{
-        title?: string;
-        subtitle?: string;
-        author?: { firstName?: string; lastName?: string } | { firstName?: string; lastName?: string }[];
-      }> };
-
-      const contributions = data?.data || [];
+      const PAGE_SIZE = 25;
+      const INITIATIVE = "efyjiy34s5lgbx2gr50k5h9l";
+      const BASE = "https://future-science.org/api/v1";
+      type Contrib = { title?: string; subtitle?: string; author?: { firstName?: string; lastName?: string } | { firstName?: string; lastName?: string }[] };
+      let page = 1;
+      let pageCount = 1;
       let synced = 0;
 
-      for (const contrib of contributions) {
-        const authors = Array.isArray(contrib.author)
-          ? contrib.author
-          : contrib.author
-          ? [contrib.author]
-          : [];
-        const firstAuthor = authors[0];
-        const source = firstAuthor
-          ? `${firstAuthor.firstName || ""} ${firstAuthor.lastName || ""}`.trim() || "FutureScience"
-          : "FutureScience";
-        const agentId = firstAuthor?.lastName || "sync";
-        const title = contrib.subtitle
-          ? `${contrib.title || ""}: ${contrib.subtitle}`
-          : contrib.title || "Untitled";
+      while (page <= pageCount) {
+        const url = `${BASE}/public/contributions?filters[initiative]=${INITIATIVE}&pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}&sort[0]=publishedAt:desc`;
+        const response = await fetch(url);
+        if (!response.ok) break;
+        const data = await response.json() as { data?: Contrib[]; meta?: { pagination?: { pageCount?: number } } };
+        const contributions = data?.data || [];
+        pageCount = data?.meta?.pagination?.pageCount || 1;
+        page++;
 
-        await storage.createResearchEvent({
-          source,
-          agentId,
-          phase: "publication-sync",
-          message: `Retrieved from Future Science: "${title}"`,
-        });
-        synced++;
+        for (const contrib of contributions) {
+          const authors = Array.isArray(contrib.author)
+            ? contrib.author
+            : contrib.author
+            ? [contrib.author]
+            : [];
+          const firstAuthor = authors[0];
+          const source = firstAuthor
+            ? `${firstAuthor.firstName || ""} ${firstAuthor.lastName || ""}`.trim() || "FutureScience"
+            : "FutureScience";
+          const agentId = firstAuthor?.lastName || "sync";
+          const title = contrib.subtitle
+            ? `${contrib.title || ""}: ${contrib.subtitle}`
+            : contrib.title || "Untitled";
+
+          await storage.createResearchEvent({
+            source,
+            agentId,
+            phase: "publication-sync",
+            message: `Retrieved from Future Science: "${title}"`,
+          });
+          synced++;
+        }
       }
 
       return res.json({ synced });
