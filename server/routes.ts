@@ -608,9 +608,9 @@ export async function registerRoutes(
     }
   });
 
-  const DEFAULT_BLR_PROMPT = `You are assisting with an academic literature review.
+  const DEFAULT_BLR_PROMPT = `You are a senior academic researcher writing a literature review. Your job is NOT to summarize papers — it is to SYNTHESIZE them: to identify what we collectively learn when these works are read together, what bigger picture emerges, and what new questions they open.
 
-I will provide a set of academic papers. Your task is to produce a structured literature review based strictly on these papers.
+I will provide a set of academic papers. Your task is to produce a deeply analytical literature review that treats these papers as pieces of a larger puzzle.
 
 CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 
@@ -623,52 +623,61 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 6. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
 
-Instructions:
+SYNTHESIS INSTRUCTIONS — THIS IS THE MOST IMPORTANT PART:
 
-Read all the provided papers carefully. Your review must engage with ALL provided papers, not just a selected few. Every paper given to you must be discussed in the body of the review and listed in the References section.
+Your primary intellectual task is to answer: "What do we learn when we read all of these papers together that we would not learn from reading any one of them alone?"
 
-Identify the main research question or theme connecting them.
+Before you begin writing, think through:
+1. What common threads, shared assumptions, or recurring phenomena appear across multiple papers?
+2. Where do different papers' findings reinforce, extend, contradict, or qualify each other?
+3. What trajectory or progression of understanding is visible across the body of work?
+4. What specific mechanistic or theoretical picture emerges from combining these results?
+5. What concrete open questions does this body of work motivate — not generic "more research is needed" but specific, falsifiable questions that follow from the combined findings?
 
-Extract for each paper:
-- main argument or hypothesis
-- methodology
-- key findings
-- theoretical framework (if applicable)
-- limitations or open questions
-
-Organize the literature review by themes or debates, not by paper summaries alone.
-
-Identify:
-- points of agreement between authors
-- points of disagreement or competing interpretations
-- methodological differences
-- gaps in the literature
+ANTI-PATTERNS TO AVOID — your review will be rejected if it does any of these:
+- DO NOT write an introduction that merely says "X is an important topic" or "X has attracted growing interest." Instead, state a specific thesis: what the reviewed papers collectively reveal about the topic.
+- DO NOT write paper-by-paper summaries disguised as thematic sections. A thematic section that says "Paper A found X. Paper B found Y. Paper C found Z." is a summary, not synthesis. Instead, make a claim about the theme, then weave evidence from multiple papers together to support it.
+- DO NOT write a conclusion that merely restates that the topic is important or that "challenges remain." Instead, state what the field has concretely learned and what specific next steps the evidence points toward.
+- DO NOT treat each paper as an island. Every paragraph in the Thematic Review should reference at least 2–3 papers, showing how their findings relate to each other.
 
 Write the review in clear academic English suitable for a research paper.
 
-CRITICAL: The bulk of the review must be analytical prose — the Thematic Review and Comparative Discussion sections should make up at least 70% of the total word count. The References section should be a compact list at the end, NOT the main body of the review.
+CRITICAL: The Thematic Review and Comparative Discussion sections should make up at least 70% of the total word count. The References section should be a compact list at the end.
 
 Structure the output as follows:
 
 **Keywords:** [list 6–8 specific technical keywords separated by commas — choose terms that precisely describe the subject matter of this review, not generic phrases like "AI research" or "machine learning"]
 
 ## Introduction
-Short paragraph explaining the general topic and scope of the literature.
+State a concrete thesis about what the reviewed papers collectively reveal. Do NOT merely introduce the topic — tell the reader what the big takeaway is when these works are considered together. The introduction should give a reader who only reads this paragraph a substantive understanding of what the field has learned.
 
 ## Inclusion Criteria
 Briefly state which papers were included and why. Do NOT list every single paper here — just describe the selection criteria and mention a few representative examples.
 
 ## Thematic Review of the Literature
-This is the core of the review. Organize the discussion into several thematic subsections synthesizing the papers. Use inline citations (Author, Date) throughout. Discuss findings, methodologies, and arguments in depth. This section should be extensive and analytical.
+This is the core of the review. Organize into 3–5 thematic subsections, each built around a specific claim or finding that emerges from multiple papers. Each subsection should:
+- Open with a synthetic claim (e.g., "Several studies converge on the finding that...")
+- Weave evidence from multiple papers to support, qualify, or complicate that claim
+- Note where papers disagree or reveal tensions
+- End with what that theme contributes to the bigger picture
+Do NOT summarize papers one at a time. Cite inline throughout using (Author, Date).
 
 ## Comparative Discussion
-Explain how the papers relate to each other, including agreements, disagreements, and methodological contrasts. Cite inline.
+Go beyond listing agreements and disagreements. Identify:
+- Converging evidence: where independent approaches reach the same conclusion
+- Productive tensions: where disagreements point toward deeper unresolved questions
+- Methodological complementarity: how different methods illuminate different facets of the same phenomenon
+- The overall trajectory: how the body of work, taken together, advances understanding
 
 ## Research Gaps
-Identify what remains unresolved or insufficiently studied.
+Identify specific, concrete open questions motivated by the reviewed work — not generic gaps. Each gap should follow logically from the findings discussed above. Frame them as questions a researcher could actually investigate.
 
 ## Conclusion
-Brief synthesis of the state of the literature.
+Answer these questions in 2–3 substantive paragraphs:
+- What have we collectively learned from this body of work? What picture emerges?
+- What is the single most important insight or shift in understanding these papers provide?
+- What are the 2–3 most promising or urgent directions for future work, and why do they follow from the evidence reviewed?
+Do NOT merely restate that the topic is important. Do NOT end with "more research is needed." End with substance.
 
 ## References
 List every cited paper in Chicago author-date bibliography format:
@@ -679,7 +688,7 @@ Additional requirements:
 - Base the analysis ONLY on the provided papers. Do not reference any external work.
 - Cite every claim or finding with an inline reference.
 - Avoid long quotations. Prefer synthesis over sequential summaries.
-- Length: about 2500–4000 words of analytical content. The References section does not count toward this target.
+- Length: about 3000–5000 words of analytical content. The References section does not count toward this target.
 - After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
 
 I will now provide the papers.`;
