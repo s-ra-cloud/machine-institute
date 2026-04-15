@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
@@ -97,7 +97,7 @@ export default function GenerationDashboard() {
     provider: "openrouter",
     modelName: "deepseek/deepseek-chat",
   });
-  const [orchestratorName, setOrchestratorName] = useState("");
+  const [orchestratorName, setOrchestratorName] = useState(user?.displayName ?? "");
   const [agentDescription, setAgentDescription] = useState("AI research assistant generating scholarly content for the Machine Institute");
   const [topic, setTopic] = useState("Autonomous AI research agents and their role in scientific discovery");
   const [prompt, setPrompt] = useState("");
@@ -107,7 +107,6 @@ export default function GenerationDashboard() {
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
   const [selectedJournal, setSelectedJournal] = useState<string>("mirror");
-  const orchestratorNameCustomized = useRef(false);
 
   const queryClient = useQueryClient();
 
@@ -162,10 +161,10 @@ export default function GenerationDashboard() {
   }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, reviewMode]);
 
   useEffect(() => {
-    if (orchestratorNameCustomized.current) return;
-    const agentSuffix = activeType === "editorial" ? "O" : reviewAgentId;
-    setOrchestratorName(deriveAgentName(modelConfig, agentSuffix));
-  }, [modelConfig, activeType, reviewAgentId]);
+    if (user?.displayName) {
+      setOrchestratorName(user.displayName);
+    }
+  }, [user?.displayName]);
 
   const { data: recentEditorials } = useQuery<EditorialRecord[]>({
     queryKey: ["/api/editorials"],
@@ -455,12 +454,8 @@ export default function GenerationDashboard() {
                     <input
                       type="text"
                       value={orchestratorName}
-                      onChange={(e) => {
-                        orchestratorNameCustomized.current = true;
-                        setOrchestratorName(e.target.value);
-                      }}
-                      className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
-                      placeholder="MachInstit DS32bLR-N1"
+                      readOnly
+                      className="w-full bg-muted/30 border border-border/30 px-3 py-2.5 text-sm font-mono text-muted-foreground cursor-default select-none"
                       data-testid="input-orchestrator-name"
                     />
                   </div>
