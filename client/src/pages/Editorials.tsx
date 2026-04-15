@@ -1,11 +1,10 @@
-import { useState, useEffect } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
 import { agentMembers } from "@/lib/mockData";
 import { Link } from "wouter";
-import { ArrowRight, Loader2, PenTool, Clock } from "lucide-react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowRight, Loader2, PenTool } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 interface EditorialRecord {
   id: string;
@@ -20,52 +19,7 @@ interface EditorialRecord {
   completedAt: string | null;
 }
 
-interface RateLimitStatus {
-  remaining: number;
-  resetAt: number | null;
-  count: number;
-}
-
-function CooldownBar({ resetAt }: { resetAt: number }) {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const totalDuration = 24 * 60 * 60 * 1000;
-  const remaining = Math.max(0, resetAt - now);
-  const progress = Math.max(0, Math.min(1, 1 - remaining / totalDuration));
-
-  if (remaining <= 0) return null;
-
-  const hours = Math.floor(remaining / (60 * 60 * 1000));
-  const minutes = Math.floor((remaining % (60 * 60 * 1000)) / 60000);
-  const seconds = Math.floor((remaining % 60000) / 1000);
-
-  return (
-    <div className="space-y-2" data-testid="cooldown-bar">
-      <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground/60">
-        <span className="flex items-center gap-1.5">
-          <Clock className="w-3 h-3" />
-          Next available in {hours}h {minutes}m {seconds}s
-        </span>
-        <span>{Math.round(progress * 100)}%</span>
-      </div>
-      <div className="h-1 bg-border/30 w-full overflow-hidden">
-        <div
-          className="h-full bg-primary/50 transition-all duration-1000"
-          style={{ width: `${progress * 100}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
 export default function Editorials() {
-  const queryClient = useQueryClient();
-
   const { data: editorialsData, isLoading } = useQuery<EditorialRecord[]>({
     queryKey: ["/api/editorials"],
     queryFn: async () => {
@@ -75,41 +29,8 @@ export default function Editorials() {
     refetchInterval: 10000,
   });
 
-  const { data: statusData } = useQuery<RateLimitStatus>({
-    queryKey: ["/api/editorials/status"],
-    queryFn: async () => {
-      const res = await fetch("/api/editorials/status");
-      return res.json();
-    },
-    refetchInterval: 5000,
-  });
-
-  const generateMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/editorials/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to generate editorial");
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/editorials"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/editorials/status"] });
-    },
-  });
-
   const editorialist = agentMembers.find(a => a.capabilities?.includes("O"));
   const editorials = editorialsData || [];
-  const remaining = statusData?.remaining ?? 2;
-  const resetAt = statusData?.resetAt ?? null;
-  const canGenerate = remaining > 0;
-
-  const hasGenerating = editorials.some(e => e.status === "pending" || e.status === "generating");
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -130,56 +51,6 @@ export default function Editorials() {
             </p>
           </FadeIn>
 
-          <FadeIn className="mb-10">
-            <div className="border border-border/50 bg-muted/5 p-6" data-testid="editorial-request-panel">
-              <div className="flex items-center gap-3 mb-3">
-                <PenTool className="w-4 h-4 text-primary" />
-                <h3 className="font-heading text-lg font-semibold">Request an Editorial</h3>
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-                The editorialist agent reads all publications and literature reviews, searches arXiv for current trends, and writes an op-ed on the most relevant topic.
-              </p>
-
-              <div className="flex items-center gap-4 mb-3">
-                <button
-                  onClick={() => generateMutation.mutate()}
-                  disabled={!canGenerate || generateMutation.isPending || hasGenerating}
-                  className="px-6 py-3 bg-primary text-white font-mono text-sm tracking-widest hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(124,58,237,0.2)] hover:shadow-[0_0_30px_rgba(124,58,237,0.4)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none flex items-center gap-2"
-                  data-testid="button-request-editorial"
-                >
-                  {generateMutation.isPending || hasGenerating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>{hasGenerating ? "Generating..." : "Submitting..."}</span>
-                    </>
-                  ) : (
-                    <>
-                      <PenTool className="w-4 h-4" />
-                      <span>Generate Editorial</span>
-                    </>
-                  )}
-                </button>
-
-                <span className="text-[10px] font-mono text-muted-foreground/50" data-testid="text-remaining-uses">
-                  {remaining}/{2} uses remaining (24h window)
-                </span>
-              </div>
-
-              {generateMutation.isSuccess && (
-                <p className="text-[10px] font-mono text-green-400 mb-2">
-                  Editorial submitted — generation in progress. This may take a few minutes.
-                </p>
-              )}
-              {generateMutation.isError && (
-                <p className="text-[10px] font-mono text-red-400 mb-2">
-                  {(generateMutation.error as Error).message}
-                </p>
-              )}
-
-              {resetAt && !canGenerate && <CooldownBar resetAt={resetAt} />}
-            </div>
-          </FadeIn>
-
           {isLoading ? (
             <div className="text-center py-16">
               <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto mb-3" />
@@ -191,7 +62,7 @@ export default function Editorials() {
                 <PenTool className="w-8 h-8 text-muted-foreground/20 mx-auto mb-4" />
                 <p className="text-muted-foreground font-mono text-sm">No editorials yet.</p>
                 <p className="text-[10px] font-mono text-muted-foreground/40 mt-2">
-                  Click "Generate Editorial" above to create the first one.
+                  Visit the Generate tab to create the first one.
                 </p>
               </div>
             </FadeIn>
