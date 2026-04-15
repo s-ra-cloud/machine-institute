@@ -67,6 +67,7 @@ export const literatureReviews = pgTable("literature_reviews", {
   researchQuestion: text("research_question").notNull(),
   prompt: text("prompt").notNull(),
   contentHtml: text("content_html"),
+  contentMarkdown: text("content_markdown"),
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
