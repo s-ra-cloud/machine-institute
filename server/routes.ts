@@ -964,15 +964,24 @@ I will now provide the papers.`;
     const BASE = "https://future-science.org/api/v1";
     let page = 1;
     let pageCount = 1;
+    const seenDocIds = new Set<string>();
     const all: unknown[] = [];
     while (page <= pageCount) {
-      const url = `${BASE}/public/contributions?filters[initiative]=${INITIATIVE}&pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}&sort[0]=publishedAt:desc`;
+      const url = `${BASE}/initiatives/${INITIATIVE}/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
       const response = await fetch(url);
       if (!response.ok) break;
-      const data = await response.json() as { data?: unknown[]; meta?: { pagination?: { pageCount?: number } } };
+      const data = await response.json() as { data?: Array<{ documentId?: string; [key: string]: unknown }>; meta?: { pagination?: { pageCount?: number } } };
       const items = data?.data || [];
-      all.push(...items);
+      let newItems = 0;
+      for (const item of items) {
+        const docId = item.documentId || "";
+        if (docId && seenDocIds.has(docId)) continue;
+        if (docId) seenDocIds.add(docId);
+        all.push(item);
+        newItems++;
+      }
       pageCount = data?.meta?.pagination?.pageCount || 1;
+      if (newItems === 0 && items.length > 0) break;
       page++;
     }
     return all;
@@ -995,24 +1004,30 @@ I will now provide the papers.`;
 
   app.post("/api/initiative-publications/sync", requireAuth, async (req, res) => {
     try {
-      const PAGE_SIZE = 25;
+      const PAGE_SIZE = 100;
       const INITIATIVE = "efyjiy34s5lgbx2gr50k5h9l";
       const BASE = "https://future-science.org/api/v1";
-      type Contrib = { title?: string; subtitle?: string; author?: { firstName?: string; lastName?: string } | { firstName?: string; lastName?: string }[] };
+      type Contrib = { documentId?: string; title?: string; subtitle?: string; author?: { firstName?: string; lastName?: string } | { firstName?: string; lastName?: string }[] };
       let page = 1;
       let pageCount = 1;
       let synced = 0;
+      const syncSeenIds = new Set<string>();
 
       while (page <= pageCount) {
-        const url = `${BASE}/public/contributions?filters[initiative]=${INITIATIVE}&pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}&sort[0]=publishedAt:desc`;
+        const url = `${BASE}/initiatives/${INITIATIVE}/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
         const response = await fetch(url);
         if (!response.ok) break;
         const data = await response.json() as { data?: Contrib[]; meta?: { pagination?: { pageCount?: number } } };
         const contributions = data?.data || [];
         pageCount = data?.meta?.pagination?.pageCount || 1;
+        let newContribs = 0;
         page++;
 
         for (const contrib of contributions) {
+          const cDocId = contrib.documentId || "";
+          if (cDocId && syncSeenIds.has(cDocId)) continue;
+          if (cDocId) syncSeenIds.add(cDocId);
+          newContribs++;
           const authors = Array.isArray(contrib.author)
             ? contrib.author
             : contrib.author
@@ -1035,6 +1050,7 @@ I will now provide the papers.`;
           });
           synced++;
         }
+        if (newContribs === 0 && contributions.length > 0) break;
       }
 
       pubsCache = null;

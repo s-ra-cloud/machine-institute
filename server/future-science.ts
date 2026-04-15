@@ -217,9 +217,11 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
   const keywordSet = new Set<string>();
 
   while (page <= pageCount) {
-    let url = `${FS_API_BASE}/public/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+    let url: string;
     if (initiativeDocId) {
-      url += `&filters[initiative]=${encodeURIComponent(initiativeDocId)}`;
+      url = `${FS_API_BASE}/initiatives/${encodeURIComponent(initiativeDocId)}/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+    } else {
+      url = `${FS_API_BASE}/public/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
     }
     const resp = await fetch(url);
     if (!resp.ok) break;
