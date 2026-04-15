@@ -1228,13 +1228,6 @@ I will now provide the papers.`;
         return;
       }
 
-      const relevantTexts = relevantPapers.map((p, i) =>
-        `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
-      );
-      const backgroundTexts = backgroundPapers.map((p, i) =>
-        `Paper ${relevantPapers.length + i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
-      );
-
       const config = modelConfig || { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
       if (config.providerMode === "byoc" && !config.apiKey && data.userId) {
         const storedKey = getEphemeralKey(data.userId, config.provider);
@@ -1243,14 +1236,20 @@ I will now provide the papers.`;
       const model = resolveModelName(config);
 
       const systemPrompt = data.prompt;
+      const allFSPapers = [...relevantPapers, ...backgroundPapers];
       let papersSection = "";
-      if (relevantTexts.length > 0) {
-        papersSection += `\n\nPAPERS DIRECTLY RELEVANT TO YOUR RESEARCH QUESTION (these must be prioritized in the review):\n\n${relevantTexts.join("\n\n---\n\n")}`;
+      if (allFSPapers.length > 0) {
+        const allPaperTexts = allFSPapers.map((p, i) =>
+          `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
+        );
+        papersSection += `\n\nJOURNAL CORPUS — ${allFSPapers.length} PAPERS (you MUST cite and discuss EVERY one of these):\n\n${allPaperTexts.join("\n\n---\n\n")}`;
       }
-      if (backgroundTexts.length > 0) {
-        papersSection += `\n\n---\n\nADDITIONAL PAPERS FROM THE JOURNAL CORPUS (use these for broader context if relevant):\n\n${backgroundTexts.join("\n\n---\n\n")}`;
-      }
-      let userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}`;
+
+      const paperCitationChecklist = allFSPapers.length > 0
+        ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${allFSPapers.length} papers at least once in the review body AND include each in the References section. Do NOT skip any paper:\n${allFSPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}`).join("\n")}`
+        : "";
+
+      let userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}${paperCitationChecklist}`;
 
       const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
       let estimatedInput = estimateTokens(systemPrompt + userMessage);
@@ -1260,20 +1259,18 @@ I will now provide the papers.`;
         } else {
           relevantPapers = relevantPapers.slice(0, -1);
         }
-        const trimmedRelevantTexts = relevantPapers.map((p, i) =>
+        const trimmedAllPapers = [...relevantPapers, ...backgroundPapers];
+        const trimmedPaperTexts = trimmedAllPapers.map((p, i) =>
           `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
         );
-        const trimmedBackgroundTexts = backgroundPapers.map((p, i) =>
-          `Paper ${relevantPapers.length + i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
-        );
         let trimmedPapers = "";
-        if (trimmedRelevantTexts.length > 0) {
-          trimmedPapers += `\n\nPAPERS DIRECTLY RELEVANT TO YOUR RESEARCH QUESTION (these must be prioritized in the review):\n\n${trimmedRelevantTexts.join("\n\n---\n\n")}`;
+        if (trimmedPaperTexts.length > 0) {
+          trimmedPapers += `\n\nJOURNAL CORPUS — ${trimmedAllPapers.length} PAPERS (you MUST cite and discuss EVERY one of these):\n\n${trimmedPaperTexts.join("\n\n---\n\n")}`;
         }
-        if (trimmedBackgroundTexts.length > 0) {
-          trimmedPapers += `\n\n---\n\nADDITIONAL PAPERS FROM THE JOURNAL CORPUS (use these for broader context if relevant):\n\n${trimmedBackgroundTexts.join("\n\n---\n\n")}`;
-        }
-        userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${trimmedPapers}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}`;
+        const trimmedChecklist = trimmedAllPapers.length > 0
+          ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${trimmedAllPapers.length} papers at least once in the review body AND include each in the References section. Do NOT skip any paper:\n${trimmedAllPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}`).join("\n")}`
+          : "";
+        userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${trimmedPapers}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}${trimmedChecklist}`;
         estimatedInput = estimateTokens(systemPrompt + userMessage);
       }
       if (relevantPapers.length + backgroundPapers.length < allPaperSources.length) {
