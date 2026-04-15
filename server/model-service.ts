@@ -104,23 +104,35 @@ export async function generateWithConfig(
     throw new Error(`Could not create LLM client for provider: ${config.provider}`);
   }
 
-  const completion = await client.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ],
-    max_tokens: maxTokens,
-    temperature,
-  });
+  let completion: any;
+  try {
+    completion = await client.chat.completions.create(
+      {
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        max_tokens: maxTokens,
+        temperature,
+      },
+      { timeout: 600_000 },
+    );
+  } catch (err: any) {
+    const status = err?.status ?? err?.statusCode ?? "unknown";
+    const body = err?.error ?? err?.message ?? String(err);
+    console.error(`[LLM] API request failed — model=${model} provider=${config.provider} status=${status}:`, JSON.stringify(body));
+    throw new Error(`LLM request failed (${status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
+  }
 
-  const anyCompletion = completion as any;
-  if (anyCompletion?.error) {
-    throw new Error(`LLM API error: ${anyCompletion.error.message || JSON.stringify(anyCompletion.error)}`);
+  if (completion?.error) {
+    console.error(`[LLM] API returned error body — model=${model} provider=${config.provider}:`, JSON.stringify(completion.error));
+    throw new Error(`LLM API error: ${completion.error.message || JSON.stringify(completion.error)}`);
   }
 
   const content = completion.choices?.[0]?.message?.content || "";
   if (!content) {
+    console.error(`[LLM] Empty content returned — model=${model} choices:`, JSON.stringify(completion.choices));
     throw new Error(`LLM returned empty response (choices: ${JSON.stringify(completion.choices)})`);
   }
   return { content, model, provider: config.provider };

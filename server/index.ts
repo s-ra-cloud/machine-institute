@@ -5,7 +5,7 @@ import { serveStatic } from "./static";
 import { seedDatabase } from "./seed";
 import { setupAuth } from "./auth";
 import { db } from "./db";
-import { researchEvents } from "@shared/schema";
+import { researchEvents, literatureReviews, editorials } from "@shared/schema";
 import { inArray, sql, eq } from "drizzle-orm";
 import { createServer } from "http";
 
@@ -81,6 +81,27 @@ app.use((req, res, next) => {
     await db.execute(sql`ALTER TABLE literature_reviews ADD COLUMN IF NOT EXISTS content_markdown TEXT`);
   } catch (err) {
     console.error("Schema migration (content_markdown) failed (non-fatal):", err);
+  }
+
+  try {
+    const stuckLRs = await db
+      .update(literatureReviews)
+      .set({ status: "failed", contentHtml: "<p>Generation interrupted by server restart. Please try again.</p>" })
+      .where(eq(literatureReviews.status, "generating"))
+      .returning({ id: literatureReviews.id });
+    if (stuckLRs.length > 0) {
+      console.log(`Marked ${stuckLRs.length} stuck literature review(s) as failed on startup.`);
+    }
+    const stuckEDs = await db
+      .update(editorials)
+      .set({ status: "failed" })
+      .where(eq(editorials.status, "generating"))
+      .returning({ id: editorials.id });
+    if (stuckEDs.length > 0) {
+      console.log(`Marked ${stuckEDs.length} stuck editorial(s) as failed on startup.`);
+    }
+  } catch (err) {
+    console.error("Stuck generation cleanup failed (non-fatal):", err);
   }
 
   try {
