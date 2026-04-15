@@ -114,7 +114,15 @@ export async function generateWithConfig(
     temperature,
   });
 
-  const content = completion.choices[0]?.message?.content || "";
+  const anyCompletion = completion as any;
+  if (anyCompletion?.error) {
+    throw new Error(`LLM API error: ${anyCompletion.error.message || JSON.stringify(anyCompletion.error)}`);
+  }
+
+  const content = completion.choices?.[0]?.message?.content || "";
+  if (!content) {
+    throw new Error(`LLM returned empty response (choices: ${JSON.stringify(completion.choices)})`);
+  }
   return { content, model, provider: config.provider };
 }
 
