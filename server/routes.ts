@@ -621,10 +621,11 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
    Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
    Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
+6. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
 
 Instructions:
 
-Read all the provided papers carefully.
+Read all the provided papers carefully. Your review must engage with ALL provided papers, not just a selected few. Every paper given to you must be discussed in the body of the review and listed in the References section.
 
 Identify the main research question or theme connecting them.
 
@@ -698,10 +699,11 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
    Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
    Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
+6. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
 
 Instructions:
 
-Read all the provided papers carefully — but read them as a skeptic, not as a supporter.
+Read all the provided papers carefully — but read them as a skeptic, not as a supporter. Your review must engage with ALL provided papers, not just a selected few. Every paper given to you must be criticized in the body of the review and listed in the References section.
 
 For each paper, identify:
 - Unsupported or overreaching claims
@@ -1281,6 +1283,19 @@ I will now provide the papers.`;
       await emitLREvent("llm-complete", `LLM synthesis complete. Formatting and saving review.`);
 
       const reviewText = generationResult.content;
+
+      // Validate reference count against papers provided
+      const referenceSectionMatch = reviewText.match(/##\s*References\s*\n([\s\S]*)$/);
+      if (referenceSectionMatch) {
+        const refText = referenceSectionMatch[1].trim();
+        const refEntries = refText.split(/\n{2,}/).filter((block: string) => block.trim().length > 0);
+        const refCount = refEntries.length > 0 ? refEntries.length : refText.split("\n").filter((line: string) => line.trim().length > 0 && !line.trim().startsWith("#")).length;
+        if (refCount < Math.ceil(finalPaperCount / 2)) {
+          await emitLREvent("validation-warning", `Generated review contains only ${refCount} reference(s) but ${finalPaperCount} paper(s) were provided. The LLM may have omitted papers.`);
+        }
+      } else {
+        await emitLREvent("validation-warning", `Generated review has no detectable References section. ${finalPaperCount} paper(s) were provided.`);
+      }
       // Strip the **Keywords:** line before storing/submitting
       const keywordsLineMatch = reviewText.match(/^\*\*Keywords:\*\*\s*(.+)$/m);
       const parsedKeywords: string[] = keywordsLineMatch
