@@ -78,6 +78,12 @@ app.use((req, res, next) => {
   }
 
   try {
+    await db.execute(sql`ALTER TABLE literature_reviews ADD COLUMN IF NOT EXISTS content_markdown TEXT`);
+  } catch (err) {
+    console.error("Schema migration (content_markdown) failed (non-fatal):", err);
+  }
+
+  try {
     const BAD_SOURCES = ["Sacha Raoult", "LiteratureReview"];
     const purged = await db.delete(researchEvents).where(inArray(researchEvents.source, BAD_SOURCES)).returning({ id: researchEvents.id });
     if (purged.length > 0) {
