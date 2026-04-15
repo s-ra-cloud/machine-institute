@@ -1138,15 +1138,16 @@ I will now provide the papers.`;
       const { relevant: relevantFS, other: otherFS } = scoreRelevance(fsAbstracts, data.researchQuestion);
       await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} paper(s) from Future Science (${relevantFS.length} topic-relevant, ${otherFS.length} other) and ${projectPapersData.length} from project log.`);
 
-      const MAX_RELEVANT_PAPERS = 60;
-      const MAX_BACKGROUND_PAPERS = 20;
+      const MAX_RELEVANT_PAPERS = 25;
+      const MAX_BACKGROUND_PAPERS = 5;
+      const MAX_INPUT_TOKENS = 28000;
 
       const existingTitles = new Set(projectPapersData.map(p => p.title));
-      const relevantPapers = [
+      let relevantPapers = [
         ...projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description })),
         ...relevantFS.filter(a => !existingTitles.has(a.title)).slice(0, MAX_RELEVANT_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract })),
       ];
-      const backgroundPapers = otherFS
+      let backgroundPapers = otherFS
         .filter(a => !existingTitles.has(a.title))
         .slice(0, MAX_BACKGROUND_PAPERS)
         .map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract }));
@@ -1207,7 +1208,35 @@ I will now provide the papers.`;
       if (backgroundTexts.length > 0) {
         papersSection += `\n\n---\n\nADDITIONAL PAPERS FROM THE JOURNAL CORPUS (use these for broader context if relevant):\n\n${backgroundTexts.join("\n\n---\n\n")}`;
       }
-      const userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}`;
+      let userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}`;
+
+      const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
+      let estimatedInput = estimateTokens(systemPrompt + userMessage);
+      while (estimatedInput > MAX_INPUT_TOKENS && (backgroundPapers.length > 0 || relevantPapers.length > 5)) {
+        if (backgroundPapers.length > 0) {
+          backgroundPapers = backgroundPapers.slice(0, -1);
+        } else {
+          relevantPapers = relevantPapers.slice(0, -1);
+        }
+        const trimmedRelevantTexts = relevantPapers.map((p, i) =>
+          `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
+        );
+        const trimmedBackgroundTexts = backgroundPapers.map((p, i) =>
+          `Paper ${relevantPapers.length + i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
+        );
+        let trimmedPapers = "";
+        if (trimmedRelevantTexts.length > 0) {
+          trimmedPapers += `\n\nPAPERS DIRECTLY RELEVANT TO YOUR RESEARCH QUESTION (these must be prioritized in the review):\n\n${trimmedRelevantTexts.join("\n\n---\n\n")}`;
+        }
+        if (trimmedBackgroundTexts.length > 0) {
+          trimmedPapers += `\n\n---\n\nADDITIONAL PAPERS FROM THE JOURNAL CORPUS (use these for broader context if relevant):\n\n${trimmedBackgroundTexts.join("\n\n---\n\n")}`;
+        }
+        userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${trimmedPapers}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}`;
+        estimatedInput = estimateTokens(systemPrompt + userMessage);
+      }
+      if (relevantPapers.length + backgroundPapers.length < allPaperSources.length) {
+        console.log(`Literature review ${reviewId}: Trimmed papers from ${allPaperSources.length} to ${relevantPapers.length + backgroundPapers.length} to fit within ~${MAX_INPUT_TOKENS} token budget (estimated ${estimatedInput} tokens).`);
+      }
 
       const promptTrace = JSON.stringify({
         systemPrompt,
@@ -1215,7 +1244,7 @@ I will now provide the papers.`;
         model,
         provider: config.provider,
         providerMode: config.providerMode,
-        paperCount: allPaperSources.length,
+        paperCount: relevantPapers.length + backgroundPapers.length,
         timestamp: new Date().toISOString(),
       });
 
@@ -1229,7 +1258,8 @@ I will now provide the papers.`;
 
       await storage.updateLiteratureReview(reviewId, { promptTrace, sourceTrace });
 
-      await emitLREvent("llm-start", `Calling LLM (${model}) to synthesize literature review from ${allPaperSources.length} paper(s) and ${arxivResults.length} arXiv result(s).`);
+      const finalPaperCount = relevantPapers.length + backgroundPapers.length;
+      await emitLREvent("llm-start", `Calling LLM (${model}) to synthesize literature review from ${finalPaperCount} paper(s) and ${arxivResults.length} arXiv result(s).`);
       const generationResult = await generateWithConfig(config, systemPrompt, userMessage, {
         maxTokens: 12000,
         temperature: 0.3,
