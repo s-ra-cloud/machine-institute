@@ -1151,8 +1151,9 @@ I will now provide the papers.`;
         console.error("Future Science data retrieval failed (non-fatal):", err);
       }
 
-      const { relevant: relevantFS, other: otherFS } = scoreRelevance(fsAbstracts, data.researchQuestion);
-      await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} paper(s) from Future Science (${relevantFS.length} topic-relevant, ${otherFS.length} other) and ${projectPapersData.length} from project log.`);
+      const filteredAbstracts = fsAbstracts.filter(a => !a.title.toLowerCase().startsWith("literature review:"));
+      const { relevant: relevantFS, other: otherFS } = scoreRelevance(filteredAbstracts, data.researchQuestion);
+      await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} unique paper(s) from Future Science (filtered to ${filteredAbstracts.length} after removing existing LRs; ${relevantFS.length} topic-relevant, ${otherFS.length} other) and ${projectPapersData.length} from project log.`);
 
       const MAX_RELEVANT_PAPERS = 25;
       const MAX_BACKGROUND_PAPERS = 5;
@@ -1170,7 +1171,7 @@ I will now provide the papers.`;
 
       const allPaperSources = [...relevantPapers, ...backgroundPapers];
 
-      const clusters = clusterByKeywords(fsAbstracts);
+      const clusters = clusterByKeywords(filteredAbstracts);
       let clusterText = "";
       if (clusters.size > 0) {
         const clusterEntries = Array.from(clusters.entries()).map(([keyword, papers]) =>
@@ -1179,10 +1180,10 @@ I will now provide the papers.`;
         clusterText = `\n\nIdentified topic clusters from the corpus:\n${clusterEntries.join("\n")}`;
       }
 
-      const trendsAnalysis = extractTrendsAndGaps(fsAbstracts);
+      const trendsAnalysis = extractTrendsAndGaps(filteredAbstracts);
       await emitLREvent("trend-analysis", `Clustered corpus into ${clusters.size} topic cluster(s) and extracted trend/gap analysis.`);
 
-      const searchTerms = data.researchQuestion.split(/\s+/).filter(w => w.length > 4).slice(0, 6).join(" ");
+      const searchTerms = data.researchQuestion.trim().length > 0 ? data.researchQuestion.trim() : data.researchQuestion.split(/\s+/).filter(w => w.length > 4).slice(0, 6).join(" ");
       console.log(`Literature review ${reviewId}: arXiv retrieval for "${searchTerms}"`);
       await emitLREvent("arxiv-search", `Searching arXiv for recent papers matching: "${searchTerms}"`);
       const arxivResults = await searchArxiv(searchTerms);

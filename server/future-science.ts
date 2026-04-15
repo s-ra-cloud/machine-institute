@@ -209,9 +209,10 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
   abstracts: FutureScienceAbstract[];
   allKeywords: string[];
 }> {
-  const PAGE_SIZE = 25;
+  const PAGE_SIZE = 100;
   let page = 1;
   let pageCount = 1;
+  const seenDocIds = new Set<string>();
   const abstracts: FutureScienceAbstract[] = [];
   const keywordSet = new Set<string>();
 
@@ -227,13 +228,19 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
     const items = json?.data || [];
     pageCount = json?.meta?.pagination?.pageCount || 1;
 
+    let newItemsOnPage = 0;
     for (const c of items) {
+      const docId = c.documentId || "";
+      if (docId && seenDocIds.has(docId)) continue;
+      if (docId) seenDocIds.add(docId);
+
       const authors: FSAuthor[] = Array.isArray(c.author) ? c.author : (c.author ? [c.author] : []);
       const matchesInstitution = institutions.length === 0 || authors.some((a) =>
         institutions.some(inst => (a.institution || "").includes(inst))
       );
 
       if (matchesInstitution) {
+        newItemsOnPage++;
         const authorList = authors
           .map((a) => `${a.firstName || ""} ${a.lastName || ""}`.trim())
           .filter((s) => s.length > 0)
@@ -248,43 +255,67 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
           authors: authorList || "Unknown",
           date: c.publishedAt ? c.publishedAt.split("T")[0] : "",
           keywords,
-          documentId: c.documentId || "",
+          documentId: docId,
         });
       }
     }
+
+    if (newItemsOnPage === 0 && items.length > 0) break;
     page++;
   }
 
+  console.log(`fetchAbstractsAndKeywords: ${abstracts.length} unique papers fetched (deduped from ${seenDocIds.size} doc IDs across ${page - 1} page(s)).`);
   return { abstracts, allKeywords: Array.from(keywordSet) };
+}
+
+function normalizeText(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 export function scoreRelevance(
   abstracts: FutureScienceAbstract[],
   researchQuestion: string,
 ): { relevant: FutureScienceAbstract[]; other: FutureScienceAbstract[] } {
-  const queryTerms = researchQuestion
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w.length > 2)
-    .map((w) => w.replace(/[^a-z0-9]/g, ""))
-    .filter(Boolean);
+  const normalizedQuestion = normalizeText(researchQuestion);
+  const queryTerms = normalizedQuestion.split(" ").filter((w) => w.length > 2);
+
+  const queryPhrases: string[] = [normalizedQuestion];
+  const words = normalizedQuestion.split(" ");
+  for (let i = 0; i < words.length - 1; i++) {
+    queryPhrases.push(words.slice(i, i + 2).join(" "));
+  }
 
   const scored = abstracts.map((a) => {
     let score = 0;
-    const lowerTitle = a.title.toLowerCase();
-    const lowerAbstract = (a.abstract || "").toLowerCase();
-    const lowerKeywords = a.keywords.map((k) => k.toLowerCase());
+    const normTitle = normalizeText(a.title);
+    const normAbstract = normalizeText(a.abstract || "");
+    const normKeywords = a.keywords.map((k) => normalizeText(k));
+
+    for (const kw of normKeywords) {
+      if (kw === normalizedQuestion || normalizedQuestion === kw) score += 10;
+      else if (kw.includes(normalizedQuestion) || normalizedQuestion.includes(kw)) score += 6;
+    }
+
+    if (normTitle.includes(normalizedQuestion)) score += 8;
+    if (normAbstract.includes(normalizedQuestion)) score += 4;
 
     for (const term of queryTerms) {
-      for (const kw of lowerKeywords) {
+      for (const kw of normKeywords) {
         if (kw.includes(term)) score += 3;
       }
-      if (lowerTitle.includes(term)) score += 2;
-      if (lowerAbstract.includes(term)) score += 1;
+      if (normTitle.includes(term)) score += 2;
+      if (normAbstract.includes(term)) score += 1;
+    }
+
+    for (const phrase of queryPhrases) {
+      if (phrase.split(" ").length >= 2) {
+        if (normTitle.includes(phrase)) score += 5;
+        if (normAbstract.includes(phrase)) score += 3;
+      }
     }
 
     const fullQuestion = researchQuestion.toLowerCase();
-    for (const kw of lowerKeywords) {
+    for (const kw of normKeywords) {
       if (fullQuestion.includes(kw)) score += 4;
     }
 
