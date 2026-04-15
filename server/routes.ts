@@ -944,27 +944,40 @@ I will now provide the papers.`;
     }
   });
 
+  let pubsCache: { data: unknown[]; fetchedAt: number } | null = null;
+  const PUBS_CACHE_TTL = 5 * 60 * 1000;
+
+  async function fetchAllInitiativePublications(): Promise<unknown[]> {
+    const PAGE_SIZE = 100;
+    const INITIATIVE = "efyjiy34s5lgbx2gr50k5h9l";
+    const BASE = "https://future-science.org/api/v1";
+    let page = 1;
+    let pageCount = 1;
+    const all: unknown[] = [];
+    while (page <= pageCount) {
+      const url = `${BASE}/public/contributions?filters[initiative]=${INITIATIVE}&pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}&sort[0]=publishedAt:desc`;
+      const response = await fetch(url);
+      if (!response.ok) break;
+      const data = await response.json() as { data?: unknown[]; meta?: { pagination?: { pageCount?: number } } };
+      const items = data?.data || [];
+      all.push(...items);
+      pageCount = data?.meta?.pagination?.pageCount || 1;
+      page++;
+    }
+    return all;
+  }
+
   app.get("/api/initiative-publications", async (req, res) => {
     try {
-      const PAGE_SIZE = 25;
-      const INITIATIVE = "efyjiy34s5lgbx2gr50k5h9l";
-      const BASE = "https://future-science.org/api/v1";
-      let page = 1;
-      let pageCount = 1;
-      const all: unknown[] = [];
-      while (page <= pageCount) {
-        const url = `${BASE}/public/contributions?filters[initiative]=${INITIATIVE}&pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}&sort[0]=publishedAt:desc`;
-        const response = await fetch(url);
-        if (!response.ok) break;
-        const data = await response.json() as { data?: unknown[]; meta?: { pagination?: { pageCount?: number } } };
-        const items = data?.data || [];
-        all.push(...items);
-        pageCount = data?.meta?.pagination?.pageCount || 1;
-        page++;
+      if (pubsCache && Date.now() - pubsCache.fetchedAt < PUBS_CACHE_TTL) {
+        return res.json({ data: pubsCache.data });
       }
+      const all = await fetchAllInitiativePublications();
+      pubsCache = { data: all, fetchedAt: Date.now() };
       return res.json({ data: all });
     } catch (err: any) {
       console.error("Error fetching initiative publications:", err);
+      if (pubsCache) return res.json({ data: pubsCache.data });
       return res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -1013,6 +1026,7 @@ I will now provide the papers.`;
         }
       }
 
+      pubsCache = null;
       return res.json({ synced });
     } catch (err: any) {
       console.error("Error syncing initiative publications:", err);
