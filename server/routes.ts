@@ -649,7 +649,11 @@ Structure the output as follows:
 **Keywords:** [list 6–8 specific technical keywords separated by commas — choose terms that precisely describe the subject matter of this review, not generic phrases like "AI research" or "machine learning"]
 
 ## Introduction
-State a concrete thesis about what the reviewed papers collectively reveal. Do NOT merely introduce the topic — tell the reader what the big takeaway is when these works are considered together. The introduction should give a reader who only reads this paragraph a substantive understanding of what the field has learned.
+The introduction MUST do two things:
+1. **Establish the broader research context** by drawing on the arXiv papers provided under "EXTERNAL CONTEXT FROM ARXIV." Summarize the state of the field — what problems researchers are working on, what recent progress looks like, and what open questions remain — using these external arXiv sources as evidence. Cite them inline as (Author et al., Date) or (arXiv: ID).
+2. **State a concrete thesis** about what the journal corpus papers (from Mirror) collectively reveal within that broader context. Tell the reader what the big takeaway is when these works are considered together.
+
+The introduction should be 2–4 paragraphs: first grounding the reader in the wider field (via arXiv), then pivoting to the specific contributions of the reviewed corpus. Do NOT merely say "X is an important topic." Instead, show what the field is doing (arXiv context) and then state what these specific papers add to it.
 
 ## Inclusion Criteria
 Briefly state which papers were included and why. Do NOT list every single paper here — just describe the selection criteria and mention a few representative examples.
@@ -685,11 +689,16 @@ Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpreta
 
 Additional requirements:
 
-- Base the analysis ONLY on the provided papers. Do not reference any external work.
+- Base the analysis ONLY on the provided papers (journal corpus + arXiv). Do not reference any work not explicitly given to you.
+- Use arXiv papers primarily in the Introduction to establish broader context. They may also appear in the Comparative Discussion or Research Gaps sections when relevant.
+- The Thematic Review must focus on the journal corpus papers (from Mirror).
 - Cite every claim or finding with an inline reference.
 - Avoid long quotations. Prefer synthesis over sequential summaries.
 - Length: about 3000–5000 words of analytical content. The References section does not count toward this target.
 - After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
+- In the References section, list journal corpus papers and arXiv papers separately:
+  - Journal papers: Author. Date. "Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+  - arXiv papers: Author(s). Date. "Title." arXiv: ID.
 
 I will now provide the papers.`;
 
@@ -739,7 +748,9 @@ Structure the output as follows:
 **Keywords:** [list 6–8 specific technical keywords separated by commas — choose terms that precisely describe the subject matter of this review, not generic phrases like "AI research" or "machine learning"]
 
 ## Introduction
-State the topic and immediately flag the central problems you see in this body of literature.
+The introduction MUST do two things:
+1. **Establish the broader research context** by drawing on the arXiv papers provided under "EXTERNAL CONTEXT FROM ARXIV." Briefly summarize the state of the field using these external sources as evidence. Cite them inline as (Author et al., Date) or (arXiv: ID).
+2. **Immediately flag the central problems** you see in this body of literature, framed against that broader context.
 
 ## Inclusion Criteria
 Briefly describe which papers were included and why. Do NOT list every single paper here — just describe the selection criteria and mention a few representative examples.
@@ -762,11 +773,16 @@ Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpreta
 
 Additional requirements:
 
-- Base the analysis ONLY on the provided papers. Do not reference any external work.
+- Base the analysis ONLY on the provided papers (journal corpus + arXiv). Do not reference any work not explicitly given to you.
+- Use arXiv papers in the Introduction to establish broader context against which to frame your critique.
+- The Critical Analysis and Cross-Paper Contradictions sections must focus on journal corpus papers (from Mirror). Do not substitute journal-corpus critique with arXiv-only criticism.
 - Cite every criticism with an inline reference to the specific paper(s) being criticized.
 - Do NOT be charitable. If something is wrong, say it is wrong.
 - Length: about 2500–4000 words of analytical content. The References section does not count toward this target.
 - After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
+- In the References section, list journal corpus papers and arXiv papers separately:
+  - Journal papers: Author. Date. "Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+  - arXiv papers: Author(s). Date. "Title." arXiv: ID.
 
 I will now provide the papers.`;
 
@@ -1249,7 +1265,7 @@ I will now provide the papers.`;
         ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${allFSPapers.length} papers at least once in the review body AND include each in the References section. Do NOT skip any paper:\n${allFSPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}`).join("\n")}`
         : "";
 
-      let userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}${paperCitationChecklist}`;
+      let userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nEXTERNAL CONTEXT FROM ARXIV — Use these papers to establish the broader research context in the Introduction section. Cite them as (Author et al., Date) or (arXiv: ID):\n\n${arxivTexts}` : ""}${paperCitationChecklist}`;
 
       const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
       let estimatedInput = estimateTokens(systemPrompt + userMessage);
@@ -1270,7 +1286,7 @@ I will now provide the papers.`;
         const trimmedChecklist = trimmedAllPapers.length > 0
           ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${trimmedAllPapers.length} papers at least once in the review body AND include each in the References section. Do NOT skip any paper:\n${trimmedAllPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}`).join("\n")}`
           : "";
-        userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${trimmedPapers}${arxivTexts ? `\n\n---\n\nRecent external research from arXiv:\n\n${arxivTexts}` : ""}${trimmedChecklist}`;
+        userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${trimmedPapers}${arxivTexts ? `\n\n---\n\nEXTERNAL CONTEXT FROM ARXIV — Use these papers to establish the broader research context in the Introduction section. Cite them as (Author et al., Date) or (arXiv: ID):\n\n${arxivTexts}` : ""}${trimmedChecklist}`;
         estimatedInput = estimateTokens(systemPrompt + userMessage);
       }
       if (relevantPapers.length + backgroundPapers.length < allPaperSources.length) {
