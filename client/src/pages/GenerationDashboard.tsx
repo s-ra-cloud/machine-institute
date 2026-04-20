@@ -19,6 +19,7 @@ import {
   XCircle,
   Clock,
   Lock,
+  FlaskConical,
 } from "lucide-react";
 
 type GenerationType = "editorial" | "literature-review";
@@ -313,7 +314,7 @@ export default function GenerationDashboard() {
 
           {!activeType ? (
             <FadeIn>
-              <div className="grid md:grid-cols-2 gap-6 mb-12">
+              <div className="grid md:grid-cols-3 gap-6 mb-12">
                 <div
                   className="p-8 border border-border/30 bg-muted/10 relative overflow-hidden opacity-60 cursor-not-allowed"
                   data-testid="card-generate-editorial"
@@ -342,6 +343,18 @@ export default function GenerationDashboard() {
                     </span>
                   )}
                 </button>
+
+                <div
+                  className="p-8 border border-border/50 bg-muted/5 opacity-50 cursor-not-allowed relative text-left"
+                  data-testid="card-generate-experiment"
+                >
+                  <Lock className="w-3 h-3 text-muted-foreground/40 absolute top-3 right-3" />
+                  <FlaskConical className="w-8 h-8 text-primary/60 mb-4" />
+                  <h2 className="text-xl font-heading font-semibold mb-2">Generate Experiment</h2>
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                    Design a computational experiment grounded in the institute's prior work and current arXiv frontiers.
+                  </p>
+                </div>
               </div>
             </FadeIn>
           ) : (
