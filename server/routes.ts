@@ -112,10 +112,11 @@ function linkifyCitations(
 
     if (citationMap.size > 0) {
       // Linkify inline citations like (AutoInterp, 2026a) or (AutoInterp 2026a; Smith et al., 2025)
+      // Skip parens that are part of a markdown link: either the [(text)](url) link-text
+      // form (preceded by '[') or the [text](url) link-target form (preceded by ']').
       out = out.replace(
-        /\(([^()]+)\)/g,
-        (full, inner: string) => {
-          // Skip if this looks like a markdown link target or already contains a link
+        /(^|[^\[\]])\(([^()]+)\)/g,
+        (full, prefix: string, inner: string) => {
           if (inner.includes("](") || inner.startsWith("http")) return full;
           // Split multi-citation groups by ;
           const parts = inner.split(/\s*;\s*/);
@@ -129,7 +130,7 @@ function linkifyCitations(
             changed = true;
             return `[${part}](${url})`;
           });
-          return changed ? `(${newParts.join("; ")})` : full;
+          return changed ? `${prefix}(${newParts.join("; ")})` : full;
         }
       );
     }
@@ -473,7 +474,7 @@ export async function registerRoutes(
   };
 
   const INITIATIVE_SLUGS: Record<string, string> = {
-    "mirror": "mirror-an-automated-journal-of-ai-interpretability",
+    "mirror": "mirror",
   };
 
   const ROLE_CODES: Record<string, string> = {
@@ -716,10 +717,10 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 
 1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format the citation as a markdown link to the paper's URL: [(Author, Date)](URL). Example: [(MachinePsyKw DS32E-N1, 2026)](https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/abc123). When the same author has multiple papers from the same year, distinguish them with letters: [(MachinePsyKw DS32E-N1, 2026a)](URL1), [(MachinePsyKw DS32E-N1, 2026b)](URL2), etc.
+3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format the citation as a markdown link to the paper's URL: [(Author, Date)](URL). Example: [(MachinePsyKw DS32E-N1, 2026)](https://future-science.org/mirror/abc123). When the same author has multiple papers from the same year, distinguish them with letters: [(MachinePsyKw DS32E-N1, 2026a)](URL1), [(MachinePsyKw DS32E-N1, 2026b)](URL2), etc.
 4. BIBLIOGRAPHY: In the References section, use full Chicago style with the title as a markdown link to the paper's URL. Format:
    Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-   Example: MachinePsyKw DS32E-N1. 2026a. "[Dark Triad Emergence in DeepSeek Chat](https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/abc123)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+   Example: MachinePsyKw DS32E-N1. 2026a. "[Dark Triad Emergence in DeepSeek Chat](https://future-science.org/mirror/abc123)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 5. ALWAYS use the URL provided with each paper (in the URL field). Do NOT invent URLs. If a paper has no URL provided, omit the markdown link wrapper but keep the citation text.
 6. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 7. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
@@ -813,10 +814,10 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 
 1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format the citation as a markdown link to the paper's URL: [(Author, Date)](URL). Example: [(MachinePsyKw DS32E-N1, 2026)](https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/abc123). When the same author has multiple papers from the same year, distinguish them with letters: [(MachinePsyKw DS32E-N1, 2026a)](URL1), [(MachinePsyKw DS32E-N1, 2026b)](URL2), etc.
+3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format the citation as a markdown link to the paper's URL: [(Author, Date)](URL). Example: [(MachinePsyKw DS32E-N1, 2026)](https://future-science.org/mirror/abc123). When the same author has multiple papers from the same year, distinguish them with letters: [(MachinePsyKw DS32E-N1, 2026a)](URL1), [(MachinePsyKw DS32E-N1, 2026b)](URL2), etc.
 4. BIBLIOGRAPHY: In the References section, use full Chicago style with the title as a markdown link to the paper's URL. Format:
    Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-   Example: MachinePsyKw DS32E-N1. 2026a. "[Dark Triad Emergence in DeepSeek Chat](https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/abc123)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+   Example: MachinePsyKw DS32E-N1. 2026a. "[Dark Triad Emergence in DeepSeek Chat](https://future-science.org/mirror/abc123)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 5. ALWAYS use the URL provided with each paper (in the URL field). Do NOT invent URLs. If a paper has no URL provided, omit the markdown link wrapper but keep the citation text.
 6. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
 7. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
@@ -2041,7 +2042,7 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
             keywords: ["editorial", "AI research", "machine psychology"],
             type: "article",
             accessToken,
-            initiativeSlug: "mirror-an-automated-journal-of-ai-interpretability",
+            initiativeSlug: "mirror",
             metadata: {
               orchestratorName: editorial?.orchestratorName || undefined,
               agentDescription: editorial?.agentDescription || undefined,

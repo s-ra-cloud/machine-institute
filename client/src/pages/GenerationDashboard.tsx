@@ -795,7 +795,7 @@ function MetadataPanel({ record }: { record: EditorialRecord | LiteratureReviewR
   } catch {}
 
   const publishedUrl = record.publishedDocumentId
-    ? `https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/papers/${record.publishedDocumentId}`
+    ? `https://future-science.org/mirror/papers/${record.publishedDocumentId}`
     : null;
 
   return (

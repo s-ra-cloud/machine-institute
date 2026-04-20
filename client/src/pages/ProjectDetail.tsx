@@ -257,7 +257,7 @@ export default function ProjectDetail() {
                   const date = pub.publishedAt
                     ? new Date(pub.publishedAt).toLocaleDateString()
                     : null;
-                  const FS_INITIATIVE = "mirror-an-automated-journal-of-ai-interpretability";
+                  const FS_INITIATIVE = "mirror";
                   const paperUrl = pub.slug
                     ? `https://future-science.org/${FS_INITIATIVE}/papers/${pub.slug}`
                     : pub.documentId

@@ -191,7 +191,7 @@ export default function LiteratureReviewDetail() {
                     {review.publishedDocumentId && (
                       <div>
                         <a
-                          href={`https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/papers/${review.publishedDocumentId}`}
+                          href={`https://future-science.org/mirror/papers/${review.publishedDocumentId}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-xs font-mono text-primary hover:underline flex items-center gap-1"

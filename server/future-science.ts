@@ -105,7 +105,7 @@ export async function submitLiteratureReviewToFutureScience(
     const result: FSPublishResult = await resp.json() as FSPublishResult;
     const documentId = result?.data?.documentId || result?.documentId || result?.id;
     const slug = result?.data?.slug || result?.slug;
-    const FS_INITIATIVE = "mirror-an-automated-journal-of-ai-interpretability";
+    const FS_INITIATIVE = "mirror";
     const url = slug
       ? `https://future-science.org/${FS_INITIATIVE}/papers/${slug}`
       : documentId
@@ -191,7 +191,7 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
     const result: FSPublishResult = await resp.json() as FSPublishResult;
     const documentId = result?.data?.documentId || result?.documentId || result?.id;
     const slug = result?.data?.slug || result?.slug;
-    const initiativeSlug = options.initiativeSlug || "mirror-an-automated-journal-of-ai-interpretability";
+    const initiativeSlug = options.initiativeSlug || "mirror";
     const url = slug
       ? `https://future-science.org/${initiativeSlug}/papers/${slug}`
       : documentId
