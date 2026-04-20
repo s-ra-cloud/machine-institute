@@ -616,12 +616,13 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 
 1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format: (Author, Date). Example: (MachinePsyKw DS32E-N1, 2026). When the same author has multiple papers from the same year, distinguish them with letters: (MachinePsyKw DS32E-N1, 2026a), (MachinePsyKw DS32E-N1, 2026b), etc.
-4. BIBLIOGRAPHY: In the References section, use full Chicago style including the journal. Format:
-   Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-   Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
-6. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
+3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format the citation as a markdown link to the paper's URL: [(Author, Date)](URL). Example: [(MachinePsyKw DS32E-N1, 2026)](https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/abc123). When the same author has multiple papers from the same year, distinguish them with letters: [(MachinePsyKw DS32E-N1, 2026a)](URL1), [(MachinePsyKw DS32E-N1, 2026b)](URL2), etc.
+4. BIBLIOGRAPHY: In the References section, use full Chicago style with the title as a markdown link to the paper's URL. Format:
+   Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+   Example: MachinePsyKw DS32E-N1. 2026a. "[Dark Triad Emergence in DeepSeek Chat](https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/abc123)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+5. ALWAYS use the URL provided with each paper (in the URL field). Do NOT invent URLs. If a paper has no URL provided, omit the markdown link wrapper but keep the citation text.
+6. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
+7. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
 
 SYNTHESIS INSTRUCTIONS — THIS IS THE MOST IMPORTANT PART:
 
@@ -664,7 +665,7 @@ This is the core of the review. Organize into 3–5 thematic subsections, each b
 - Weave evidence from multiple papers to support, qualify, or complicate that claim
 - Note where papers disagree or reveal tensions
 - End with what that theme contributes to the bigger picture
-Do NOT summarize papers one at a time. Cite inline throughout using (Author, Date).
+Do NOT summarize papers one at a time. Cite inline throughout using markdown-linked citations: [(Author, Date)](URL).
 
 ## Comparative Discussion
 Go beyond listing agreements and disagreements. Identify:
@@ -684,8 +685,8 @@ Answer these questions in 2–3 substantive paragraphs:
 Do NOT merely restate that the topic is important. Do NOT end with "more research is needed." End with substance.
 
 ## References
-List every cited paper in Chicago author-date bibliography format:
-Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+List every cited paper in Chicago author-date bibliography format with the title as a markdown link to the paper's URL:
+Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 
 Additional requirements:
 
@@ -697,8 +698,8 @@ Additional requirements:
 - Length: about 3000–5000 words of analytical content. The References section does not count toward this target.
 - After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
 - In the References section, list journal corpus papers and arXiv papers separately:
-  - Journal papers: Author. Date. "Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-  - arXiv papers: Author(s). Date. "Title." arXiv: ID.
+  - Journal papers: Author. Date. "[Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+  - arXiv papers: Author(s). Date. "[Title](https://arxiv.org/abs/ID)." arXiv: ID.
 
 I will now provide the papers.`;
 
@@ -712,12 +713,13 @@ CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
 
 1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
 2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format: (Author, Date). Example: (MachinePsyKw DS32E-N1, 2026). When the same author has multiple papers from the same year, distinguish them with letters: (MachinePsyKw DS32E-N1, 2026a), (MachinePsyKw DS32E-N1, 2026b), etc.
-4. BIBLIOGRAPHY: In the References section, use full Chicago style including the journal. Format:
-   Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-   Example: MachinePsyKw DS32E-N1. 2026a. "Dark Triad Emergence in DeepSeek Chat." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-5. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
-6. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
+3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format the citation as a markdown link to the paper's URL: [(Author, Date)](URL). Example: [(MachinePsyKw DS32E-N1, 2026)](https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/abc123). When the same author has multiple papers from the same year, distinguish them with letters: [(MachinePsyKw DS32E-N1, 2026a)](URL1), [(MachinePsyKw DS32E-N1, 2026b)](URL2), etc.
+4. BIBLIOGRAPHY: In the References section, use full Chicago style with the title as a markdown link to the paper's URL. Format:
+   Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+   Example: MachinePsyKw DS32E-N1. 2026a. "[Dark Triad Emergence in DeepSeek Chat](https://future-science.org/mirror-an-automated-journal-of-ai-interpretability/abc123)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+5. ALWAYS use the URL provided with each paper (in the URL field). Do NOT invent URLs. If a paper has no URL provided, omit the markdown link wrapper but keep the citation text.
+6. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
+7. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
 
 Instructions:
 
@@ -768,21 +770,21 @@ Identify what these papers collectively fail to address. What questions should h
 A blunt assessment of the state of this literature. Is it building toward reliable knowledge, or is it an echo chamber of weakly validated claims?
 
 ## References
-List every cited paper in Chicago author-date bibliography format:
-Author. Date. "Full Paper Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+List every cited paper in Chicago author-date bibliography format with the title as a markdown link to the paper's URL:
+Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
 
 Additional requirements:
 
 - Base the analysis ONLY on the provided papers (journal corpus + arXiv). Do not reference any work not explicitly given to you.
 - Use arXiv papers in the Introduction to establish broader context against which to frame your critique.
 - The Critical Analysis and Cross-Paper Contradictions sections must focus on journal corpus papers (from Mirror). Do not substitute journal-corpus critique with arXiv-only criticism.
-- Cite every criticism with an inline reference to the specific paper(s) being criticized.
+- Cite every criticism with an inline reference (markdown-linked) to the specific paper(s) being criticized.
 - Do NOT be charitable. If something is wrong, say it is wrong.
 - Length: about 2500–4000 words of analytical content. The References section does not count toward this target.
 - After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
 - In the References section, list journal corpus papers and arXiv papers separately:
-  - Journal papers: Author. Date. "Title." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-  - arXiv papers: Author(s). Date. "Title." arXiv: ID.
+  - Journal papers: Author. Date. "[Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+  - arXiv papers: Author(s). Date. "[Title](https://arxiv.org/abs/ID)." arXiv: ID.
 
 I will now provide the papers.`;
 
@@ -1108,8 +1110,12 @@ I will now provide the papers.`;
       if (listType) { htmlLines.push(`</${listType}>`); listType = null; }
     }
 
+    function escapeAttr(s: string): string {
+      return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    }
     function inlineFormat(s: string): string {
       return s
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_m, text, url) => `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">${text}</a>`)
         .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
         .replace(/\*(.+?)\*/g, "<em>$1</em>");
     }
@@ -1200,15 +1206,17 @@ I will now provide the papers.`;
       const MAX_BACKGROUND_PAPERS = 5;
       const MAX_INPUT_TOKENS = 28000;
 
+      const lrInitiativeSlug = INITIATIVE_SLUGS[lrJournalId] || "papers";
+      const fsPaperUrl = (docId: string | undefined) => docId ? `https://future-science.org/${lrInitiativeSlug}/${docId}` : "";
       const existingTitles = new Set(projectPapersData.map(p => p.title));
       let relevantPapers = [
-        ...projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description })),
-        ...relevantFS.filter(a => !existingTitles.has(a.title)).slice(0, MAX_RELEVANT_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract })),
+        ...projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url: p.sourceDocumentId ? fsPaperUrl(p.sourceDocumentId) : "" })),
+        ...relevantFS.filter(a => !existingTitles.has(a.title)).slice(0, MAX_RELEVANT_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId) })),
       ];
       let backgroundPapers = otherFS
         .filter(a => !existingTitles.has(a.title))
         .slice(0, MAX_BACKGROUND_PAPERS)
-        .map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract }));
+        .map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId) }));
 
       const allPaperSources = [...relevantPapers, ...backgroundPapers];
 
@@ -1256,13 +1264,13 @@ I will now provide the papers.`;
       let papersSection = "";
       if (allFSPapers.length > 0) {
         const allPaperTexts = allFSPapers.map((p, i) =>
-          `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
+          `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}${p.url ? `\nURL: ${p.url}` : ""}\nAbstract/Summary: ${p.abstract}`
         );
         papersSection += `\n\nJOURNAL CORPUS — ${allFSPapers.length} PAPERS (you MUST cite and discuss EVERY one of these):\n\n${allPaperTexts.join("\n\n---\n\n")}`;
       }
 
       const paperCitationChecklist = allFSPapers.length > 0
-        ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${allFSPapers.length} papers at least once in the review body AND include each in the References section. Do NOT skip any paper:\n${allFSPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}`).join("\n")}`
+        ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${allFSPapers.length} papers at least once in the review body AND include each in the References section. Use the URL in markdown link format for each citation. Do NOT skip any paper:\n${allFSPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}${p.url ? ` — ${p.url}` : ""}`).join("\n")}`
         : "";
 
       let userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nEXTERNAL CONTEXT FROM ARXIV — Use these papers to establish the broader research context in the Introduction section. Cite them as (Author et al., Date) or (arXiv: ID):\n\n${arxivTexts}` : ""}${paperCitationChecklist}`;
@@ -1277,14 +1285,14 @@ I will now provide the papers.`;
         }
         const trimmedAllPapers = [...relevantPapers, ...backgroundPapers];
         const trimmedPaperTexts = trimmedAllPapers.map((p, i) =>
-          `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}\nAbstract/Summary: ${p.abstract}`
+          `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}${p.url ? `\nURL: ${p.url}` : ""}\nAbstract/Summary: ${p.abstract}`
         );
         let trimmedPapers = "";
         if (trimmedPaperTexts.length > 0) {
           trimmedPapers += `\n\nJOURNAL CORPUS — ${trimmedAllPapers.length} PAPERS (you MUST cite and discuss EVERY one of these):\n\n${trimmedPaperTexts.join("\n\n---\n\n")}`;
         }
         const trimmedChecklist = trimmedAllPapers.length > 0
-          ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${trimmedAllPapers.length} papers at least once in the review body AND include each in the References section. Do NOT skip any paper:\n${trimmedAllPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}`).join("\n")}`
+          ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${trimmedAllPapers.length} papers at least once in the review body AND include each in the References section. Use the URL in markdown link format for each citation. Do NOT skip any paper:\n${trimmedAllPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}${p.url ? ` — ${p.url}` : ""}`).join("\n")}`
           : "";
         userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${trimmedPapers}${arxivTexts ? `\n\n---\n\nEXTERNAL CONTEXT FROM ARXIV — Use these papers to establish the broader research context in the Introduction section. Cite them as (Author et al., Date) or (arXiv: ID):\n\n${arxivTexts}` : ""}${trimmedChecklist}`;
         estimatedInput = estimateTokens(systemPrompt + userMessage);
