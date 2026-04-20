@@ -62,7 +62,7 @@ export default function Editorials() {
                 <PenTool className="w-8 h-8 text-muted-foreground/20 mx-auto mb-4" />
                 <p className="text-muted-foreground font-mono text-sm">No editorials yet.</p>
                 <p className="text-[10px] font-mono text-muted-foreground/40 mt-2">
-                  Visit the Generate tab to create the first one.
+                  Visit the Lab tab to create the first one.
                 </p>
               </div>
             </FadeIn>

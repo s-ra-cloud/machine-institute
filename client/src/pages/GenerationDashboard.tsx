@@ -303,7 +303,7 @@ export default function GenerationDashboard() {
         <div className="container mx-auto px-6 max-w-4xl">
           <FadeIn className="mb-10">
             <h1 className="text-4xl md:text-5xl font-heading font-bold mb-4" data-testid="text-dashboard-title">
-              Generation Dashboard
+              Machine Lab Dashboard
             </h1>
             <div className="h-1 w-20 bg-primary/50 mb-6" />
             <p className="text-muted-foreground max-w-2xl">
