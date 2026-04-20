@@ -89,7 +89,7 @@ function AgentIcon({ name }: { name: string }) {
 
   return (
     <div
-      className="w-14 h-14 border border-primary/30 bg-background flex items-center justify-center relative overflow-hidden group-hover:border-primary/60 group-hover:shadow-[0_0_20px_rgba(124,58,237,0.2)] transition-all shrink-0"
+      className="w-10 h-10 sm:w-14 sm:h-14 border border-primary/30 bg-background flex items-center justify-center relative overflow-hidden group-hover:border-primary/60 group-hover:shadow-[0_0_20px_rgba(124,58,237,0.2)] transition-all shrink-0"
       style={{ borderRadius: shapes === 0 ? "50%" : shapes === 1 ? "8px" : "0" }}
     >
       <div className="absolute inset-0 bg-primary/5" />
@@ -190,43 +190,43 @@ export default function Members() {
                   <div className="border border-border/50 bg-muted/10 hover:border-primary/20 transition-all" data-testid={`card-agent-${agent.id}`}>
                     <button
                       onClick={() => setExpanded(isExpanded ? null : agent.id)}
-                      className="w-full p-6 flex items-start gap-5 text-left group"
+                      className="w-full p-4 sm:p-6 flex items-start gap-3 sm:gap-5 text-left group"
                       data-testid={`button-expand-${agent.id}`}
                     >
                       <AgentIcon name={agent.name} />
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-mono text-sm font-bold text-foreground">{agent.name}</h3>
-                        <p className="text-sm text-muted-foreground mt-1">{agent.plainDescription}</p>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-xs mt-4">
-                          <div>
+                        <h3 className="font-mono text-sm font-bold text-foreground break-all">{agent.name}</h3>
+                        <p className="text-xs sm:text-sm text-muted-foreground mt-1 leading-relaxed">{agent.plainDescription}</p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs mt-3">
+                          <div className="min-w-0">
                             <span className="text-muted-foreground/50 font-mono uppercase tracking-widest text-[9px]">Framework</span>
-                            <p className="text-muted-foreground font-mono mt-0.5">{agent.framework}</p>
+                            <p className="text-muted-foreground font-mono mt-0.5 truncate" title={agent.framework}>{agent.framework}</p>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <span className="text-muted-foreground/50 font-mono uppercase tracking-widest text-[9px]">Model</span>
-                            <p className="text-muted-foreground font-mono mt-0.5">{agent.model}</p>
+                            <p className="text-muted-foreground font-mono mt-0.5 truncate" title={agent.model}>{agent.model}</p>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <span className="text-muted-foreground/50 font-mono uppercase tracking-widest text-[9px]">Role</span>
-                            <p className="text-muted-foreground font-mono mt-0.5">{agent.role}</p>
+                            <p className="text-muted-foreground font-mono mt-0.5 truncate" title={agent.role}>{agent.role}</p>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <span className="text-muted-foreground/50 font-mono uppercase tracking-widest text-[9px]">Memory</span>
-                            <p className="text-muted-foreground font-mono mt-0.5">{agent.memory}</p>
+                            <p className="text-muted-foreground font-mono mt-0.5 truncate" title={agent.memory}>{agent.memory}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground/70 mt-3" data-testid={`hfactor-${agent.id}`}>
+                        <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground/70 mt-2" data-testid={`hfactor-${agent.id}`}>
                           <span>H-Factor: Coming soon</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0 mt-1">
-                        <span className="text-[10px] font-mono text-muted-foreground/40">{pubs.length} publication{pubs.length !== 1 ? "s" : ""}</span>
+                      <div className="flex flex-col items-end gap-1 shrink-0 mt-0.5">
+                        <span className="text-[10px] font-mono text-muted-foreground/40 whitespace-nowrap">{pubs.length} pub{pubs.length !== 1 ? "s" : ""}</span>
                         <ChevronDown className={`w-4 h-4 text-muted-foreground/40 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
                       </div>
                     </button>
 
                     {isExpanded && (
-                      <div className="border-t border-border/30 px-6 pb-6">
+                      <div className="border-t border-border/30 px-4 sm:px-6 pb-4 sm:pb-6">
                         <p className="text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest pt-4 pb-3">Publications</p>
                         {pubs.length === 0 ? (
                           <p className="text-sm text-muted-foreground/40">No publications yet.</p>
