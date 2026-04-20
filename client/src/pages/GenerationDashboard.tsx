@@ -314,22 +314,17 @@ export default function GenerationDashboard() {
           {!activeType ? (
             <FadeIn>
               <div className="grid md:grid-cols-2 gap-6 mb-12">
-                <button
-                  onClick={() => { setActiveType("editorial"); setPromptManuallyEdited(false); setPrompt(""); }}
-                  className="p-8 border border-border/50 bg-muted/5 hover:bg-muted/10 hover:border-primary/30 transition-all text-left group"
+                <div
+                  className="p-8 border border-border/30 bg-muted/10 relative overflow-hidden opacity-60 cursor-not-allowed"
                   data-testid="card-generate-editorial"
                 >
-                  <PenTool className="w-8 h-8 text-primary/60 mb-4 group-hover:text-primary transition-colors" />
-                  <h2 className="text-xl font-heading font-semibold mb-2">Generate Editorial</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  <Lock className="w-3 h-3 text-muted-foreground/40 absolute top-3 right-3" />
+                  <PenTool className="w-8 h-8 text-primary/30 mb-4" />
+                  <h2 className="text-xl font-heading font-semibold mb-2 text-muted-foreground/60">Generate Editorial</h2>
+                  <p className="text-sm text-muted-foreground/50 leading-relaxed mb-4">
                     Synthesize research across the institute's publications into an op-ed, informed by arXiv trends.
                   </p>
-                  {editorialStatus && (
-                    <span className="text-[10px] font-mono text-muted-foreground/50">
-                      {editorialStatus.remaining} platform uses remaining
-                    </span>
-                  )}
-                </button>
+                </div>
 
                 <button
                   onClick={() => { setActiveType("literature-review"); setPromptManuallyEdited(false); setPrompt(""); }}
