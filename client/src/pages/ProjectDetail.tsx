@@ -64,13 +64,25 @@ export default function ProjectDetail() {
 
   const syncMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/initiative-publications/sync", { method: "POST" });
-      if (!res.ok) throw new Error("Sync failed");
-      return res.json();
+      const [pubRes, paperRes] = await Promise.all([
+        fetch("/api/initiative-publications/sync", { method: "POST" }),
+        fetch("/api/project-papers/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: id }),
+        }),
+      ]);
+      if (!pubRes.ok) throw new Error("Publication sync failed");
+      if (!paperRes.ok) throw new Error("Member cleanup sync failed");
+      const pubData = await pubRes.json();
+      const paperData = await paperRes.json();
+      return { pubData, paperData };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/initiative-publications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/research/events"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agent-members"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/project-papers"] });
     },
   });
 
