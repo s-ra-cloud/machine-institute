@@ -1,6 +1,6 @@
 import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, lt, lte, inArray, and } from "drizzle-orm";
+import { eq, desc, gte, lt, lte, inArray, and, notInArray } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -32,6 +32,7 @@ export interface IStorage {
   createProjectPapers(papers: InsertProjectPaper[]): Promise<ProjectPaper[]>;
   getProjectPapersBySourceDocIds(docIds: string[]): Promise<ProjectPaper[]>;
   deleteAllProjectPapers(): Promise<number>;
+  deleteProjectPapersNotInSourceDocIds(projectId: string, keepDocIds: string[]): Promise<number>;
 
   createEditorial(editorial: InsertEditorial): Promise<EditorialRecord>;
   getEditorialById(id: string): Promise<EditorialRecord | undefined>;
@@ -46,6 +47,7 @@ export interface IStorage {
   createAgentMember(member: InsertAgentMember): Promise<AgentMember>;
   createAgentMembers(members: InsertAgentMember[]): Promise<AgentMember[]>;
   upsertAgentMembers(members: InsertAgentMember[]): Promise<AgentMember[]>;
+  deleteAgentMembersNotIn(keepIds: string[]): Promise<number>;
   updateProjectPaperUrl(sourceDocumentId: string, url: string): Promise<void>;
 
   getLastSyncTime(key: string): Promise<Date | null>;
@@ -176,6 +178,22 @@ export class DatabaseStorage implements IStorage {
     return deleted.length;
   }
 
+  async deleteProjectPapersNotInSourceDocIds(projectId: string, keepDocIds: string[]): Promise<number> {
+    if (keepDocIds.length === 0) {
+      const deleted = await db.delete(projectPapers)
+        .where(eq(projectPapers.projectId, projectId))
+        .returning({ id: projectPapers.id });
+      return deleted.length;
+    }
+    const deleted = await db.delete(projectPapers)
+      .where(and(
+        eq(projectPapers.projectId, projectId),
+        notInArray(projectPapers.sourceDocumentId, keepDocIds),
+      ))
+      .returning({ id: projectPapers.id });
+    return deleted.length;
+  }
+
   async createEditorial(editorial: InsertEditorial): Promise<EditorialRecord> {
     const [created] = await db.insert(editorials).values(editorial).returning();
     return created;
@@ -246,6 +264,17 @@ export class DatabaseStorage implements IStorage {
       results.push(result);
     }
     return results;
+  }
+
+  async deleteAgentMembersNotIn(keepIds: string[]): Promise<number> {
+    if (keepIds.length === 0) {
+      const deleted = await db.delete(agentMembers).returning({ id: agentMembers.id });
+      return deleted.length;
+    }
+    const deleted = await db.delete(agentMembers)
+      .where(notInArray(agentMembers.id, keepIds))
+      .returning({ id: agentMembers.id });
+    return deleted.length;
   }
 
   async updateProjectPaperUrl(sourceDocumentId: string, url: string): Promise<void> {

@@ -603,11 +603,6 @@ export async function registerRoutes(
       const institutions = INITIATIVE_INSTITUTIONS[projectId] || [];
       const contributions = await fetchAllContributions(institutions);
 
-      if (contributions.length === 0) {
-        await storage.setLastSyncTime(syncKey, new Date());
-        return res.json({ synced: true, message: "No contributions found.", newPapers: 0 });
-      }
-
       const sourceDocIds = contributions.map((c) => c.documentId).filter((id): id is string => !!id);
       const existing = await storage.getProjectPapersBySourceDocIds(sourceDocIds);
       const existingDocIds = new Set(existing.map(p => p.sourceDocumentId));
@@ -673,10 +668,12 @@ export async function registerRoutes(
         }
       }
 
+      const memberIdsForCorpus: string[] = [];
       if (authorSet.size > 0) {
         const membersToUpsert = [];
         for (const [fullName, info] of authorSet) {
           const id = fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          memberIdsForCorpus.push(id);
           const parsed = parseAgentName(fullName);
           const desc = buildAgentDescription(parsed, info.institution);
           membersToUpsert.push({
@@ -695,12 +692,27 @@ export async function registerRoutes(
         }
       }
 
+      const removedPapers = await storage.deleteProjectPapersNotInSourceDocIds(projectId, sourceDocIds);
+
+      const allCurrentPapers = await storage.getAllProjectPapers();
+      const keepMemberIds = new Set<string>();
+      for (const p of allCurrentPapers) {
+        const authorNames = p.authors.split(",").map((a) => a.replace(/\s*\([^)]*\)\s*/g, "").trim()).filter(Boolean);
+        for (const an of authorNames) {
+          const id = an.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          if (id) keepMemberIds.add(id);
+        }
+      }
+      const removedMembers = await storage.deleteAgentMembersNotIn(Array.from(keepMemberIds));
+
       await storage.setLastSyncTime(syncKey, new Date());
 
       return res.json({
         synced: true,
         message: `Synced ${newPapers.length} new paper(s) from Future Science.`,
         newPapers: newPapers.length,
+        removedPapers,
+        removedMembers,
         total: contributions.length,
       });
     } catch (err: any) {

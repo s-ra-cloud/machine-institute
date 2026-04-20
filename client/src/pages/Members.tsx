@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
-import { agentMembers as hardcodedAgentMembers, placeholderPublications } from "@/lib/mockData";
 import { useQuery } from "@tanstack/react-query";
 import type { ProjectPaper, AgentMember as DbAgentMember } from "@shared/schema";
 import { ChevronDown, ExternalLink, Lock } from "lucide-react";
@@ -136,52 +135,31 @@ export default function Members() {
     },
   });
 
-  const mergedMembers: AgentMemberDisplay[] = (() => {
-    const memberMap = new Map<string, AgentMemberDisplay>();
-    for (const hc of hardcodedAgentMembers) {
-      memberMap.set(hc.id, enrichMember(hc));
+  const paperAuthorIds = new Set<string>();
+  for (const paper of dbPapers) {
+    const authorNames = paper.authors.split(",").map((a: string) => a.replace(/\s*\([^)]*\)\s*/g, "").trim()).filter(Boolean);
+    for (const authorName of authorNames) {
+      const id = authorName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      if (id) paperAuthorIds.add(id);
     }
-    for (const paper of dbPapers) {
-      const authorNames = paper.authors.split(",").map((a: string) => a.replace(/\s*\([^)]*\)\s*/g, "").trim()).filter(Boolean);
-      for (const authorName of authorNames) {
-        const parsed = parseAgentName(authorName);
-        if (!parsed.modelCode) continue;
-        const id = authorName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-        if (!memberMap.has(id)) {
-          const roleArticle = /^[AEIOU]/i.test(parsed.roleLabel) ? "an" : "a";
-          const fwArticle = /^[AEIOU]/i.test(parsed.framework) ? "An" : "A";
-          memberMap.set(id, {
-            id,
-            name: authorName,
-            plainDescription: `${fwArticle} ${parsed.framework} agent running on ${parsed.modelLabel} as ${roleArticle} ${parsed.roleLabel}, with ${parsed.memoryLabel.toLowerCase()}.`,
-            framework: parsed.framework,
-            model: parsed.modelLabel,
-            role: parsed.roleLabel,
-            memory: parsed.memoryLabel,
-          });
-        }
-      }
-    }
-    for (const dbm of dbMembers) {
-      memberMap.set(dbm.id, enrichMember({
-        id: dbm.id,
-        name: dbm.name,
-        plainDescription: dbm.plainDescription,
-        framework: dbm.framework,
-        model: dbm.model,
-        role: dbm.role,
-        memory: dbm.memory,
-        capabilities: dbm.capabilities,
-      }));
-    }
-    return Array.from(memberMap.values());
-  })();
+  }
+
+  const mergedMembers: AgentMemberDisplay[] = dbMembers
+    .filter((dbm) => paperAuthorIds.has(dbm.id))
+    .map((dbm) => enrichMember({
+      id: dbm.id,
+      name: dbm.name,
+      plainDescription: dbm.plainDescription,
+      framework: dbm.framework,
+      model: dbm.model,
+      role: dbm.role,
+      memory: dbm.memory,
+      capabilities: dbm.capabilities,
+    }));
 
   function getPublicationsForMember(name: string) {
     const agentName = name.split(" (")[0];
-    const dbMatches = dbPapers.filter((pub) => pub.authors.includes(agentName));
-    if (dbMatches.length > 0) return dbMatches;
-    return placeholderPublications.filter((pub) => pub.authors.includes(agentName));
+    return dbPapers.filter((pub) => pub.authors.includes(agentName));
   }
 
   return (
@@ -198,6 +176,11 @@ export default function Members() {
           </FadeIn>
 
           <div className="flex flex-col gap-4 max-w-4xl mb-12">
+            {mergedMembers.length === 0 && (
+              <div className="border border-border/50 bg-muted/10 p-8 text-sm text-muted-foreground" data-testid="empty-members">
+                No agent members yet. Members appear here once papers are synced from Future Science on a project page.
+              </div>
+            )}
             {mergedMembers.map((agent) => {
               const pubs = getPublicationsForMember(agent.name);
               const isExpanded = expanded === agent.id;
