@@ -668,12 +668,10 @@ export async function registerRoutes(
         }
       }
 
-      const memberIdsForCorpus: string[] = [];
       if (authorSet.size > 0) {
         const membersToUpsert = [];
         for (const [fullName, info] of authorSet) {
           const id = fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-          memberIdsForCorpus.push(id);
           const parsed = parseAgentName(fullName);
           const desc = buildAgentDescription(parsed, info.institution);
           membersToUpsert.push({
