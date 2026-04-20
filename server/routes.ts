@@ -11,7 +11,7 @@ import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
 import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
-import { publishToFutureScience, submitLiteratureReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, scoreRelevance, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
+import { publishToFutureScience, submitLiteratureReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
 function buildConventionName(modelName: string, agentId: string): string {
@@ -1291,17 +1291,34 @@ I will now provide the papers.`;
 
       let fsAbstracts: FutureScienceAbstract[] = [];
       let fsKeywords: string[] = [];
+      let fsFetchFailed = false;
+      let fsFetchFailureReason = "";
       try {
         const fsData = await fetchAbstractsAndKeywords([], lrInitiativeDocId);
         fsAbstracts = fsData.abstracts;
         fsKeywords = fsData.allKeywords;
       } catch (err) {
-        console.error("Future Science data retrieval failed (non-fatal):", err);
+        fsFetchFailed = true;
+        if (err instanceof FutureScienceFetchError) {
+          fsFetchFailureReason = `${err.message}${err.status ? ` (status ${err.status})` : ""} on page ${err.page}${err.bodyExcerpt ? `: ${err.bodyExcerpt.slice(0, 120)}` : ""}`;
+        } else {
+          fsFetchFailureReason = err instanceof Error ? err.message : String(err);
+        }
+        console.error(`[LR ${reviewId}] Future Science fetch failed:`, err);
       }
 
       const filteredAbstracts = fsAbstracts.filter(a => !a.title.toLowerCase().startsWith("literature review:"));
       const { relevant: relevantFS, other: otherFS } = scoreRelevance(filteredAbstracts, data.researchQuestion);
-      await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} unique paper(s) from Future Science (filtered to ${filteredAbstracts.length} after removing existing LRs; ${relevantFS.length} topic-relevant, ${otherFS.length} other) and ${projectPapersData.length} from project log.`);
+
+      if (fsFetchFailed) {
+        await emitLREvent("paper-fetch", `Future Science fetch failed: ${fsFetchFailureReason}. Continuing with ${projectPapersData.length} paper(s) from project log.`);
+      } else if (fsAbstracts.length === 0) {
+        await emitLREvent("paper-fetch", `Future Science initiative "${lrJournalId}" has no contributions. Using ${projectPapersData.length} paper(s) from project log.`);
+      } else if (filteredAbstracts.length === 0) {
+        await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} paper(s) from Future Science but all were existing literature reviews and were filtered out. Using ${projectPapersData.length} paper(s) from project log.`);
+      } else {
+        await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} unique paper(s) from Future Science (filtered to ${filteredAbstracts.length} after removing existing LRs; ${relevantFS.length} topic-relevant, ${otherFS.length} other) and ${projectPapersData.length} from project log.`);
+      }
 
       const MAX_RELEVANT_PAPERS = 25;
       const MAX_BACKGROUND_PAPERS = 5;

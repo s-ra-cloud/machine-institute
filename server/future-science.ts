@@ -205,6 +205,23 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
   }
 }
 
+export class FutureScienceFetchError extends Error {
+  status?: number;
+  url: string;
+  page: number;
+  bodyExcerpt?: string;
+  cause?: unknown;
+  constructor(message: string, info: { url: string; page: number; status?: number; bodyExcerpt?: string; cause?: unknown }) {
+    super(message);
+    this.name = "FutureScienceFetchError";
+    this.url = info.url;
+    this.page = info.page;
+    this.status = info.status;
+    this.bodyExcerpt = info.bodyExcerpt;
+    this.cause = info.cause;
+  }
+}
+
 export async function fetchAbstractsAndKeywords(institutions: string[], initiativeDocId?: string): Promise<{
   abstracts: FutureScienceAbstract[];
   allKeywords: string[];
@@ -223,17 +240,45 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
     } else {
       url = `${FS_API_BASE}/public/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
     }
-    const resp = await fetch(url);
-    if (!resp.ok) break;
 
-    const json: FSContributionsResponse = await resp.json() as FSContributionsResponse;
+    let resp: Response;
+    try {
+      resp = await fetch(url);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`[future-science] Network error fetching contributions page ${page} from ${url}: ${reason}`);
+      throw new FutureScienceFetchError(`network error: ${reason}`, { url, page, cause: err });
+    }
+
+    if (!resp.ok) {
+      let bodyExcerpt = "";
+      try {
+        const text = await resp.text();
+        bodyExcerpt = text.slice(0, 300);
+      } catch {
+        bodyExcerpt = "<unable to read body>";
+      }
+      console.error(`[future-science] HTTP ${resp.status} fetching contributions page ${page} from ${url}. Body excerpt: ${bodyExcerpt}`);
+      throw new FutureScienceFetchError(`HTTP ${resp.status}`, { url, page, status: resp.status, bodyExcerpt });
+    }
+
+    let json: FSContributionsResponse;
+    try {
+      json = await resp.json() as FSContributionsResponse;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`[future-science] JSON parse error on page ${page} from ${url}: ${reason}`);
+      throw new FutureScienceFetchError(`JSON parse error: ${reason}`, { url, page, status: resp.status, cause: err });
+    }
+
     const items = json?.data || [];
     pageCount = json?.meta?.pagination?.pageCount || 1;
 
     let newItemsOnPage = 0;
+    let dupedOnPage = 0;
     for (const c of items) {
       const docId = c.documentId || "";
-      if (docId && seenDocIds.has(docId)) continue;
+      if (docId && seenDocIds.has(docId)) { dupedOnPage++; continue; }
       if (docId) seenDocIds.add(docId);
 
       const authors: FSAuthor[] = Array.isArray(c.author) ? c.author : (c.author ? [c.author] : []);
@@ -262,11 +307,18 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
       }
     }
 
-    if (newItemsOnPage === 0 && items.length > 0) break;
+    console.log(`[future-science] page ${page}/${pageCount}: received ${items.length} item(s), ${newItemsOnPage} new, ${dupedOnPage} duplicate (running total: ${abstracts.length}).`);
+
+    if (items.length === 0) break;
+    if (newItemsOnPage === 0 && dupedOnPage === items.length) {
+      console.log(`[future-science] page ${page} returned only duplicates — API likely not honoring pagination params. Stopping.`);
+      break;
+    }
+    if (newItemsOnPage === 0) break;
     page++;
   }
 
-  console.log(`fetchAbstractsAndKeywords: ${abstracts.length} unique papers fetched (deduped from ${seenDocIds.size} doc IDs across ${page - 1} page(s)).`);
+  console.log(`[future-science] fetchAbstractsAndKeywords done: ${abstracts.length} unique papers fetched (deduped from ${seenDocIds.size} doc IDs across ${page - 1} page(s)) for initiative=${initiativeDocId || "<public>"}.`);
   return { abstracts, allKeywords: Array.from(keywordSet) };
 }
 
