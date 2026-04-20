@@ -38,6 +38,106 @@ function generateSlug(title: string): string {
     + "-" + Date.now().toString(36);
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface LinkifyPaper {
+  title: string;
+  authors?: string;
+  url?: string;
+}
+
+interface LinkifyArxiv {
+  title: string;
+  arxivId?: string;
+  url?: string;
+}
+
+function linkifyCitations(
+  text: string,
+  papers: LinkifyPaper[],
+  arxivResults: LinkifyArxiv[]
+): string {
+  let out = text;
+
+  // 1) Replace plain titles in references with markdown links.
+  //    Match each paper's title when it appears in quotes (straight or curly,
+  //    single or doubled) and is not already inside a markdown link.
+  for (const p of papers) {
+    if (!p.url || !p.title) continue;
+    const escTitle = escapeRegExp(p.title);
+    // Match "Title", "Title.", "Title?", "Title!" — punctuation inside quotes is common.
+    const quoteRe = new RegExp(
+      `(?<!\\]\\()(["“”])(${escTitle})([.?!]?)(["“”])`,
+      "g"
+    );
+    out = out.replace(quoteRe, (_m, q1, t, punct) => {
+      const closeQ = q1 === "“" ? "”" : q1;
+      return `${q1}[${t}](${p.url})${punct}${closeQ}`;
+    });
+  }
+
+  // 2) Replace arXiv IDs with markdown links to arxiv.org.
+  //    Patterns: "arXiv: 2604.16288", "arXiv:2604.16288v1", "(arXiv: 2604.16288)"
+  out = out.replace(
+    /(?<!\]\()\barXiv:\s*([0-9]{4}\.[0-9]{4,5})(v\d+)?\b/gi,
+    (_m, id, ver) => {
+      const full = `${id}${ver || ""}`;
+      return `[arXiv: ${full}](https://arxiv.org/abs/${id})`;
+    }
+  );
+
+  // 3) Build a map of (lastNameOrAuthorToken + year-letter) -> URL by parsing
+  //    the References section in document order. Then linkify inline citations
+  //    of the form (Author, 2026a) or (Author 2026a).
+  const refSecMatch = out.match(/(##\s*References[\s\S]*)$/);
+  if (refSecMatch) {
+    const refSection = refSecMatch[1];
+    // Each non-empty line that begins with a capital letter is a reference entry.
+    const lines = refSection.split(/\n+/).filter((l) => /^[A-Z]/.test(l.trim()));
+    // Map from "AuthorToken|2026a" -> URL
+    const citationMap = new Map<string, string>();
+    for (const line of lines) {
+      // Pull the first author surname / token and the year (with optional letter)
+      const m = line.match(/^([A-Z][A-Za-z\-']+(?:\s+et\s+al\.?)?)\.?\s+(\d{4}[a-z]?)\b/);
+      if (!m) continue;
+      const authorToken = m[1].replace(/\s+et\s+al\.?$/, "");
+      const yearKey = m[2];
+      // Find the linked title in this line to pull the URL we already injected.
+      const urlMatch = line.match(/\]\((https?:\/\/[^)\s]+)\)/);
+      if (!urlMatch) continue;
+      citationMap.set(`${authorToken.toLowerCase()}|${yearKey}`, urlMatch[1]);
+    }
+
+    if (citationMap.size > 0) {
+      // Linkify inline citations like (AutoInterp, 2026a) or (AutoInterp 2026a; Smith et al., 2025)
+      out = out.replace(
+        /\(([^()]+)\)/g,
+        (full, inner: string) => {
+          // Skip if this looks like a markdown link target or already contains a link
+          if (inner.includes("](") || inner.startsWith("http")) return full;
+          // Split multi-citation groups by ;
+          const parts = inner.split(/\s*;\s*/);
+          let changed = false;
+          const newParts = parts.map((part) => {
+            const cm = part.match(/^([A-Z][A-Za-z\-']+(?:\s+et\s+al\.?)?)[,\s]+\s*(\d{4}[a-z]?)\s*$/);
+            if (!cm) return part;
+            const tok = cm[1].replace(/\s+et\s+al\.?$/, "").toLowerCase();
+            const url = citationMap.get(`${tok}|${cm[2]}`);
+            if (!url) return part;
+            changed = true;
+            return `[${part}](${url})`;
+          });
+          return changed ? `(${newParts.join("; ")})` : full;
+        }
+      );
+    }
+  }
+
+  return out;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -1348,7 +1448,10 @@ I will now provide the papers.`;
       const parsedKeywords: string[] = keywordsLineMatch
         ? keywordsLineMatch[1].split(",").map((k: string) => k.trim()).filter(Boolean).slice(0, 8)
         : [];
-      const cleanReviewText = reviewText.replace(/^\*\*Keywords:\*\*\s*.+\n?/m, "").trim();
+      let cleanReviewText = reviewText.replace(/^\*\*Keywords:\*\*\s*.+\n?/m, "").trim();
+      // Post-process: convert plain-text citations to markdown links since the LLM often ignores
+      // the link-format instruction. We linkify by matching paper titles and arXiv IDs.
+      cleanReviewText = linkifyCitations(cleanReviewText, allFSPapers, arxivResults);
       // Extract abstract from Introduction section (first real paragraph, first 3 sentences)
       const introMatch = cleanReviewText.match(/##\s*Introduction\s*\n+([\s\S]+?)(?=\n##\s)/);
       let extractedAbstract = `A literature review on: ${data.researchQuestion}.`;
