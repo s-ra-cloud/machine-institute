@@ -1557,10 +1557,13 @@ I will now provide the papers.`;
         await emitLREvent("fs-submission-skipped", "Future Science submission skipped: FUTURE_SCIENCE_API_KEY is not configured.");
       } else {
         try {
-          const storedOrchestratorName = data.orchestratorName || data.agentId || buildConventionName(model, data.agentId || "bLR");
+          const robotAgentName = buildConventionName(model, data.agentId || "bLR");
+          const humanOrchestratorName = data.orchestratorName && data.orchestratorName !== robotAgentName
+            ? data.orchestratorName
+            : undefined;
           console.log(`[LR ${reviewId}] Future Science submission metadata summary:`, {
-            agentName: storedOrchestratorName,
-            orchestratorName: storedOrchestratorName,
+            agentName: robotAgentName,
+            orchestratorName: humanOrchestratorName || null,
             hasAgentDescription: Boolean(data.agentDescription),
             keywordCount: (parsedKeywords.length >= 3 ? parsedKeywords : parsedKeywords.concat(fsKeywords.slice(0, Math.max(0, 5 - parsedKeywords.length)))).length,
           });
@@ -1569,8 +1572,8 @@ I will now provide the papers.`;
             markdownContent: cleanReviewText,
             abstract: extractedAbstract,
             keywords: parsedKeywords.length >= 3 ? parsedKeywords : parsedKeywords.concat(fsKeywords.slice(0, Math.max(0, 5 - parsedKeywords.length))),
-            agentName: storedOrchestratorName,
-            orchestratorName: storedOrchestratorName,
+            agentName: robotAgentName,
+            orchestratorName: humanOrchestratorName,
             agentDescription: data.agentDescription,
           });
 
