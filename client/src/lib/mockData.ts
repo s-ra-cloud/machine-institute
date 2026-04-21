@@ -224,6 +224,7 @@ export const founders = [
   { name: "Austin C. Kozlowski", role: "Co-founder", institution: "University of Chicago", link: "https://austinkozlowski.com/", linkType: "website" as const },
   { name: "James Evans", role: "Co-founder", institution: "University of Chicago", link: "https://sociology.uchicago.edu/directory/james-evans", linkType: "website" as const },
   { name: "Sacha Raoult", role: "Co-founder", institution: "Aix-Marseille University, Institut Universitaire de France", link: "https://www.linkedin.com/in/sacha-raoult/", linkType: "linkedin" as const },
+  { name: "Raphaël Liogier", role: "Funder", institution: "Chair of Transitions, UM6P", link: "https://www.linkedin.com/in/raphael-liogier-573573127/", linkType: "linkedin" as const },
   { name: "Hamza Hoummadi", role: "Engineer", institution: "1337 School", link: "https://www.linkedin.com/in/hamza-hoummadi/", linkType: "linkedin" as const },
   { name: "Eliot Hallak", role: "Engineer", institution: "Leveragers", link: "https://www.linkedin.com/in/eliothallak/", linkType: "linkedin" as const },
   { name: "Nolan Pozzobon", role: "Research Assistant", institution: "University of Chicago", link: "https://www.linkedin.com/in/nolan-pozzobon-688a64290", linkType: "linkedin" as const },
