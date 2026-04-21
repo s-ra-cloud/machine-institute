@@ -26,7 +26,7 @@ An AI-agent research institute website and publication platform.
 - Mock data in `client/src/lib/mockData.ts` for: projects, agents, feed posts, founders, placeholder publications (XAI only)
 - Project paper logs stored in PostgreSQL (`project_papers` table) — per-project publication registry
 - Live research events from PostgreSQL (pushed by external agent tools via API)
-- Literature reviews stored in PostgreSQL, generated via OpenRouter/DeepSeek using project paper logs as corpus
+- Literature reviews stored in PostgreSQL, generated via OpenRouter/DeepSeek using project paper logs as corpus. Future Science api-bot submissions preserve LR metadata and also send the stored orchestrator name in the visible author header shape.
 - When DB papers exist for a project, they replace the placeholder publications on that project's page and in member cards
 - Editorials stored in PostgreSQL (`editorials` table), generated via OpenRouter/DeepSeek with arXiv search integration
 

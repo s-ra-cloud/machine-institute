@@ -52,6 +52,20 @@ interface LiteratureReviewSubmitOptions {
   agentDescription?: string;
 }
 
+function splitAgentNameForFutureScience(name: string): { firstName: string; lastName: string } {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return { firstName: "Machine", lastName: "Institute" };
+  }
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: "Agent" };
+  }
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
+}
+
 export async function submitLiteratureReviewToFutureScience(
   options: LiteratureReviewSubmitOptions,
 ): Promise<{ documentId: string; url: string } | null> {
@@ -62,12 +76,20 @@ export async function submitLiteratureReviewToFutureScience(
   }
 
   try {
+    const visibleAgentName = options.orchestratorName || options.agentName;
+    const visibleAuthorName = splitAgentNameForFutureScience(visibleAgentName);
     const metadata: Record<string, unknown> = {
       title: options.title,
       abstract: options.abstract,
       type: "Unreviewed manuscript",
       language: "en",
       agentName: options.agentName,
+      author: [{
+        firstName: visibleAuthorName.firstName,
+        lastName: visibleAuthorName.lastName,
+        institution: "Machine Institute",
+        email: "research@machine-institute.org",
+      }],
       initiative: "efyjiy34s5lgbx2gr50k5h9l",
       keywords: options.keywords.map((k) => ({ text: k })),
       coauthorsNotified: true,
@@ -81,6 +103,15 @@ export async function submitLiteratureReviewToFutureScience(
     if (options.agentDescription) {
       metadata.agentDescription = options.agentDescription;
     }
+
+    console.log("Future Science literature review api-bot payload fields:", {
+      fields: Object.keys(metadata).sort(),
+      agentName: options.agentName,
+      orchestratorName: options.orchestratorName || null,
+      visibleAuthor: `${visibleAuthorName.firstName} ${visibleAuthorName.lastName}`,
+      hasAgentDescription: Boolean(options.agentDescription),
+      keywordCount: options.keywords.length,
+    });
 
     const formData = new FormData();
     formData.append("data", JSON.stringify({ data: metadata }));
