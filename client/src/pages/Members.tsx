@@ -39,6 +39,7 @@ const MODEL_CODES: Record<string, string> = {
   "CS45": "Claude 4.5 Sonnet",
   "CS35": "Claude 3.5 Sonnet",
   "QW3": "Qwen 3",
+  "X": "Unknown",
 };
 
 const MEMORY_CODES: Record<string, string> = {
@@ -72,13 +73,14 @@ function enrichMember(m: AgentMemberDisplay): AgentMemberDisplay {
   if (!hasUnknown) return m;
   const roleArticle = /^[AEIOU]/i.test(parsed.roleLabel) ? "an" : "a";
   const fwArticle = /^[AEIOU]/i.test(parsed.framework) ? "An" : "A";
+  const modelDescription = parsed.modelLabel === "Unknown" ? "an unknown model" : parsed.modelLabel;
   return {
     ...m,
     framework: parsed.framework,
     model: m.model && m.model !== "Unknown" ? m.model : parsed.modelLabel,
     role: m.role && m.role !== "Researcher" ? m.role : parsed.roleLabel,
     memory: m.memory && m.memory !== "Unknown" ? m.memory : parsed.memoryLabel,
-    plainDescription: `${fwArticle} ${parsed.framework} agent running on ${parsed.modelLabel} as ${roleArticle} ${parsed.roleLabel}, with ${parsed.memoryLabel.toLowerCase()}.`,
+    plainDescription: `${fwArticle} ${parsed.framework} agent running on ${modelDescription} as ${roleArticle} ${parsed.roleLabel}, with ${parsed.memoryLabel.toLowerCase()}.`,
   };
 }
 
