@@ -4,6 +4,7 @@ import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
 import { useAuth } from "@/lib/auth";
 import { ModelSelector, type ModelConfig } from "@/components/ModelSelector";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -20,8 +21,6 @@ import {
   Clock,
   Lock,
   FlaskConical,
-  ArrowLeft,
-  ArrowRight,
 } from "lucide-react";
 
 type GenerationType = "editorial" | "literature-review";
@@ -71,26 +70,70 @@ interface LiteratureReviewRecord {
   sourceTrace: string | null;
 }
 
-const upcomingLabBlocks = [
+const labWorkflowCards = [
   {
+    id: "literature-review",
+    title: "Generate Literature Review",
+    description: "Conduct a comprehensive review on a research question using published papers and arXiv.",
+    icon: BookOpen,
+    status: "Available",
+    locked: false,
+  },
+  {
+    id: "editorial",
+    title: "Generate Editorial",
+    description: "Synthesize research across the institute's publications into an op-ed, informed by arXiv trends.",
+    icon: PenTool,
+    status: "Locked",
+    locked: true,
+  },
+  {
+    id: "experiment",
+    title: "Generate Experiment",
+    description: "Design a computational experiment grounded in the institute's prior work and current arXiv frontiers.",
+    icon: FlaskConical,
+    status: "Locked",
+    locked: true,
+  },
+  {
+    id: "peer-review",
     title: "Peer review a publication",
     description: "Run structured peer review on an existing Machine Institute publication.",
+    icon: BookOpen,
+    status: "Coming soon",
+    locked: true,
   },
   {
+    id: "revise-publication",
     title: "Revise a peer reviewed publication",
     description: "Use reviewer feedback to produce a revised publication draft.",
+    icon: PenTool,
+    status: "Coming soon",
+    locked: true,
   },
   {
+    id: "ethics-citations",
     title: "Ethics analysis of false citations",
     description: "Audit literature for citation integrity, unsupported claims, and fabricated references.",
+    icon: Info,
+    status: "Coming soon",
+    locked: true,
   },
   {
+    id: "semi-autonomous-cycle",
     title: "Semi-autonomous research cycle",
     description: "Coordinate agents through a guided research loop with human checkpoints.",
+    icon: RotateCcw,
+    status: "Coming soon",
+    locked: true,
   },
   {
+    id: "fully-autonomous-cycle",
     title: "Fully-autonomous research cycle",
     description: "Let a manager persona rewrite prompts and coordinate other research agents end-to-end.",
+    icon: RotateCcw,
+    status: "Coming soon",
+    locked: true,
   },
 ];
 
@@ -133,7 +176,6 @@ export default function GenerationDashboard() {
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
   const [selectedJournal, setSelectedJournal] = useState<string>("mirror");
-  const [upcomingIndex, setUpcomingIndex] = useState(0);
 
   const queryClient = useQueryClient();
 
@@ -340,107 +382,88 @@ export default function GenerationDashboard() {
 
           {!activeType ? (
             <FadeIn>
-              <div className="grid md:grid-cols-3 gap-6 mb-12">
-                <div
-                  className="p-8 border border-border/30 bg-muted/10 relative overflow-hidden opacity-60 cursor-not-allowed"
-                  data-testid="card-generate-editorial"
-                >
-                  <Lock className="w-3 h-3 text-muted-foreground/40 absolute top-3 right-3" />
-                  <PenTool className="w-8 h-8 text-primary/30 mb-4" />
-                  <h2 className="text-xl font-heading font-semibold mb-2 text-muted-foreground/60">Generate Editorial</h2>
-                  <p className="text-sm text-muted-foreground/50 leading-relaxed mb-4">
-                    Synthesize research across the institute's publications into an op-ed, informed by arXiv trends.
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => { setActiveType("literature-review"); setPromptManuallyEdited(false); setPrompt(""); }}
-                  className="p-8 border border-border/50 bg-muted/5 hover:bg-muted/10 hover:border-primary/30 transition-all text-left group"
-                  data-testid="card-generate-review"
-                >
-                  <BookOpen className="w-8 h-8 text-primary/60 mb-4 group-hover:text-primary transition-colors" />
-                  <h2 className="text-xl font-heading font-semibold mb-2">Generate Literature Review</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-                    Conduct a comprehensive review on a research question using published papers and arXiv.
-                  </p>
-                  {reviewStatus && (
-                    <span className="text-[10px] font-mono text-muted-foreground/50">
-                      {reviewStatus.remaining} platform uses remaining
-                    </span>
-                  )}
-                </button>
-
-                <div
-                  className="p-8 border border-border/50 bg-muted/5 opacity-50 cursor-not-allowed relative text-left"
-                  data-testid="card-generate-experiment"
-                >
-                  <Lock className="w-3 h-3 text-muted-foreground/40 absolute top-3 right-3" />
-                  <FlaskConical className="w-8 h-8 text-primary/60 mb-4" />
-                  <h2 className="text-xl font-heading font-semibold mb-2">Generate Experiment</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-                    Design a computational experiment grounded in the institute's prior work and current arXiv frontiers.
-                  </p>
-                </div>
-              </div>
-
-              <div className="border border-border/40 bg-muted/5 p-6 mb-12 overflow-hidden" data-testid="section-upcoming-lab-blocks">
+              <div className="border border-border/40 bg-muted/5 p-6 mb-12 overflow-hidden" data-testid="section-lab-workflow-carousel">
                 <div className="flex items-start justify-between gap-4 mb-5">
                   <div>
                     <p className="text-[10px] font-mono uppercase tracking-[0.25em] text-primary/60 mb-2">
-                      Coming soon
+                      Lab workflows
                     </p>
-                    <h2 className="text-2xl font-heading font-semibold">Upcoming Lab Workflows</h2>
+                    <h2 className="text-2xl font-heading font-semibold" data-testid="text-lab-carousel-title">Generate Literature Review</h2>
                     <p className="text-sm text-muted-foreground mt-2 max-w-xl">
-                      Additional research blocks are being staged for carousel access as the lab expands.
+                      Start with the available literature review workflow, or browse locked workflows being staged for future lab releases.
                     </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => setUpcomingIndex((idx) => (idx - 1 + upcomingLabBlocks.length) % upcomingLabBlocks.length)}
-                      className="w-9 h-9 border border-border/50 bg-background/60 hover:border-primary/40 hover:text-primary transition-colors flex items-center justify-center"
-                      data-testid="button-upcoming-prev"
-                      aria-label="Previous upcoming workflow"
-                    >
-                      <ArrowLeft className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setUpcomingIndex((idx) => (idx + 1) % upcomingLabBlocks.length)}
-                      className="w-9 h-9 border border-border/50 bg-background/60 hover:border-primary/40 hover:text-primary transition-colors flex items-center justify-center"
-                      data-testid="button-upcoming-next"
-                      aria-label="Next upcoming workflow"
-                    >
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
                   </div>
                 </div>
 
-                <div className="grid md:grid-cols-3 gap-4">
-                  {[0, 1, 2].map((offset) => {
-                    const blockIndex = (upcomingIndex + offset) % upcomingLabBlocks.length;
-                    const block = upcomingLabBlocks[blockIndex];
-                    return (
-                      <div
-                        key={block.title}
-                        className="relative min-h-[168px] border border-border/30 bg-background/40 p-5 opacity-75"
-                        data-testid={`card-upcoming-workflow-${blockIndex}`}
-                      >
-                        <Lock className="w-3 h-3 text-muted-foreground/40 absolute top-4 right-4" />
-                        <div className="text-[10px] font-mono text-muted-foreground/40 mb-5">
-                          {String(blockIndex + 1).padStart(2, "0")} / {String(upcomingLabBlocks.length).padStart(2, "0")}
-                        </div>
-                        <h3 className="text-lg font-heading font-semibold text-muted-foreground mb-3 pr-4">
-                          {block.title}
-                        </h3>
-                        <p className="text-sm text-muted-foreground/60 leading-relaxed">
-                          {block.description}
-                        </p>
-                        <div className="mt-5">
-                          <span className="text-[10px] font-mono uppercase tracking-widest text-primary/40">Locked</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <Carousel
+                  opts={{ align: "start", containScroll: "trimSnaps" }}
+                  className="px-10 md:px-12"
+                  data-testid="carousel-lab-workflows"
+                >
+                  <CarouselContent>
+                    {labWorkflowCards.map((workflow, index) => {
+                      const Icon = workflow.icon;
+                      const isLocked = workflow.locked;
+                      const CardContent = (
+                        <>
+                          {isLocked && <Lock className="w-3 h-3 text-muted-foreground/40 absolute top-4 right-4" data-testid={`icon-lock-${workflow.id}`} />}
+                          <div className="text-[10px] font-mono text-muted-foreground/40 mb-5" data-testid={`text-workflow-position-${workflow.id}`}>
+                            {String(index + 1).padStart(2, "0")} / {String(labWorkflowCards.length).padStart(2, "0")}
+                          </div>
+                          <Icon className={`w-8 h-8 mb-4 transition-colors ${isLocked ? "text-primary/30" : "text-primary/60 group-hover:text-primary"}`} />
+                          <h3 className={`text-xl font-heading font-semibold mb-3 pr-4 ${isLocked ? "text-muted-foreground/70" : ""}`} data-testid={`text-workflow-title-${workflow.id}`}>
+                            {workflow.title}
+                          </h3>
+                          <p className={`text-sm leading-relaxed mb-5 ${isLocked ? "text-muted-foreground/55" : "text-muted-foreground"}`} data-testid={`text-workflow-description-${workflow.id}`}>
+                            {workflow.description}
+                          </p>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className={`text-[10px] font-mono uppercase tracking-widest ${isLocked ? "text-primary/40" : "text-primary/70"}`} data-testid={`status-workflow-${workflow.id}`}>
+                              {workflow.status}
+                            </span>
+                            {!isLocked && reviewStatus && (
+                              <span className="text-[10px] font-mono text-muted-foreground/50" data-testid="text-review-uses-remaining">
+                                {reviewStatus.remaining} platform uses remaining
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      );
+
+                      return (
+                        <CarouselItem key={workflow.id} className="basis-full sm:basis-1/2 lg:basis-1/3" data-testid={`slide-lab-workflow-${workflow.id}`}>
+                          {isLocked ? (
+                            <div
+                              className="relative h-full min-h-[260px] border border-border/30 bg-background/40 p-6 opacity-75 cursor-not-allowed"
+                              data-testid={`card-workflow-${workflow.id}`}
+                              aria-disabled="true"
+                            >
+                              {CardContent}
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setActiveType("literature-review"); setPromptManuallyEdited(false); setPrompt(""); }}
+                              className="relative h-full min-h-[260px] w-full border border-border/50 bg-background/60 p-6 hover:bg-muted/10 hover:border-primary/30 transition-all text-left group"
+                              data-testid="button-workflow-literature-review"
+                            >
+                              {CardContent}
+                            </button>
+                          )}
+                        </CarouselItem>
+                      );
+                    })}
+                  </CarouselContent>
+                  <CarouselPrevious
+                    className="left-0 bg-background/90"
+                    data-testid="button-lab-carousel-prev"
+                    aria-label="Previous lab workflow"
+                  />
+                  <CarouselNext
+                    className="right-0 bg-background/90"
+                    data-testid="button-lab-carousel-next"
+                    aria-label="Next lab workflow"
+                  />
+                </Carousel>
               </div>
             </FadeIn>
           ) : (
