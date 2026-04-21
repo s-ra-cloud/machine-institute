@@ -1112,15 +1112,16 @@ I will now provide the papers.`;
   const PUBS_CACHE_TTL = 5 * 60 * 1000;
 
   async function fetchAllInitiativePublications(): Promise<unknown[]> {
-    const PAGE_SIZE = 100;
+    const LIMIT = 50;
+    const MAX_CURSORS = 200;
     const INITIATIVE = "efyjiy34s5lgbx2gr50k5h9l";
     const BASE = "https://future-science.org/api/v1";
-    let page = 1;
+    let cursor = 1;
     let pageCount = 1;
     const seenDocIds = new Set<string>();
     const all: unknown[] = [];
-    while (page <= pageCount) {
-      const url = `${BASE}/initiatives/${INITIATIVE}/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+    while (cursor <= pageCount && cursor <= MAX_CURSORS) {
+      const url = `${BASE}/initiatives/${INITIATIVE}/contributions?cursor=${cursor}&limit=${LIMIT}&isOriginal=true`;
       const response = await fetch(url);
       if (!response.ok) break;
       const data = await response.json() as { data?: Array<{ documentId?: string; [key: string]: unknown }>; meta?: { pagination?: { pageCount?: number } } };
@@ -1134,8 +1135,9 @@ I will now provide the papers.`;
         newItems++;
       }
       pageCount = data?.meta?.pagination?.pageCount || 1;
-      if (newItems === 0 && items.length > 0) break;
-      page++;
+      if (items.length === 0) break;
+      if (newItems === 0) break;
+      cursor++;
     }
     return all;
   }
