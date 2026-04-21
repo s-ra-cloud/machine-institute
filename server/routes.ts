@@ -558,17 +558,18 @@ export async function registerRoutes(
   const SYNC_COOLDOWN_MS = 60 * 60 * 1000;
 
   async function fetchAllContributions(initiativeDocId: string): Promise<FSContribution[]> {
-    const PAGE_SIZE = 100;
-    let page = 1;
+    const LIMIT = 50;
+    const MAX_CURSORS = 200;
+    let cursor = 1;
     let all: FSContribution[] = [];
     let pageCount = 1;
     const seen = new Set<string>();
 
-    while (page <= pageCount) {
-      const url = `https://future-science.org/api/v1/initiatives/${initiativeDocId}/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+    while (cursor <= pageCount && cursor <= MAX_CURSORS) {
+      const url = `https://future-science.org/api/v1/initiatives/${initiativeDocId}/contributions?cursor=${cursor}&limit=${LIMIT}&isOriginal=true`;
       const resp = await fetch(url);
       if (!resp.ok) {
-        throw new Error(`Future Science API returned ${resp.status} on page ${page}`);
+        throw new Error(`Future Science API returned ${resp.status} on cursor ${cursor}`);
       }
       const json: FSContributionsResponse = await resp.json() as FSContributionsResponse;
       const items = json?.data || [];
@@ -582,8 +583,9 @@ export async function registerRoutes(
         all.push(c);
         added++;
       }
-      page++;
-      if (added === 0 && items.length > 0) break;
+      cursor++;
+      if (items.length === 0) break;
+      if (added === 0) break;
     }
 
     return all;
