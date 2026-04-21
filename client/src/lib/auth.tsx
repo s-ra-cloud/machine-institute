@@ -11,15 +11,19 @@ interface AuthState {
   authenticated: boolean;
   validated: boolean;
   user: AuthUser | null;
+  isAdmin: boolean;
   isLoading: boolean;
   login: () => void;
   logout: () => Promise<void>;
 }
 
+const ADMIN_EMAIL = "sacharaoult@gmail.com";
+
 const AuthContext = createContext<AuthState>({
   authenticated: false,
   validated: false,
   user: null,
+  isAdmin: false,
   isLoading: true,
   login: () => {},
   logout: async () => {},
@@ -68,6 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     authenticated: data?.authenticated ?? false,
     validated: data?.validated ?? false,
     user: data?.user ?? null,
+    isAdmin: data?.user?.email === ADMIN_EMAIL,
     isLoading,
     login,
     logout,

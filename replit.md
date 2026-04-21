@@ -128,6 +128,7 @@ OAuth2 SSO via Future Science (`future-science.org`). Machine Institute has no n
 - **Validation**: Only Future Science users with `validated: true` can access protected features
 - **Protected features**: Literature reviews, editorials (currently locked)
 - **Auth module**: `server/auth.ts` — OAuth flow, session management, `requireAuth` middleware (strict), `optionalAuth` middleware (populates user if session exists without blocking)
+- **Admin-only controls**: Manual Future Science/member sync actions are visible only to the admin email (`sacharaoult@gmail.com`) and protected server-side with `adminAuth`.
 
 ## Environment Secrets
 

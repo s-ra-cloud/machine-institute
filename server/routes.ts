@@ -591,7 +591,7 @@ export async function registerRoutes(
     return all;
   }
 
-  app.post("/api/project-papers/sync", async (req, res) => {
+  app.post("/api/project-papers/sync", adminAuth, async (req, res) => {
     try {
       const { projectId } = req.body;
       if (!projectId || !INITIATIVE_DOC_IDS[projectId]) {
@@ -1157,7 +1157,7 @@ I will now provide the papers.`;
     }
   });
 
-  app.post("/api/initiative-publications/sync", requireAuth, async (req, res) => {
+  app.post("/api/initiative-publications/sync", adminAuth, async (req, res) => {
     try {
       const PAGE_SIZE = 100;
       const INITIATIVE = "efyjiy34s5lgbx2gr50k5h9l";

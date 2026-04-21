@@ -6,6 +6,7 @@ import { projects } from "@/lib/mockData";
 import { ArrowLeft, ExternalLink, Lock, FileText, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth";
 
 interface LiteratureReview {
   id: string;
@@ -41,6 +42,7 @@ export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const project = projects.find((p) => p.id === id);
   const queryClient = useQueryClient();
+  const { isAdmin } = useAuth();
 
   const { data: literatureReviews, isLoading: reviewsLoading } = useQuery<LiteratureReview[]>({
     queryKey: ["/api/literature-reviews", id],
@@ -233,16 +235,18 @@ export default function ProjectDetail() {
           <FadeIn delay={0.3} className="mt-16">
             <div className="flex items-center gap-3 mb-6">
               <h2 className="text-2xl font-heading font-bold" data-testid="heading-publication-log">Publication Log</h2>
-              <button
-                onClick={() => syncMutation.mutate()}
-                disabled={syncMutation.isPending}
-                className="ml-auto flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
-                data-testid="button-sync-publications"
-                title="Update publication log"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-                {syncMutation.isPending ? "Updating…" : "Update"}
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => syncMutation.mutate()}
+                  disabled={syncMutation.isPending}
+                  className="ml-auto flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                  data-testid="button-sync-publications"
+                  title="Update publication log"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                  {syncMutation.isPending ? "Updating…" : "Update"}
+                </button>
+              )}
             </div>
             {pubsLoading ? (
               <p className="text-sm text-muted-foreground font-mono" data-testid="status-pubs-loading">Loading publications…</p>

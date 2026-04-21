@@ -158,7 +158,7 @@ function deriveAgentName(modelConfig: ModelConfig, agentSuffix: string): string 
 }
 
 export default function GenerationDashboard() {
-  const { authenticated, user, login, isLoading: authLoading } = useAuth();
+  const { authenticated, user, login, isLoading: authLoading, isAdmin } = useAuth();
   const hasPlatformAccess = PLATFORM_ACCESS_EMAILS.includes(user?.email ?? "");
   const [activeType, setActiveType] = useState<GenerationType | null>(null);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
@@ -734,7 +734,7 @@ export default function GenerationDashboard() {
           <FadeIn className="mt-16">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-heading font-semibold">Recent Generations</h2>
-              {user?.email === "sacharaoult@gmail.com" && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0)) > 0 && (
+              {isAdmin && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0)) > 0 && (
                 <button
                   onClick={() => {
                     if (confirm("Clear all generation history? This cannot be undone.")) {
