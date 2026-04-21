@@ -760,6 +760,15 @@ Structure the output as follows:
 
 **Keywords:** [list 6–8 specific technical keywords separated by commas — choose terms that precisely describe the subject matter of this review, not generic phrases like "AI research" or "machine learning"]
 
+## Abstract
+Write a single self-contained paragraph of approximately 150–250 words that summarizes the entire review. The abstract MUST cover, in this order:
+1. The scope of the review (the research question and the body of work surveyed).
+2. The synthetic thesis — what these papers, taken together, reveal.
+3. The key thematic findings and the most important points of convergence or tension across the corpus.
+4. The principal research gaps identified.
+5. The main conclusion and the most important direction(s) for future work.
+This is a true abstract — a standalone summary of the whole review — NOT an opening paragraph of the Introduction. Do not include citations or markdown links in the abstract. Do not begin with phrases like "This review introduces…"; instead, state findings directly.
+
 ## Introduction
 The introduction MUST do two things:
 1. **Establish the broader research context** by drawing on the arXiv papers provided under "EXTERNAL CONTEXT FROM ARXIV." Summarize the state of the field — what problems researchers are working on, what recent progress looks like, and what open questions remain — using these external arXiv sources as evidence. Cite them inline as (Author et al., Date) or (arXiv: ID).
@@ -859,6 +868,15 @@ CRITICAL: The bulk of the review must be analytical critique — the Critical An
 Structure the output as follows:
 
 **Keywords:** [list 6–8 specific technical keywords separated by commas — choose terms that precisely describe the subject matter of this review, not generic phrases like "AI research" or "machine learning"]
+
+## Abstract
+Write a single self-contained paragraph of approximately 150–250 words that summarizes the entire adversarial review. The abstract MUST cover, in this order:
+1. The scope of the review (the research question and the body of work scrutinized).
+2. The central critical thesis — the most damning weakness or pattern of weaknesses identified across the corpus.
+3. The principal categories of methodological, evidential, or interpretive flaws found.
+4. The most consequential cross-paper contradictions or shared blind spots.
+5. The blunt verdict on whether this literature is building reliable knowledge, and what would be needed to fix it.
+This is a true abstract — a standalone summary of the whole review — NOT an opening paragraph of the Introduction. Do not include citations or markdown links in the abstract. State the critique directly and without hedging.
 
 ## Introduction
 The introduction MUST do two things:
@@ -1480,13 +1498,30 @@ I will now provide the papers.`;
       // Post-process: convert plain-text citations to markdown links since the LLM often ignores
       // the link-format instruction. We linkify by matching paper titles and arXiv IDs.
       cleanReviewText = linkifyCitations(cleanReviewText, allFSPapers, arxivResults);
-      // Extract abstract from Introduction section (first real paragraph, first 3 sentences)
-      const introMatch = cleanReviewText.match(/##\s*Introduction\s*\n+([\s\S]+?)(?=\n##\s)/);
-      let extractedAbstract = `A literature review on: ${data.researchQuestion}.`;
-      if (introMatch) {
-        const introText = introMatch[1].trim();
-        const sentences = introText.match(/[^.!?]+[.!?]+/g) || [];
-        extractedAbstract = sentences.slice(0, 3).join(" ").trim() || introText.slice(0, 500);
+      // Extract the dedicated Abstract section produced by the prompt. Match either a markdown
+      // heading (## Abstract) or a bold-label form (**Abstract:**), then capture text up to the
+      // next heading/bold-label or end of document.
+      const abstractMatch =
+        cleanReviewText.match(/##\s*Abstract\s*\n+([\s\S]+?)(?=\n##\s|$)/) ||
+        cleanReviewText.match(/\*\*Abstract:\*\*\s*([\s\S]+?)(?=\n##\s|\n\*\*[A-Z][^*]*:\*\*|\n{2,}|$)/);
+      let extractedAbstract: string;
+      if (abstractMatch) {
+        // Strip any inline markdown links/formatting to keep the abstract plain-text-friendly
+        // for the Future Science metadata field, while leaving the body markdown untouched.
+        extractedAbstract = abstractMatch[1]
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+          .replace(/\*\*([^*]+)\*\*/g, "$1")
+          .replace(/\s+/g, " ")
+          .trim();
+      } else {
+        await emitLREvent(
+          "validation-warning",
+          "Generated review did not contain a parseable Abstract section; submitting a generic summary fallback instead of intro text.",
+        );
+        extractedAbstract = `Summary unavailable: this literature review on "${data.researchQuestion}" was generated without a parseable abstract section. See the full review for scope, findings, and conclusions.`;
+        // Keep the locally-stored review consistent with what was submitted: prepend the
+        // fallback abstract to the body so the UI shows the same text as the FS metadata.
+        cleanReviewText = `## Abstract\n\n${extractedAbstract}\n\n${cleanReviewText}`;
       }
 
       const rawHtml = markdownToHtml(cleanReviewText);
