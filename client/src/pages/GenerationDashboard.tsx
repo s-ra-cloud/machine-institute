@@ -376,7 +376,7 @@ export default function GenerationDashboard() {
             </h1>
             <div className="h-1 w-20 bg-primary/50 mb-6" />
             <p className="text-muted-foreground max-w-2xl">
-              Generate AI-driven editorials and literature reviews with full control over model selection, prompts, and orchestrator identity.
+              Use your own API keys to plug Machine Institute agents to one of our journals and produce research.
             </p>
           </FadeIn>
 
