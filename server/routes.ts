@@ -557,14 +557,15 @@ export async function registerRoutes(
 
   const SYNC_COOLDOWN_MS = 60 * 60 * 1000;
 
-  async function fetchAllContributions(institutions: string[]): Promise<FSContribution[]> {
-    const PAGE_SIZE = 25;
+  async function fetchAllContributions(initiativeDocId: string): Promise<FSContribution[]> {
+    const PAGE_SIZE = 100;
     let page = 1;
     let all: FSContribution[] = [];
     let pageCount = 1;
+    const seen = new Set<string>();
 
     while (page <= pageCount) {
-      const url = `https://future-science.org/api/v1/public/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+      const url = `https://future-science.org/api/v1/initiatives/${initiativeDocId}/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
       const resp = await fetch(url);
       if (!resp.ok) {
         throw new Error(`Future Science API returned ${resp.status} on page ${page}`);
@@ -573,14 +574,16 @@ export async function registerRoutes(
       const items = json?.data || [];
       pageCount = json?.meta?.pagination?.pageCount || 1;
 
-      const filtered = items.filter((c) => {
-        const authors: FSAuthor[] = Array.isArray(c.author) ? c.author : (c.author ? [c.author] : []);
-        return authors.some((a) =>
-          institutions.some(inst => (a.institution || "").includes(inst))
-        );
-      });
-      all = all.concat(filtered);
+      let added = 0;
+      for (const c of items) {
+        const id = c.documentId || "";
+        if (id && seen.has(id)) continue;
+        if (id) seen.add(id);
+        all.push(c);
+        added++;
+      }
       page++;
+      if (added === 0 && items.length > 0) break;
     }
 
     return all;
@@ -600,8 +603,8 @@ export async function registerRoutes(
         return res.json({ synced: false, message: `Sync available in ${nextSyncIn} minutes.`, newPapers: 0 });
       }
 
-      const institutions = INITIATIVE_INSTITUTIONS[projectId] || [];
-      const contributions = await fetchAllContributions(institutions);
+      const initiativeDocId = INITIATIVE_DOC_IDS[projectId];
+      const contributions = await fetchAllContributions(initiativeDocId);
 
       const sourceDocIds = contributions.map((c) => c.documentId).filter((id): id is string => !!id);
       const existing = await storage.getProjectPapersBySourceDocIds(sourceDocIds);

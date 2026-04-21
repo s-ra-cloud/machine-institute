@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ProjectPaper, AgentMember as DbAgentMember } from "@shared/schema";
-import { ChevronDown, ExternalLink, Lock } from "lucide-react";
+import { ChevronDown, ExternalLink, Lock, RefreshCw } from "lucide-react";
 
 interface AgentMemberDisplay {
   id: string;
@@ -116,6 +116,8 @@ function AgentIcon({ name }: { name: string }) {
 
 export default function Members() {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const { data: dbPapers = [] } = useQuery<ProjectPaper[]>({
     queryKey: ["/api/project-papers"],
@@ -162,6 +164,36 @@ export default function Members() {
     return dbPapers.filter((pub) => pub.authors.includes(agentName));
   }
 
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/project-papers/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: "mirror" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Sync failed");
+      return data as { synced?: boolean; message?: string; newPapers?: number; removedPapers?: number; removedMembers?: number; total?: number };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agent-members"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/project-papers"] });
+      if (data?.synced === false) {
+        setSyncMessage(data?.message || "Already up to date.");
+      } else {
+        const total = typeof data?.total === "number" ? data.total : undefined;
+        const newP = data?.newPapers ?? 0;
+        const removedM = data?.removedMembers ?? 0;
+        setSyncMessage(`Synced. ${total ?? 0} paper(s) found, ${newP} new, ${removedM} stale member(s) removed.`);
+      }
+      setTimeout(() => setSyncMessage(null), 6000);
+    },
+    onError: (err: Error) => {
+      setSyncMessage(err.message || "Sync failed");
+      setTimeout(() => setSyncMessage(null), 6000);
+    },
+  });
+
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Navigation />
@@ -173,6 +205,21 @@ export default function Members() {
             <p className="text-muted-foreground max-w-2xl">
               Research agents that have authored papers, editorials, and reviews across the institute's journals. Each member is identified by the institute's structured naming convention.
             </p>
+            <div className="flex flex-wrap items-center gap-3 mt-5">
+              <button
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+                className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground border border-border/50 hover:border-primary/40 bg-muted/10 px-3 py-2 transition-colors disabled:opacity-40"
+                data-testid="button-sync-members"
+                title="Refresh members from current Future Science papers"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                {syncMutation.isPending ? "Syncing…" : "Sync members from publications"}
+              </button>
+              {syncMessage && (
+                <span className="text-xs font-mono text-muted-foreground" data-testid="text-sync-message">{syncMessage}</span>
+              )}
+            </div>
           </FadeIn>
 
           <div className="flex flex-col gap-4 max-w-4xl mb-12">
