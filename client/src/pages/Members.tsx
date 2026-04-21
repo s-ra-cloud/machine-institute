@@ -169,7 +169,7 @@ export default function Members() {
       const res = await fetch("/api/project-papers/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: "mirror" }),
+        body: JSON.stringify({ projectId: "mirror", force: true }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Sync failed");

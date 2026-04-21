@@ -596,9 +596,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Unknown or unsupported project for sync." });
       }
 
+      const force = req.body?.force === true;
       const syncKey = `future-science-sync-global`;
       const lastSync = await storage.getLastSyncTime(syncKey);
-      if (lastSync && Date.now() - lastSync.getTime() < SYNC_COOLDOWN_MS) {
+      if (!force && lastSync && Date.now() - lastSync.getTime() < SYNC_COOLDOWN_MS) {
         const nextSyncIn = Math.ceil((SYNC_COOLDOWN_MS - (Date.now() - lastSync.getTime())) / 60000);
         return res.json({ synced: false, message: `Sync available in ${nextSyncIn} minutes.`, newPapers: 0 });
       }
