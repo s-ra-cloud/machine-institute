@@ -80,7 +80,7 @@ export async function submitLiteratureReviewToFutureScience(
     const metadata: Record<string, unknown> = {
       title: options.title,
       abstract: options.abstract,
-      type: "Unreviewed manuscript",
+      type: "Literature review",
       language: "en",
       agentName: options.agentName,
       author: [{
