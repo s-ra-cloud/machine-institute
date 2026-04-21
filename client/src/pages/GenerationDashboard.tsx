@@ -20,6 +20,8 @@ import {
   Clock,
   Lock,
   FlaskConical,
+  ArrowLeft,
+  ArrowRight,
 } from "lucide-react";
 
 type GenerationType = "editorial" | "literature-review";
@@ -69,6 +71,29 @@ interface LiteratureReviewRecord {
   sourceTrace: string | null;
 }
 
+const upcomingLabBlocks = [
+  {
+    title: "Peer review a publication",
+    description: "Run structured peer review on an existing Machine Institute publication.",
+  },
+  {
+    title: "Revise a peer reviewed publication",
+    description: "Use reviewer feedback to produce a revised publication draft.",
+  },
+  {
+    title: "Ethics analysis of false citations",
+    description: "Audit literature for citation integrity, unsupported claims, and fabricated references.",
+  },
+  {
+    title: "Semi-autonomous research cycle",
+    description: "Coordinate agents through a guided research loop with human checkpoints.",
+  },
+  {
+    title: "Fully-autonomous research cycle",
+    description: "Let a manager persona rewrite prompts and coordinate other research agents end-to-end.",
+  },
+];
+
 const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
 
 function deriveModelInitials(modelName: string): string {
@@ -108,6 +133,7 @@ export default function GenerationDashboard() {
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
   const [selectedJournal, setSelectedJournal] = useState<string>("mirror");
+  const [upcomingIndex, setUpcomingIndex] = useState(0);
 
   const queryClient = useQueryClient();
 
@@ -354,6 +380,66 @@ export default function GenerationDashboard() {
                   <p className="text-sm text-muted-foreground leading-relaxed mb-4">
                     Design a computational experiment grounded in the institute's prior work and current arXiv frontiers.
                   </p>
+                </div>
+              </div>
+
+              <div className="border border-border/40 bg-muted/5 p-6 mb-12 overflow-hidden" data-testid="section-upcoming-lab-blocks">
+                <div className="flex items-start justify-between gap-4 mb-5">
+                  <div>
+                    <p className="text-[10px] font-mono uppercase tracking-[0.25em] text-primary/60 mb-2">
+                      Coming soon
+                    </p>
+                    <h2 className="text-2xl font-heading font-semibold">Upcoming Lab Workflows</h2>
+                    <p className="text-sm text-muted-foreground mt-2 max-w-xl">
+                      Additional research blocks are being staged for carousel access as the lab expands.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => setUpcomingIndex((idx) => (idx - 1 + upcomingLabBlocks.length) % upcomingLabBlocks.length)}
+                      className="w-9 h-9 border border-border/50 bg-background/60 hover:border-primary/40 hover:text-primary transition-colors flex items-center justify-center"
+                      data-testid="button-upcoming-prev"
+                      aria-label="Previous upcoming workflow"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setUpcomingIndex((idx) => (idx + 1) % upcomingLabBlocks.length)}
+                      className="w-9 h-9 border border-border/50 bg-background/60 hover:border-primary/40 hover:text-primary transition-colors flex items-center justify-center"
+                      data-testid="button-upcoming-next"
+                      aria-label="Next upcoming workflow"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-3 gap-4">
+                  {[0, 1, 2].map((offset) => {
+                    const blockIndex = (upcomingIndex + offset) % upcomingLabBlocks.length;
+                    const block = upcomingLabBlocks[blockIndex];
+                    return (
+                      <div
+                        key={block.title}
+                        className="relative min-h-[168px] border border-border/30 bg-background/40 p-5 opacity-75"
+                        data-testid={`card-upcoming-workflow-${blockIndex}`}
+                      >
+                        <Lock className="w-3 h-3 text-muted-foreground/40 absolute top-4 right-4" />
+                        <div className="text-[10px] font-mono text-muted-foreground/40 mb-5">
+                          {String(blockIndex + 1).padStart(2, "0")} / {String(upcomingLabBlocks.length).padStart(2, "0")}
+                        </div>
+                        <h3 className="text-lg font-heading font-semibold text-muted-foreground mb-3 pr-4">
+                          {block.title}
+                        </h3>
+                        <p className="text-sm text-muted-foreground/60 leading-relaxed">
+                          {block.description}
+                        </p>
+                        <div className="mt-5">
+                          <span className="text-[10px] font-mono uppercase tracking-widest text-primary/40">Locked</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </FadeIn>
