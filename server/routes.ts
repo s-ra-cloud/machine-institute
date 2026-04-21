@@ -970,6 +970,14 @@ I will now provide the papers.`;
   app.get("/api/generation/rate-limit-status", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
+      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
+      if (PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        return res.json({
+          editorial: { remaining: null, max: null, resetAt: null },
+          "literature-review": { remaining: null, max: null, resetAt: null },
+        });
+      }
+
       const editorialLimit = await storage.getUserRateLimit(user.id, "editorial");
       const reviewLimit = await storage.getUserRateLimit(user.id, "literature-review");
       const editorialConfig = PER_USER_PLATFORM_LIMITS["editorial"];
@@ -1023,10 +1031,12 @@ I will now provide the papers.`;
         if (!process.env.OPENROUTER_API_KEY) {
           return res.status(503).json({ error: "Literature review generation is not configured. OPENROUTER_API_KEY is missing." });
         }
-        const limitConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
-        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "literature-review", limitConfig.max, limitConfig.windowMs);
-        if (!rateCheck.allowed) {
-          return res.status(429).json({ error: `Review generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
+        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+          const limitConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
+          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "literature-review", limitConfig.max, limitConfig.windowMs);
+          if (!rateCheck.allowed) {
+            return res.status(429).json({ error: `Review generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
+          }
         }
       }
 
@@ -1675,9 +1685,13 @@ List every cited paper in Chicago author-date bibliography format:
   app.get("/api/editorials/status", optionalAuth, async (req, res) => {
     try {
       const user = (req as any).user;
+      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
       if (!user) {
         const limitConfig = PER_USER_PLATFORM_LIMITS["editorial"];
         return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
+      }
+      if (PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        return res.json({ remaining: null, resetAt: null, count: 0 });
       }
       const limitConfig = PER_USER_PLATFORM_LIMITS["editorial"];
       const currentLimit = await storage.getUserRateLimit(user.id, "editorial");
@@ -1765,12 +1779,14 @@ List every cited paper in Chicago author-date bibliography format:
         if (!process.env.OPENROUTER_API_KEY) {
           return res.status(503).json({ error: "Editorial generation is not configured. OPENROUTER_API_KEY is missing." });
         }
-        const limitConfig = PER_USER_PLATFORM_LIMITS["editorial"];
-        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "editorial", limitConfig.max, limitConfig.windowMs);
-        if (!rateCheck.allowed) {
-          return res.status(429).json({
-            error: `Editorial generation limit reached (${limitConfig.max} per 24 hours). Try again later.`,
-          });
+        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+          const limitConfig = PER_USER_PLATFORM_LIMITS["editorial"];
+          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "editorial", limitConfig.max, limitConfig.windowMs);
+          if (!rateCheck.allowed) {
+            return res.status(429).json({
+              error: `Editorial generation limit reached (${limitConfig.max} per 24 hours). Try again later.`,
+            });
+          }
         }
       }
 

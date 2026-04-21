@@ -26,7 +26,7 @@ import {
 type GenerationType = "editorial" | "literature-review";
 
 interface RateLimitStatus {
-  remaining: number;
+  remaining: number | null;
   resetAt: number | null;
   count: number;
 }
@@ -361,9 +361,9 @@ export default function GenerationDashboard() {
 
   const byocReady = modelConfig.providerMode === "byoc" ? !!modelConfig.keyValidated : true;
   const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && byocReady &&
-    (modelConfig.providerMode === "byoc" || (editorialStatus?.remaining ?? 1) > 0);
+    (modelConfig.providerMode === "byoc" || editorialStatus?.remaining === null || (editorialStatus?.remaining ?? 1) > 0);
   const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && byocReady &&
-    (modelConfig.providerMode === "byoc" || (reviewStatus?.remaining ?? 1) > 0);
+    (modelConfig.providerMode === "byoc" || reviewStatus?.remaining === null || (reviewStatus?.remaining ?? 1) > 0);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -423,7 +423,7 @@ export default function GenerationDashboard() {
                             </span>
                             {!isLocked && reviewStatus && (
                               <span className="text-[10px] font-mono text-muted-foreground/50" data-testid="text-review-uses-remaining">
-                                {reviewStatus.remaining} platform uses remaining
+                                {reviewStatus.remaining === null ? "Unlimited" : reviewStatus.remaining} platform uses remaining
                               </span>
                             )}
                           </div>

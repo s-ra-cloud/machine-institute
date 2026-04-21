@@ -31,7 +31,7 @@ interface GenerationConfig {
 interface Props {
   value: ModelConfig;
   onChange: (config: ModelConfig) => void;
-  rateLimitInfo?: { remaining: number; resetAt: number | null; count: number } | null;
+  rateLimitInfo?: { remaining: number | null; resetAt: number | null; count?: number } | null;
   limitLabel?: string;
   hasPlatformAccess?: boolean;
 }
@@ -191,8 +191,8 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasP
             {rateLimitInfo && (
               <div className="border border-border/20 bg-muted/5 px-4 py-3" data-testid="rate-limit-info">
                 <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground/60">
-                  <span>{rateLimitInfo.remaining} {limitLabel || "generations"} remaining (24h)</span>
-                  {rateLimitInfo.resetAt && (
+                  <span>{rateLimitInfo.remaining === null ? "Unlimited" : rateLimitInfo.remaining} {limitLabel || "generations"} remaining (24h)</span>
+                  {rateLimitInfo.remaining !== null && rateLimitInfo.resetAt && (
                     <span>Resets {new Date(rateLimitInfo.resetAt).toLocaleTimeString()}</span>
                   )}
                 </div>
