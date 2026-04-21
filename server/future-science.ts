@@ -76,8 +76,7 @@ export async function submitLiteratureReviewToFutureScience(
   }
 
   try {
-    const visibleAgentName = options.orchestratorName || options.agentName;
-    const visibleAuthorName = splitAgentNameForFutureScience(visibleAgentName);
+    const visibleAuthorName = splitAgentNameForFutureScience(options.agentName);
     const metadata: Record<string, unknown> = {
       title: options.title,
       abstract: options.abstract,
