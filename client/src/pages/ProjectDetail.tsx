@@ -144,7 +144,7 @@ export default function ProjectDetail() {
     );
   }
 
-  const completedReviews = (literatureReviews || []).filter((r) => r.status === "completed");
+  const completedReviews = (literatureReviews || []).filter((r) => ["completed", "published"].includes(r.status));
   const allPublications = publicationsData?.data ?? [];
 
   return (
