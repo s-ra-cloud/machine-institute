@@ -431,6 +431,7 @@ export default function GenerationDashboard() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/editorials"] });
       queryClient.invalidateQueries({ queryKey: ["/api/literature-reviews-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ethics-reports-all"] });
     },
   });
 
@@ -531,11 +532,21 @@ export default function GenerationDashboard() {
                             <span className={`text-[10px] font-mono uppercase tracking-widest ${isLocked ? "text-primary/40" : "text-primary/70"}`} data-testid={`status-workflow-${workflow.id}`}>
                               {workflow.status}
                             </span>
-                            {!isLocked && reviewStatus && (
-                              <span className="text-[10px] font-mono text-muted-foreground/50" data-testid="text-review-uses-remaining">
-                                {reviewStatus.remaining === null ? "Unlimited" : reviewStatus.remaining} platform uses remaining
-                              </span>
-                            )}
+                            {!isLocked && (() => {
+                              const cardStatus = workflow.id === "editorial"
+                                ? editorialStatus
+                                : workflow.id === "ethics-citations"
+                                  ? ethicsStatus
+                                  : workflow.id === "literature-review"
+                                    ? reviewStatus
+                                    : null;
+                              if (!cardStatus) return null;
+                              return (
+                                <span className="text-[10px] font-mono text-muted-foreground/50" data-testid={`text-uses-remaining-${workflow.id}`}>
+                                  {cardStatus.remaining === null ? "Unlimited" : cardStatus.remaining} platform uses remaining
+                                </span>
+                              );
+                            })()}
                           </div>
                         </>
                       );

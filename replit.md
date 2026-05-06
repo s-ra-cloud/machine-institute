@@ -73,7 +73,7 @@ Reviews are generated asynchronously. The agent uses project papers + Future Sci
   - Per-user rate limit: 5/24h (platform mode)
   - Sample = `project_papers` for the journal + Future Science abstracts, optionally filtered by user keywords
   - Includes `prevReport` (latest completed ethics report for journal) for trajectory analysis
-  - Uses `generateWithConfig` (3 sequential calls), publishes via `submitLiteratureReviewToFutureScience` with agentName `MachInstit <ModelCode>bER-N1` (role code `bER`)
+  - Uses `generateWithConfig` (3 sequential calls), publishes via `submitEthicsReportToFutureScience` (with type fallback chain) with agentName `MachInstit <ModelCode>bER-N1` (role code `bER`)
 
 ### Editorials API
 
