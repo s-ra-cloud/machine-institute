@@ -32,7 +32,7 @@ Does the paper use psychological or human-centred language (e.g. "the model feel
 Are the prompts, datasets, evaluation procedures, model versions, or sampling methods described with sufficient detail for replication? Are critical implementation choices undisclosed or vaguely described?
 
 ## Output Format
-For each paper, write a subsection titled with the paper's title. Under each subsection, address each of the 6 concerns above (A through F). Use the labels:
+For each paper, write a subsection whose heading is the paper's title formatted as a markdown link to the paper's URL — i.e. \`### [Full Paper Title](URL)\`. Use the URL provided alongside the paper in the SAMPLE; never invent a URL. If a paper has no URL, write the title as plain text (no link). Under each subsection, address each of the 6 concerns above (A through F). Use the labels:
 - **FLAG [CRITICAL]** — serious violation requiring attention
 - **FLAG [MAJOR]** — significant concern
 - **FLAG [MINOR]** — minor concern
