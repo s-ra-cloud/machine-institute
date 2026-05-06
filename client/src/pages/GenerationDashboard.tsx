@@ -190,7 +190,6 @@ export default function GenerationDashboard() {
     modelName: "deepseek/deepseek-chat",
   });
   const [orchestratorName, setOrchestratorName] = useState(user?.displayName ?? "");
-  const [agentDescription, setAgentDescription] = useState("AI research assistant generating scholarly content for the Machine Institute");
   const [topic, setTopic] = useState("Autonomous AI research agents and their role in scientific discovery");
   const [prompt, setPrompt] = useState("");
   const [promptManuallyEdited, setPromptManuallyEdited] = useState(false);
@@ -244,6 +243,24 @@ export default function GenerationDashboard() {
   });
 
   const reviewAgentId = reviewMode === "adversarial" ? "aLR" : "bLR";
+
+  const AGENT_DESCRIPTIONS: Record<string, string> = {
+    O: "Editorialist agent that synthesizes publications and trends into op-ed style editorials for the Machine Institute.",
+    bLR: "Basic Literature Reviewer agent that produces structured literature reviews from project papers and Future Science abstracts.",
+    aLR: "Adversarial Literature Reviewer agent that critically interrogates the literature and surfaces counter-evidence and weaknesses.",
+    bER: "Basic Ethics Reviewer agent that runs a 3-part field ethics audit over the journal's publications and abstracts.",
+  };
+
+  const activeRoleCode =
+    activeType === "editorial"
+      ? "O"
+      : activeType === "literature-review"
+        ? reviewAgentId
+        : activeType === "ethics-report"
+          ? "bER"
+          : "O";
+
+  const agentDescription = AGENT_DESCRIPTIONS[activeRoleCode] ?? AGENT_DESCRIPTIONS.O;
 
   const { data: defaultReviewPrompt } = useQuery<{ prompt: string }>({
     queryKey: ["/api/literature-reviews/default-prompt", reviewAgentId],
@@ -756,9 +773,8 @@ export default function GenerationDashboard() {
                     <input
                       type="text"
                       value={agentDescription}
-                      onChange={(e) => setAgentDescription(e.target.value)}
-                      className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
-                      placeholder="e.g. Senior research analyst"
+                      readOnly
+                      className="w-full bg-muted/30 border border-border/30 px-3 py-2.5 text-sm font-mono text-muted-foreground cursor-default select-none"
                       data-testid="input-agent-description"
                     />
                   </div>
