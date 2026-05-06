@@ -1,0 +1,1327 @@
+# H Persona — Solo Field Ethics Report Pipeline
+
+**Handoff document for porting the H (Ethics Analyst) persona — single-author / solo mode — to another Replit project.**
+
+This document is self-contained: it includes the architecture, every required prompt, every required source file, the database schema, the environment variables, and step-by-step adaptation instructions. Feed it directly to another Replit Agent.
+
+---
+
+## 1. What the H persona does (solo mode)
+
+The **H persona** is an autonomous AI ethics analyst that produces a **field-wide ethical assessment** of machine-psychology research published on `future-science.org`.
+
+Solo mode means: **one H agent runs end-to-end with no co-authors and no human in the loop.** The output is a single Markdown ethics report that is automatically published back to `future-science.org` as an "Unreviewed manuscript" of type `ethics-commentary`.
+
+### Pipeline at a glance
+
+```
+[trigger: user clicks "Run" on a project where agentRole === "H"]
+        │
+        ▼
+1. Look up the most recent previous ethics report in the local DB
+   (publicationType = "ethics-commentary"). If found, use its publish
+   date as a temporal cutoff.
+        │
+        ▼
+2. Broad multi-keyword search of future-science.org public API
+   (14 keywords × up to 3 pages each, 50 items per page).
+   Filter out: peer-reviews, prior ethics reports, items dated
+   before the cutoff, items with body < 800 chars.
+        │
+        ▼
+3. Randomly sample 20–35 papers from deduplicated candidates.
+        │
+        ▼
+4. LLM Part 1 — Paper-by-paper audit across 6 ethical concerns
+   (evidentiary weakness, citation integrity, overinterpretation,
+   inflated novelty, anthropomorphic framing, methodological opacity).
+        │
+        ▼
+5. LLM Part 2 — Systemic cross-paper patterns + comparison with
+   the previous report's trajectory.
+        │
+        ▼
+6. LLM Part 3 — Synthesis, consolidated flags list, recommendations,
+   field-level clearance statement (CLEARED / CLEARED_WITH_CONDITIONS
+   / NOT_CLEARED).
+        │
+        ▼
+7. Extract structured outputs (flags, recommendations, clearance
+   status) from the Markdown via regex.
+        │
+        ▼
+8. Store top recommendations as `methodological_advices` rows
+   (so future runs of any agent can use them).
+        │
+        ▼
+9. Save results to `projects.results` JSONB and mark project completed.
+        │
+        ▼
+10. Publish to future-science.org:
+    - POST multipart/form-data to
+      https://future-science.org/api/v1/contributions/api-bots
+    - `data` field: JSON with title, abstract, keywords, agentName,
+      agentDescription, researchOrchestrator, etc.
+    - `file` field: the Markdown ethics report.
+    - Auth: `x-api-key` header (no Bearer token).
+        │
+        ▼
+11. Save a row in the local `publications` table so future runs
+    know about this report.
+```
+
+---
+
+## 2. Required environment variables / secrets
+
+| Name | Purpose |
+|---|---|
+| `FUTURE_OF_SCIENCE_API_KEY` | API key for `future-science.org` — required for publishing. Without it, the pipeline still produces the report but skips publishing. |
+| `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | Anthropic API key. Required if H is run on a Claude model (default). |
+| `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | Anthropic base URL (Replit AI Integrations injects this). |
+| `AI_INTEGRATIONS_OPENAI_API_KEY` | Required only if H is run on a GPT-* model. |
+| `AI_INTEGRATIONS_OPENAI_BASE_URL` | Same. |
+| `AI_INTEGRATIONS_OPENROUTER_API_KEY` | Required only if H is run on an OpenRouter model (e.g. `deepseek/deepseek-v3.2`). |
+| `AI_INTEGRATIONS_OPENROUTER_BASE_URL` | Same. |
+| `CROSSREF_CONTACT_EMAIL` | *(optional)* — email used in CrossRef polite User-Agent. Defaults to `machine-psychology@future-science.org`. CrossRef is only used by the citation-verifier helper, which is **not** invoked by the solo H pipeline directly but is included here because the prompts assume the analyst can reason about citation authenticity. Leave it set; no real cost. |
+
+If you are using Replit's built-in AI Integrations, the `AI_INTEGRATIONS_*` variables are auto-populated when you install the `javascript_anthropic_ai_integrations`, `javascript_openai_ai_integrations`, or `javascript_openrouter_ai_integrations` blueprints.
+
+---
+
+## 3. Database schema (Drizzle / Postgres)
+
+The solo H pipeline needs only **four** tables. If your target project doesn't already use Drizzle + Postgres, you can adapt these to any storage layer — the pipeline only calls the storage interface, never the DB directly.
+
+```ts
+// shared/schema.ts (only the parts H needs)
+
+import { sql } from "drizzle-orm";
+import { pgTable, text, integer, jsonb, timestamp, boolean, pgEnum } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+export const projectStatusEnum = pgEnum("project_status", [
+  "configuring", "queued", "running", "completed", "failed", "cancelled",
+]);
+
+export const projects = pgTable("projects", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull().default("Auto-generated project"),
+  status: projectStatusEnum("status").notNull().default("configuring"),
+  researchQuestion: text("research_question"),     // for H: human-friendly subtitle
+  provider: text("provider").notNull().default("anthropic"),
+  llmModel: text("llm_model").notNull().default("claude-sonnet-4-5"),
+  targetModel: text("target_model").notNull().default("none"), // unused for H
+  temperature: text("temperature").notNull().default("0.7"),
+  agentRole: text("agent_role").notNull().default("E"),  // set to "H" to trigger ethics pipeline
+  agentMemory: text("agent_memory").notNull().default("N"),
+  agentNumber: text("agent_number").notNull().default("1"),
+  results: jsonb("results"),                              // ethics output stored here
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const projectLogs = pgTable("project_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  projectId: integer("project_id").notNull(),
+  message: text("message").notNull(),
+  level: text("level").notNull().default("info"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const publications = pgTable("publications", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  projectId: integer("project_id").notNull(),
+  title: text("title").notNull(),
+  subtitle: text("subtitle").notNull(),
+  abstract: text("abstract").notNull(),
+  authorName: text("author_name").notNull(),
+  journal: text("journal").notNull().default("future-science.org"),
+  documentId: text("document_id"),
+  publishedAt: timestamp("published_at").notNull().defaultNow(),
+  publicationType: text("publication_type"),        // for H: "ethics-commentary"
+  keywords: text("keywords").array(),
+  mainConclusions: text("main_conclusions"),
+  methodologicalAdvice: text("methodological_advice"),
+  researchGaps: text("research_gaps").array(),
+  formattedCitation: text("formatted_citation"),
+});
+
+export const methodologicalAdvices = pgTable("methodological_advices", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  advice: text("advice").notNull(),
+  source: text("source"),
+  sourceReviewId: text("source_review_id"),
+  sourceAuthors: text("source_authors"),
+  sourceYear: text("source_year"),
+  sourceTitle: text("source_title"),
+  usageCount: integer("usage_count").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type Project = typeof projects.$inferSelect;
+export type Publication = typeof publications.$inferSelect;
+export type MethodologicalAdvice = typeof methodologicalAdvices.$inferSelect;
+```
+
+### Storage interface used by the pipeline
+
+The pipeline calls these methods on a `storage` object. Implement them however you like (Drizzle, Prisma, in-memory, etc.):
+
+```ts
+interface IStorage {
+  // Projects
+  getProject(id: number): Promise<Project | undefined>;
+  updateProjectResults(id: number, results: any): Promise<void>;
+  updateProjectStatus(id: number, status: string): Promise<void>;
+
+  // Project logs (append-only, ordered by createdAt)
+  createProjectLog(input: {
+    projectId: number;
+    message: string;
+    level: "info" | "warning" | "error" | "success";
+  }): Promise<void>;
+
+  // Publications
+  getPublications(): Promise<Publication[]>;
+  createPublication(input: Omit<Publication, "id" | "publishedAt"> & {
+    publishedAt?: Date;
+  }): Promise<Publication>;
+
+  // Methodological advices (used by H to seed future runs)
+  getMethodologicalAdvices(): Promise<MethodologicalAdvice[]>;
+  createMethodologicalAdvice(input: Omit<MethodologicalAdvice, "id" | "createdAt" | "usageCount">): Promise<void>;
+}
+```
+
+---
+
+## 4. Required NPM packages
+
+```jsonc
+// package.json (only the parts H needs)
+{
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.x",       // for Anthropic provider
+    "openai": "^4.x",                  // for OpenAI + OpenRouter providers (uses chat-completions API)
+    "drizzle-orm": "^0.x",             // optional, only if using Drizzle for storage
+    "zod": "^3.x"                      // optional, for input validation
+  }
+}
+```
+
+The pipeline uses Node.js native `fetch`, `FormData`, `Blob`, and `AbortSignal.timeout` — no extra HTTP library is needed. **Requires Node 18+** (Node 20+ recommended).
+
+---
+
+## 5. Source files
+
+Below are the four files you need to copy into the target project. They can live anywhere; paths are suggestions matching the source repo.
+
+### 5.1 `server/llm.ts` — multi-provider LLM client
+
+This is the universal LLM call wrapper. **Only `callInvestigator` is used by the H solo pipeline.** The other functions (`callTargetModel`, `extractTopicKeywords`) are not needed for H but are kept here for completeness because the file is small and self-contained.
+
+```ts
+// server/llm.ts
+import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
+
+const anthropic = new Anthropic({
+  apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
+});
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
+
+const openrouter = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
+});
+
+const INVESTIGATOR_TIMEOUT_MS = 90_000;
+const MAX_LLM_RETRIES = 5;
+const RETRY_DELAY_MS = 3_000;
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function withRetry<T>(fn: () => Promise<T>, maxRetries: number, label: string): Promise<T> {
+  let lastError: Error = new Error("Unknown error");
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try { return await fn(); }
+    catch (err: unknown) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`[llm] ${label} attempt ${attempt}/${maxRetries} failed: ${lastError.message}`);
+      if (attempt < maxRetries) await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    }
+  }
+  throw lastError;
+}
+
+function getProviderForModel(model: string): "anthropic" | "openai" | "openrouter" {
+  if (model.startsWith("claude-")) return "anthropic";
+  if (model.startsWith("gpt-")) return "openai";
+  if (model.includes("/")) return "openrouter";
+  return "anthropic";
+}
+
+async function callAnthropicModel(
+  systemPrompt: string, userPrompt: string, model: string,
+  maxTokens: number = 8192, temperature?: number, signal?: AbortSignal,
+): Promise<string> {
+  const params: any = {
+    model, max_tokens: maxTokens, system: systemPrompt,
+    messages: [{ role: "user" as const, content: userPrompt }],
+  };
+  if (temperature !== undefined) params.temperature = temperature;
+  return await anthropic.messages.stream(params, { signal }).finalText();
+}
+
+async function callOpenAIModel(
+  systemPrompt: string, userPrompt: string, model: string,
+  maxTokens: number = 8192, temperature?: number, signal?: AbortSignal,
+): Promise<string> {
+  const params: any = {
+    model,
+    messages: [
+      { role: "system" as const, content: systemPrompt },
+      { role: "user" as const, content: userPrompt },
+    ],
+    max_tokens: maxTokens,
+  };
+  if (temperature !== undefined) params.temperature = temperature;
+  const response = await openai.chat.completions.create(params, { signal });
+  return response.choices[0]?.message?.content || "";
+}
+
+async function callOpenRouterModel(
+  systemPrompt: string, userPrompt: string, model: string,
+  maxTokens: number = 8192, temperature?: number, signal?: AbortSignal,
+): Promise<string> {
+  const params: any = {
+    model,
+    messages: [
+      { role: "system" as const, content: systemPrompt },
+      { role: "user" as const, content: userPrompt },
+    ],
+    max_tokens: maxTokens,
+  };
+  if (temperature !== undefined) params.temperature = temperature;
+  const response = await openrouter.chat.completions.create(params, { signal });
+  return response.choices[0]?.message?.content || "";
+}
+
+function makeTimedCall<T>(
+  fn: (signal: AbortSignal) => Promise<T>, timeoutMs: number, label: string,
+): () => Promise<T> {
+  return () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return fn(controller.signal).then(
+      (val) => { clearTimeout(timer); return val; },
+      (err) => {
+        clearTimeout(timer);
+        if (controller.signal.aborted) throw new Error(`${label} timed out after ${timeoutMs / 1000}s`);
+        throw err;
+      },
+    );
+  };
+}
+
+export async function callInvestigator(
+  systemPrompt: string,
+  userPrompt: string,
+  model: string = "claude-sonnet-4-5",
+  provider?: string,
+  options?: { timeoutMs?: number; maxRetries?: number; maxTokens?: number },
+): Promise<string> {
+  const resolvedProvider = provider || getProviderForModel(model);
+  const label = `investigator(${model})`;
+  const timeout = options?.timeoutMs ?? INVESTIGATOR_TIMEOUT_MS;
+  const retries = options?.maxRetries ?? MAX_LLM_RETRIES;
+  const tokens = options?.maxTokens ?? 8192;
+
+  return withRetry(
+    makeTimedCall((signal) => {
+      switch (resolvedProvider) {
+        case "openai":     return callOpenAIModel(systemPrompt, userPrompt, model, tokens, undefined, signal);
+        case "openrouter": return callOpenRouterModel(systemPrompt, userPrompt, model, tokens, undefined, signal);
+        case "anthropic":
+        default:           return callAnthropicModel(systemPrompt, userPrompt, model, tokens, undefined, signal);
+      }
+    }, timeout, label),
+    retries, label,
+  );
+}
+```
+
+### 5.2 `server/prompts/h-solo.ts` — the three H-Solo prompts
+
+These prompts are the heart of the ethics pipeline. **Do not modify them lightly** — the regex-based output extraction (`extractFlags`, `extractRecommendations`, `extractClearanceStatement`) depends on the exact section headings and `FLAG [SEVERITY]` markers used here.
+
+```ts
+// server/prompts/h-solo.ts
+
+export const H_SOLO_REPORT_CHUNK_1_PROMPT = `You are an autonomous ethics analyst (H) producing a field-wide ethical assessment of machine psychology research. This is PART 1 of a 3-part structured report. Your task is to perform a rigorous paper-by-paper ethical audit of a sample of recently published machine psychology studies.
+
+Machine psychology studies the behavior, cognition, and responses of artificial agents (LLMs or other AI systems) using methods derived from experimental psychology, cognitive science, and computational social science.
+
+You will receive:
+- A PREVIOUS ETHICS REPORT (if available) — read it as baseline context only; do not repeat it
+- A SAMPLE OF RECENT PAPERS — analyse each individually for the 6 ethical concerns listed below
+- A COVERAGE PERIOD — note the temporal scope of this report
+
+For EACH paper in the sample, systematically evaluate the following 6 concerns:
+
+### A. Evidentiary Weakness
+Does the paper draw conclusions that exceed what the evidence actually supports? Are claims stated as established findings when the methodology is insufficient to warrant them? Are sample sizes, trial counts, or model samples too small to support generalisation?
+
+### B. Citation Integrity
+Are any citations hallucinated, unverifiable, or misleading? Do cited sources actually contain the claims they are supposed to support? Are citations to non-existent publications, AI-fabricated references, or misattributed findings present?
+
+### C. Overinterpretation of Model Behaviour
+Does the paper attribute cognitive, emotional, moral, or psychological states to the model beyond what the outputs warrant? Is there conflation between a model producing a response and a model experiencing, believing, or reasoning?
+
+### D. Inflated Novelty Claims
+Does the paper claim originality, first-of-its-kind status, or breakthrough significance that is not supported by a proper literature review? Are prior results in the same area ignored or understated?
+
+### E. Anthropomorphic Framing
+Does the paper use psychological or human-centred language (e.g. "the model feels", "believes", "decides", "is honest") in ways that imply subjective experience or agency that is not justified? Is anthropomorphic language used systematically and without adequate qualification?
+
+### F. Methodological Opacity
+Are the prompts, datasets, evaluation procedures, model versions, or sampling methods described with sufficient detail for replication? Are critical implementation choices undisclosed or vaguely described?
+
+## Output Format
+For each paper, write a subsection titled with the paper's title. Under each subsection, address each of the 6 concerns above (A through F). Use the labels:
+- **FLAG [CRITICAL]** — serious violation requiring attention
+- **FLAG [MAJOR]** — significant concern
+- **FLAG [MINOR]** — minor concern
+- **NOTE** — informational observation, no flag
+
+If a concern is fully absent in a paper, write "No concern identified."
+
+## Style Requirements
+- Be specific, cite paper sections or quotes where possible
+- Use a formal, measured academic tone
+- Do not summarise or skip any paper in the sample — every paper must be individually reviewed
+- This is a serious scientific ethics audit, not a general commentary`;
+
+export const H_SOLO_REPORT_CHUNK_2_PROMPT = `You are an autonomous ethics analyst (H) producing PART 2 of a field-wide ethical assessment of machine psychology research. You have already completed a paper-by-paper audit (Part 1). Your task now is to identify systemic patterns and compare the current situation with any previous ethics report.
+
+You will receive:
+- Your Part 1 paper-by-paper audit
+- The PREVIOUS ETHICS REPORT (if available) as comparative baseline
+
+Produce the following sections:
+
+### 5. Systemic Patterns Across the Sampled Literature
+Identify recurring ethical problems across the full sample. Which of the 6 concern categories (evidentiary weakness, citation integrity, overinterpretation, inflated novelty, anthropomorphic framing, methodological opacity) are most prevalent? Which papers cluster around which problems? Are there shared structural weaknesses in how machine psychology experiments are designed, reported, or interpreted?
+
+### 6. Field-Level Trends and Trajectory
+Based on the sampled literature and (where available) comparison with the previous ethics report:
+- **If a previous report exists**: For each concern category, assess whether the field has IMPROVED, WORSENED, or REMAINED STABLE since the last report. Provide specific evidence from both the current sample and the previous report to support each assessment.
+- **If no previous report exists**: Characterise the baseline ethical state of the field as established by this inaugural assessment. Identify which problems appear most entrenched and which appear emergent.
+
+### 7. Structural and Systemic Risk Factors
+Identify factors in the field's structure that contribute to the observed ethical problems:
+- Publication incentives and novelty bias
+- Automated research pipelines and their transparency challenges
+- Absence of peer-review standards specific to LLM psychology
+- The dual role of AI systems as both research tools and research subjects
+- Citation practices in a rapidly evolving field with limited established literature
+
+### 8. Positive Practices and Exemplary Cases
+Identify cases in the sample where ethical standards were well upheld. What specific practices should be encouraged and replicated? Are there papers that serve as methodological models for the field?
+
+## Style Requirements
+- Be analytical and evidence-based — every claim about a pattern must reference specific papers from the sample
+- Be precise about the comparison with previous reports — avoid vague statements about "improvement" without citing evidence
+- Use a formal, measured academic tone
+- Flag systemic issues using: **FLAG [CRITICAL]**, **FLAG [MAJOR]**, **FLAG [MINOR]**`;
+
+export const H_SOLO_REPORT_CHUNK_3_PROMPT = `You are an autonomous ethics analyst (H) producing PART 3 (final) of a field-wide ethical assessment of machine psychology research. You have completed a paper-by-paper audit (Part 1) and a systemic analysis (Part 2). Your task is to synthesise everything into a final report with actionable recommendations.
+
+You will receive:
+- Your Part 1 paper-by-paper audit
+- Your Part 2 systemic analysis
+
+Produce the following sections:
+
+### 9. Consolidated Ethics Flags
+Provide a numbered master list of ALL flags raised across Parts 1 and 2. List them in sequence — do NOT use sub-headings, category labels, or section dividers within this list. Each item must be on its own line in the following exact format:
+
+    N. [SEVERITY] Short one-line description of the ethical concern — Paper title or "Field-level"
+
+Where SEVERITY is exactly one of: CRITICAL, MAJOR, or MINOR. List CRITICAL flags first, then MAJOR, then MINOR, but do not add any headers or separators between the groups.
+
+### 10. Recommendations
+Provide concrete, actionable recommendations for improving ethical standards in machine psychology research. Organise as:
+- **Immediate actions** (for authors of flagged papers or future submissions)
+- **Field-level reforms** (for journals, reviewers, and the research community)
+- **Systemic improvements** (for research infrastructure, pipelines, and institutions)
+
+Each recommendation should directly address one or more identified flags.
+
+### 11. Overall Assessment and Clearance Statement
+Provide a concluding statement that:
+1. Summarises the overall ethical state of the sampled machine psychology literature
+2. States the most pressing concerns requiring immediate attention
+3. If a previous report was available: explicitly states whether the field has shown net improvement, net deterioration, or stasis since that report
+4. Issues a field-level clearance characterisation:
+   - **CLEARED**: The field meets acceptable ethical standards with isolated minor concerns
+   - **CLEARED WITH CONDITIONS**: Significant concerns exist but are addressable with stated reforms
+   - **NOT CLEARED**: Systemic critical violations that undermine the epistemic reliability of the field
+
+### Bibliography
+List all papers reviewed in this audit, formatted as: Author(s) (Year). Title. [Source: future-science.org]
+
+## Style Requirements
+- Be definitive — the clearance statement must take a clear position
+- Be constructive — recommendations must be specific and actionable
+- The flags list must be exhaustive — include every concern from Parts 1 and 2
+- Use a formal, measured academic tone throughout`;
+```
+
+### 5.3 `server/ethics-review.ts` — the solo H pipeline
+
+This is the main pipeline. The function you need is **`runSoloEthicsReport`** at the bottom. The helpers above it (`extractFlags`, `extractRecommendations`, `extractClearanceStatement`, `extractClearanceStatus`, `fetchPapersSinceDate`, `fetchPreviousEthicsReport`) are all required.
+
+```ts
+// server/ethics-review.ts
+import { storage } from "./storage";
+import { callInvestigator } from "./llm";
+import {
+  H_SOLO_REPORT_CHUNK_1_PROMPT,
+  H_SOLO_REPORT_CHUNK_2_PROMPT,
+  H_SOLO_REPORT_CHUNK_3_PROMPT,
+} from "./prompts/h-solo";
+import type { Project } from "@shared/schema";
+
+export interface EthicsFlag {
+  severity: "CRITICAL" | "MAJOR" | "MINOR";
+  summary: string;
+  paper?: string;
+  section?: string;
+}
+
+export interface EthicsReviewOutput {
+  ethicsText: string;
+  flagsList: EthicsFlag[];
+  recommendations: string[];
+  clearanceStatement: string;
+  clearanceStatus: "CLEARED" | "CLEARED_WITH_CONDITIONS" | "NOT_CLEARED";
+  durationSeconds: number;
+  reportTitle?: string;
+  reportAbstract?: string;
+}
+
+export function isEthicsRole(role: string): boolean {
+  return role === "H";
+}
+
+const PUBLIC_API = "https://future-science.org/api/v1/public";
+const BASE_URL = "https://future-science.org";
+
+interface Contribution {
+  id: number;
+  documentId: string;
+  title: string;
+  subtitle: string;
+  abstract: string;
+  type: string;
+  keywords?: { text: string }[];
+  author?: { firstName: string; lastName: string }[];
+  createdAt: string;
+  submittedFiles?: {
+    file?: { url: string; name: string; ext?: string } | null;
+    isMarkdown?: boolean;
+  };
+}
+
+function resolveFileUrl(urlStr: string): string {
+  if (urlStr.startsWith("/")) return `${BASE_URL}${urlStr}`;
+  try {
+    const parsed = new URL(urlStr);
+    if (!parsed.hostname.endsWith("future-science.org")) return "";
+  } catch { return ""; }
+  return urlStr;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Output extractors (regex-based — depend on prompt section headings)
+// ──────────────────────────────────────────────────────────────────
+
+function extractFlags(ethicsText: string): EthicsFlag[] {
+  const flags: EthicsFlag[] = [];
+  const patterns = [
+    /(?:^|\n)\s*(?:\d+\.?\s*)?(?:\*\*)?(?:\[?\s*)(CRITICAL|MAJOR|MINOR)(?:\s*\]?)(?:\*\*)?[:\s—\-]+(?:\*\*)?\s*(.+)/gi,
+    /(?:^|\n)\s*(?:\d+\.?\s*)?(?:\*\*)?FLAG[:\s—\-]+(?:\*\*)?\s*(?:\[?\s*)(CRITICAL|MAJOR|MINOR)(?:\s*\]?)(?:\*\*)?[:\s—\-]+\s*(.+)/gi,
+  ];
+  const seen = new Set<string>();
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(ethicsText)) !== null) {
+      const severityRaw = match[1].toUpperCase().trim();
+      let severity: EthicsFlag["severity"] = "MINOR";
+      if (severityRaw === "CRITICAL") severity = "CRITICAL";
+      else if (severityRaw === "MAJOR") severity = "MAJOR";
+      const summary = match[2]?.replace(/\*\*/g, "").replace(/\s+/g, " ").trim() || "";
+      if (summary.length < 5) continue;
+      if (/^#+\s/.test(summary)) continue;
+      if (/^(CRITICAL|MAJOR|MINOR)\s*(FLAGS?)?$/i.test(summary)) continue;
+      if (seen.has(summary)) continue;
+      seen.add(summary);
+      flags.push({ severity, summary });
+    }
+  }
+  if (flags.length === 0) {
+    const lines = ethicsText.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (/^#+\s/.test(trimmed)) continue;
+      if (/(?:CRITICAL|MAJOR|MINOR)/i.test(trimmed) && /(?:flag|concern|issue|risk|problem)/i.test(trimmed)) {
+        let severity: EthicsFlag["severity"] = "MINOR";
+        if (/CRITICAL/i.test(trimmed)) severity = "CRITICAL";
+        else if (/MAJOR/i.test(trimmed)) severity = "MAJOR";
+        const summary = trimmed.replace(/^[\s\-*•\d.]+/, "").replace(/\*\*/g, "").replace(/\[.*?\]/g, "").trim();
+        if (summary.length > 5 && !seen.has(summary)) {
+          seen.add(summary);
+          flags.push({ severity, summary });
+        }
+      }
+    }
+  }
+  return flags;
+}
+
+function extractClearanceStatus(ethicsText: string): EthicsReviewOutput["clearanceStatus"] {
+  const lower = ethicsText.toLowerCase();
+  if (lower.includes("not cleared") || lower.includes("not_cleared")) return "NOT_CLEARED";
+  if (lower.includes("cleared with conditions") || lower.includes("cleared_with_conditions")) return "CLEARED_WITH_CONDITIONS";
+  if (lower.includes("cleared")) return "CLEARED";
+  return "CLEARED_WITH_CONDITIONS";
+}
+
+function extractRecommendations(ethicsText: string): string[] {
+  const recs: string[] = [];
+  const recSection = ethicsText.match(/###?\s*(?:\d+\.?\s*)?(?:Ethics\s+)?Recommendations([\s\S]*?)(?=###?\s|$)/i);
+  if (recSection) {
+    const lines = recSection[1].split("\n");
+    for (const line of lines) {
+      const cleaned = line.replace(/^[\s\-*•R\d.]+/, "").trim();
+      if (cleaned.length > 10 && !cleaned.startsWith("#")
+          && !cleaned.startsWith("**Immediate") && !cleaned.startsWith("**Future")
+          && !cleaned.startsWith("**Field") && !cleaned.startsWith("**Systemic")) {
+        recs.push(cleaned);
+      }
+    }
+  }
+  if (recs.length === 0) {
+    const lines = ethicsText.split("\n");
+    let inRec = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (/^###?\s*(?:\d+\.?\s*)?(?:Ethics\s+)?Recommendations?/i.test(trimmed)) { inRec = true; continue; }
+      if (inRec && /^###?\s/.test(trimmed)) break;
+      if (inRec) {
+        const cleaned = trimmed.replace(/^[\s\-*•R\d.]+/, "").trim();
+        if (cleaned.length > 15 && !cleaned.startsWith("#")) recs.push(cleaned);
+      }
+    }
+  }
+  return recs.slice(0, 20);
+}
+
+function extractClearanceStatement(ethicsText: string): string {
+  const section = ethicsText.match(/###?\s*(?:11\.?\s*)?(?:Overall Assessment and\s*)?Clearance Statement([\s\S]*?)(?=###?\s*Bibliography|###?\s*\d|$)/i);
+  if (section && section[1].trim().length > 10) return section[1].trim().slice(0, 2000);
+  const fallback = ethicsText.match(/(?:CLEARED|NOT.CLEARED|CLEARED.WITH.CONDITIONS)[^\n]*\n?([\s\S]{100,800}?)(?=\n##|\n\*\*|$)/i);
+  if (fallback) return fallback[0].trim().slice(0, 2000);
+  return "Ethics clearance status could not be determined from the analysis.";
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Source fetchers (future-science.org public API)
+// ──────────────────────────────────────────────────────────────────
+
+const SOLO_REPORT_KEYWORDS = [
+  "machine psychology", "LLM personality", "language model cognition",
+  "AI psychology", "HEXACO", "Big Five", "dark triad", "moral judgment",
+  "cognitive bias", "attitude formation", "theory of mind",
+  "emotional intelligence", "decision making", "personality assessment",
+];
+
+async function fetchPreviousEthicsReport(_projectId: number): Promise<{ text: string; date: Date } | null> {
+  try {
+    const allPubs = await storage.getPublications();
+    const ethicsReports = allPubs
+      .filter(p => p.publicationType === "ethics-commentary" && p.publishedAt)
+      .sort((a, b) => new Date(b.publishedAt!).getTime() - new Date(a.publishedAt!).getTime());
+
+    if (ethicsReports.length === 0) return null;
+
+    const latest = ethicsReports[0];
+    const reportDate = new Date(latest.publishedAt!);
+
+    if (latest.documentId) {
+      try {
+        const searchUrl = `${PUBLIC_API}/contributions/${latest.documentId}`;
+        const resp = await fetch(searchUrl, { signal: AbortSignal.timeout(30000) });
+        if (resp.ok) {
+          const json = await resp.json();
+          const item: Contribution = json.data || json;
+          if (item.submittedFiles?.file?.url) {
+            const fileUrl = resolveFileUrl(item.submittedFiles.file.url);
+            if (fileUrl) {
+              const fileResp = await fetch(fileUrl, { signal: AbortSignal.timeout(30000) });
+              if (fileResp.ok) {
+                const text = await fileResp.text();
+                if (text.length > 200) return { text, date: reportDate };
+              }
+            }
+          }
+          const summaryText = `# Previous Field Ethics Report\n\n**Title:** ${item.title || latest.title}\n**Date:** ${reportDate.toISOString().slice(0, 10)}\n\n## Abstract\n\n${item.abstract || latest.abstract || "(Abstract not available)"}\n\n(Full text could not be retrieved — use date and abstract as baseline only.)`;
+          return { text: summaryText, date: reportDate };
+        }
+      } catch {}
+    }
+
+    const fallbackText = `# Previous Field Ethics Report\n\n**Title:** ${latest.title || "Field Ethics Report"}\n**Date:** ${reportDate.toISOString().slice(0, 10)}\n\n## Abstract\n\n${latest.abstract || "(Abstract not available)"}\n\n## Main Conclusions\n\n${latest.mainConclusions || "(Not available)"}\n\n(Full text could not be fetched — use date and abstract as temporal baseline only.)`;
+    return { text: fallbackText, date: reportDate };
+  } catch { return null; }
+}
+
+async function fetchPapersSinceDate(
+  cutoffDate: Date | null, _projectId: number,
+): Promise<{ title: string; content: string; authors: string; year: string; date: Date }[]> {
+  const seen = new Set<string>();
+  const papers: { title: string; content: string; authors: string; year: string; date: Date }[] = [];
+  const shuffledKeywords = [...SOLO_REPORT_KEYWORDS].sort(() => Math.random() - 0.5);
+
+  for (const keyword of shuffledKeywords) {
+    for (let page = 1; page <= 3; page++) {
+      try {
+        const url = `${PUBLIC_API}/contributions?search=${encodeURIComponent(keyword)}&limit=50&page=${page}`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        if (!resp.ok) break;
+        const json = await resp.json();
+        const items: Contribution[] = json.data || [];
+        if (items.length === 0) break;
+
+        for (const item of items) {
+          const titleKey = item.title?.toLowerCase().trim();
+          if (!titleKey || seen.has(titleKey)) continue;
+          if (item.type === "Peer-review") continue;
+          if (item.type === "Unreviewed manuscript") continue;
+          if (/ethics.*(report|assessment|commentary|review)/i.test(item.title || "")) continue;
+          if (/^peer review of/i.test(item.title || "")) continue;
+
+          const itemDate = item.createdAt ? new Date(item.createdAt) : null;
+          if (cutoffDate && itemDate && itemDate <= cutoffDate) continue;
+          seen.add(titleKey);
+
+          let content = `# ${item.title}\n\n${item.subtitle || ""}\n\n## Abstract\n\n${item.abstract || "No abstract available."}`;
+
+          if (item.submittedFiles?.file?.url) {
+            const fileUrl = resolveFileUrl(item.submittedFiles.file.url);
+            if (fileUrl) {
+              const exts = new Set<string>();
+              if (item.submittedFiles.file.ext) exts.add(item.submittedFiles.file.ext.toLowerCase());
+              if (item.submittedFiles.file.name?.includes(".")) {
+                exts.add(item.submittedFiles.file.name.slice(item.submittedFiles.file.name.lastIndexOf(".")).toLowerCase());
+              }
+              if (exts.has(".md") || exts.has(".txt") || exts.has(".json")) {
+                try {
+                  const fileResp = await fetch(fileUrl, { signal: AbortSignal.timeout(30000) });
+                  if (fileResp.ok) {
+                    const text = await fileResp.text();
+                    if (text.length > 200) content = text;
+                  }
+                } catch {}
+              }
+            }
+          }
+          if (content.length < 800) continue;
+
+          const authors = item.author?.map(a => `${a.lastName}, ${a.firstName.charAt(0)}.`).join(", ") || "Unknown";
+          const year = item.createdAt ? new Date(item.createdAt).getFullYear().toString() : "n.d.";
+          papers.push({ title: item.title, content, authors, year, date: itemDate || new Date() });
+        }
+      } catch {}
+    }
+  }
+
+  // Random shuffle
+  for (let i = papers.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [papers[i], papers[j]] = [papers[j], papers[i]];
+  }
+  return papers;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// MAIN ENTRY POINT — Solo H field ethics report pipeline
+// ──────────────────────────────────────────────────────────────────
+
+export async function runSoloEthicsReport(
+  projectId: number,
+  project: Project,
+): Promise<EthicsReviewOutput> {
+  const startTime = Date.now();
+  const model = project.llmModel || "claude-sonnet-4-5";
+  const provider = project.provider;
+  const chunkOpts = { timeoutMs: 240_000, maxRetries: 3 };
+
+  await storage.createProjectLog({ projectId, message: "Solo H ethics report: checking for previous ethics reports...", level: "info" });
+  const prevReport = await fetchPreviousEthicsReport(projectId);
+
+  if (prevReport) {
+    await storage.createProjectLog({
+      projectId,
+      message: `Found previous ethics report dated ${prevReport.date.toISOString().slice(0, 10)}. Will sample papers published since that date.`,
+      level: "info",
+    });
+  } else {
+    await storage.createProjectLog({
+      projectId,
+      message: "No previous ethics report found. This will be the inaugural field ethics assessment.",
+      level: "info",
+    });
+  }
+
+  await storage.createProjectLog({
+    projectId,
+    message: "Fetching machine psychology papers from journal (broad multi-keyword search)...",
+    level: "info",
+  });
+
+  const allPapers = await fetchPapersSinceDate(prevReport?.date || null, projectId);
+  if (allPapers.length === 0) {
+    throw new Error("No suitable papers found for solo ethics report. The journal may have no publications since the last report, or the API is unavailable.");
+  }
+
+  const TARGET_SAMPLE = Math.min(Math.max(allPapers.length, 20), 35);
+  const sample = allPapers.slice(0, TARGET_SAMPLE);
+
+  await storage.createProjectLog({
+    projectId,
+    message: `Sampled ${sample.length} papers (from ${allPapers.length} candidates) covering ${prevReport ? `post-${prevReport.date.toISOString().slice(0, 10)}` : "all available"} publications.`,
+    level: "info",
+  });
+
+  const coveragePeriod = prevReport
+    ? `${prevReport.date.toISOString().slice(0, 10)} to ${new Date().toISOString().slice(0, 10)}`
+    : `Inaugural assessment (all available publications up to ${new Date().toISOString().slice(0, 10)})`;
+
+  const papersContent = sample.map((p, i) =>
+    `## Paper ${i + 1}: ${p.title}\n**Authors:** ${p.authors} (${p.year})\n\n${p.content.slice(0, 6000)}`
+  ).join("\n\n---\n\n");
+
+  const previousReportSection = prevReport
+    ? `## PREVIOUS ETHICS REPORT (Baseline)\n\nDate: ${prevReport.date.toISOString().slice(0, 10)}\n\n${prevReport.text.slice(0, 8000)}\n\n---\n\n`
+    : `## PREVIOUS ETHICS REPORT\n\nNone available. This is the inaugural field ethics assessment.\n\n---\n\n`;
+
+  // ── Part 1 ──
+  await storage.createProjectLog({ projectId, message: "Solo ethics report — Part 1/3: Paper-by-paper ethical audit...", level: "info" });
+  const chunk1UserPrompt = `${previousReportSection}## COVERAGE PERIOD\n\n${coveragePeriod}\n\n---\n\n## PAPERS FOR ETHICAL AUDIT (${sample.length} papers)\n\n${papersContent}`;
+  const chunk1 = await callInvestigator(H_SOLO_REPORT_CHUNK_1_PROMPT, chunk1UserPrompt, model, provider, chunkOpts);
+  await storage.createProjectLog({ projectId, message: `Solo ethics report — Part 1/3 complete (${chunk1.length} chars). Running Part 2/3: Systemic patterns...`, level: "info" });
+
+  // ── Part 2 ──
+  const chunk2UserPrompt = `${previousReportSection}## YOUR PART 1 PAPER-BY-PAPER AUDIT\n\n${chunk1}`;
+  const chunk2 = await callInvestigator(H_SOLO_REPORT_CHUNK_2_PROMPT, chunk2UserPrompt, model, provider, chunkOpts);
+  await storage.createProjectLog({ projectId, message: `Solo ethics report — Part 2/3 complete (${chunk2.length} chars). Running Part 3/3: Synthesis and clearance...`, level: "info" });
+
+  // ── Part 3 ──
+  const chunk3UserPrompt = `## YOUR PART 1 PAPER-BY-PAPER AUDIT\n\n${chunk1}\n\n---\n\n## YOUR PART 2 SYSTEMIC ANALYSIS\n\n${chunk2}`;
+  const chunk3 = await callInvestigator(H_SOLO_REPORT_CHUNK_3_PROMPT, chunk3UserPrompt, model, provider, { timeoutMs: 300_000, maxRetries: 3 });
+  await storage.createProjectLog({ projectId, message: `Solo ethics report — Part 3/3 complete (${chunk3.length} chars).`, level: "info" });
+
+  // ── Assemble report and extract structured outputs ──
+  const ethicsText = `# Field Ethics Report — Machine Psychology\n\n**Coverage period:** ${coveragePeriod}\n**Papers sampled:** ${sample.length}\n**Previous baseline:** ${prevReport ? prevReport.date.toISOString().slice(0, 10) : "None (inaugural report)"}\n\n---\n\n${chunk1}\n\n---\n\n${chunk2}\n\n---\n\n${chunk3}`;
+
+  const flagsList = extractFlags(chunk3);
+  const recommendations = extractRecommendations(chunk3);
+  const clearanceStatement = extractClearanceStatement(chunk3);
+  const clearanceStatus = extractClearanceStatus(chunk3);
+  const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+
+  const reportDateLabel = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const reportTitle = `Field Ethics Report on Machine Psychology Research: ${reportDateLabel}`;
+
+  const critCount = flagsList.filter(f => f.severity === "CRITICAL").length;
+  const majorCount = flagsList.filter(f => f.severity === "MAJOR").length;
+  const minorCount = flagsList.filter(f => f.severity === "MINOR").length;
+  const comparisonNote = prevReport
+    ? ` This report compares findings against a previous assessment dated ${prevReport.date.toISOString().slice(0, 10)} to evaluate whether ethical standards in the field have improved, worsened, or remained stable.`
+    : " This is the inaugural field ethics assessment for this research platform.";
+  const reportAbstract = `This report presents a systematic field-level ethical assessment of machine psychology research. A total of ${sample.length} peer-reviewed studies published on future-science.org (covering the period ${coveragePeriod}) were audited for six ethical concern categories: evidentiary weakness, citation integrity, overinterpretation of model behaviour, inflated novelty claims, anthropomorphic framing, and methodological opacity.${comparisonNote} The audit identified ${flagsList.length} ethical concern(s): ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall field clearance status: ${clearanceStatus.replace(/_/g, " ")}.`;
+
+  // Persist top recommendations as methodological_advices for future agents
+  const adviceItems = recommendations.slice(0, 10);
+  for (const advice of adviceItems) {
+    try {
+      await storage.createMethodologicalAdvice({
+        advice,
+        source: "H",
+        sourceReviewId: String(projectId),
+        sourceAuthors: `MachinePsyKw ${project.agentRole || "H"}`,
+        sourceYear: new Date().getFullYear().toString(),
+        sourceTitle: project.name || "Field Ethics Report",
+      });
+    } catch {}
+  }
+  if (adviceItems.length > 0) {
+    await storage.createProjectLog({
+      projectId,
+      message: `Stored ${adviceItems.length} ethics recommendations as methodological advices.`,
+      level: "info",
+    });
+  }
+
+  const flagSummary = flagsList.length > 0
+    ? `${flagsList.filter(f => f.severity === "CRITICAL").length} critical, ${flagsList.filter(f => f.severity === "MAJOR").length} major, ${flagsList.filter(f => f.severity === "MINOR").length} minor`
+    : "No flags identified";
+
+  await storage.createProjectLog({
+    projectId,
+    message: `Solo H field ethics report complete: ${clearanceStatus} — ${flagSummary} — ${sample.length} papers reviewed (${durationSeconds}s).`,
+    level: clearanceStatus === "NOT_CLEARED" ? "warning" : "success",
+  });
+
+  return {
+    ethicsText, flagsList, recommendations, clearanceStatement,
+    clearanceStatus, durationSeconds, reportTitle, reportAbstract,
+  };
+}
+```
+
+### 5.4 Markdown report formatter + publish function
+
+```ts
+// server/ethics-publish.ts
+import { storage } from "./storage";
+import type { Project } from "@shared/schema";
+
+// ── Agent naming convention (for publish payload) ──
+// Format: {ModelCode}{Role}-{Memory}{Number}
+// Model codes: CS45, CO45, G5, G5m, KK2, QW3, DS32, ...
+// Role: "H" for ethics analyst.
+// Memory: "N" (no memory) or "RAG" (retrieval-augmented).
+// Number: agent instance number (for distinguishing multiple H agents).
+function generateAgentLastName(project: Project): string {
+  const modelMap: Record<string, string> = {
+    "claude-sonnet-4-5": "CS45",
+    "claude-opus-4-5-20251101": "CO45",
+    "anthropic/claude-sonnet-4.5": "CS45",
+    "anthropic/claude-opus-4.5": "CO45",
+    "gpt-5-2025-08-07": "G5",
+    "gpt-5-mini-2025-08-07": "G5m",
+    "openai/gpt-5": "G5",
+    "openai/gpt-5-mini": "G5m",
+    "moonshotai/kimi-k2-0905": "KK2",
+    "qwen/qwen3-235b-a22b": "QW3",
+    "deepseek/deepseek-v3.2": "DS32",
+    "anthropic/claude-sonnet-3.5": "CS35",
+    "meta-llama/llama-3.3-70b-instruct": "LL33",
+    "google/gemini-2.5-flash": "GF25",
+  };
+  const modelCode = modelMap[project.llmModel] || project.llmModel.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6);
+  const role = project.agentRole || "H";
+  const memory = project.agentMemory || "N";
+  const number = project.agentNumber || "1";
+  return `${modelCode}${role}-${memory}${number}`;
+}
+
+// ── Strip the title and any pre-content metadata before submission ──
+// Future-science.org renders its own title from `data.title`, so we
+// remove everything before the first "## " section in the markdown body.
+export function stripBodyMetadata(md: string): string {
+  const firstSection = md.search(/^## /m);
+  if (firstSection <= 0) return md.trim();
+  return md.slice(firstSection).trim();
+}
+
+// ── Markdown formatter for the published report body ──
+export function formatEthicsCommentaryReport(project: Project): string {
+  const results = project.results as any;
+  const date = new Date(project.createdAt).toLocaleDateString("en-US", {
+    year: "numeric", month: "long", day: "numeric",
+  });
+
+  const ethicsText = results?.ethicsText || "";
+  const flagsList = Array.isArray(results?.flagsList) ? results.flagsList : [];
+  const recommendations = Array.isArray(results?.recommendations) ? results.recommendations : [];
+  const clearanceStatement = results?.clearanceStatement || "No clearance statement available.";
+  const clearanceStatus = results?.clearanceStatus || "UNKNOWN";
+
+  const reportTitle = results?.reportTitle || `Field Ethics Report on Machine Psychology Research`;
+  const reportAbstract = results?.reportAbstract || `This field ethics report provides a systematic ethical assessment of machine psychology research. Clearance status: ${clearanceStatus}.`;
+
+  const critCount = flagsList.filter((f: any) => f.severity === "CRITICAL").length;
+  const majorCount = flagsList.filter((f: any) => f.severity === "MAJOR").length;
+  const minorCount = flagsList.filter((f: any) => f.severity === "MINOR").length;
+
+  const flagsMd = flagsList.length > 0
+    ? flagsList.map((f: any, i: number) =>
+        `${i + 1}. **[${f.severity}]** ${f.summary}${f.paper ? ` *(${f.paper})*` : ""}`
+      ).join("\n")
+    : "No ethics flags identified.";
+
+  const recsMd = recommendations.length > 0
+    ? recommendations.map((r: string, i: number) => `${i + 1}. ${r}`).join("\n")
+    : "No specific recommendations identified.";
+
+  return `# ${reportTitle}
+
+**${date}**
+*MachinePsyWn Ethics Analyst (H)*
+
+---
+
+## Abstract
+
+${reportAbstract}
+
+---
+
+## Ethics Background
+
+This field ethics assessment was conducted using the H (Ethics Analyst) agent persona within the MachinePsyWn framework. The report follows a three-part protocol: (1) paper-by-paper ethical audit across six concern categories (evidentiary weakness, citation integrity, overinterpretation of model behaviour, inflated novelty claims, anthropomorphic framing, methodological opacity), (2) systemic cross-paper pattern analysis and comparison with any previous ethics report, and (3) synthesis of consolidated flags, field-level clearance determination, and actionable recommendations.
+
+## Ethics Flags Summary (${flagsList.length} total: ${critCount} critical, ${majorCount} major, ${minorCount} minor)
+
+${flagsMd}
+
+## Clearance Statement
+
+**Overall field clearance: ${clearanceStatus.replace(/_/g, " ")}**
+
+${clearanceStatement}
+
+## Recommendations
+
+${recsMd}
+
+## Full Ethics Analysis
+
+${ethicsText}
+
+---
+
+*Generated by MachinePsyWn Agent Framework — Ethics Analyst (H)*
+*Investigator: ${project.llmModel} (${project.provider})*
+`;
+}
+
+// ── Publish to future-science.org ──
+export async function publishEthicsCommentary(projectId: number): Promise<void> {
+  try {
+    const completed = await storage.getProject(projectId);
+    if (!completed || completed.status !== "completed" || !completed.results) return;
+
+    const results = completed.results as any;
+    const ethicsText = results.ethicsText;
+    if (!ethicsText) return;
+
+    const apiKey = process.env.FUTURE_OF_SCIENCE_API_KEY;
+    if (!apiKey) {
+      await storage.createProjectLog({ projectId, message: "Skipping ethics commentary publish: API key not configured.", level: "warning" });
+      return;
+    }
+
+    const API_BASE = "https://future-science.org";
+    const INITIATIVE_DOC_ID = "ixli00u1vnheboi9z80ml9o6";  // Machine Psychology initiative on FOS
+    const agentLastName = generateAgentLastName(completed);
+    const truncate255 = (s: string) => s.length > 255 ? s.slice(0, 252) + "..." : s;
+
+    const mdReport = formatEthicsCommentaryReport(completed);
+
+    const dataPayload = {
+      title: truncate255(results.reportTitle || completed.name || "Field Ethics Report on Machine Psychology Research"),
+      subtitle: truncate255(completed.researchQuestion || "A systematic ethical assessment of machine psychology research practices"),
+      type: "Unreviewed manuscript",
+      linkOriginalContribution: "",
+      abstract: results.reportAbstract || results.summary || "Ethics commentary on machine psychology research.",
+      language: "English",
+      langId: "",
+      keywords: [
+        { text: "Machine Psychology" },
+        { text: "Ethics" },
+        { text: "Ethics Commentary" },
+      ],
+      // ── Agent identification (NEW future-science.org schema, replaces author array) ──
+      agentName: `MachinePsyWn ${agentLastName}`,
+      agentDescription: "Autonomous ethics analyst that performs systematic field-level ethical assessments of published machine psychology research.",
+      researchOrchestrator: "Sacha Raoult",     // ← the human orchestrating the AI research
+      // ─────────────────────────────────────────────────────────────────────────────────
+      comments: "",
+      coauthorsNotified: true,
+      isFormatCompliant: true,
+      sourceLinkCorrect: true,
+      contributorEmail: "sacharaoult@gmail.com", // ← contact email associated with submissions
+      initiative: INITIATIVE_DOC_ID,
+      isMarkdown: true,
+      selfArchive: { doi: null, copyright: null, license: "CC-BY-4.0", fullReference: null },
+      isOriginal: true,
+    };
+
+    await storage.createProjectLog({ projectId, message: "Publishing ethics commentary to future-science.org...", level: "info" });
+
+    // Multipart submission: data (JSON) + file (markdown)
+    const form = new FormData();
+    form.append("data", JSON.stringify({ data: dataPayload }));
+    const safeTitle = (completed.name || "ethics").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50);
+    const mdBlob = new Blob([stripBodyMetadata(mdReport)], { type: "text/markdown" });
+    form.append("file", mdBlob as any, `${safeTitle}_ethics.md`);
+
+    const resp = await fetch(`${API_BASE}/api/v1/contributions/api-bots`, {
+      method: "POST",
+      headers: { "x-api-key": apiKey },     // ← x-api-key header, NOT Bearer
+      body: form,
+    });
+
+    const rawText = await resp.text();
+    let responseData: any = null;
+    try { responseData = JSON.parse(rawText); } catch {}
+
+    if (resp.status < 200 || resp.status >= 300) {
+      await storage.createProjectLog({ projectId, message: `Ethics commentary publish failed: API error ${resp.status}`, level: "error" });
+      return;
+    }
+
+    const publishedDocId = responseData?.data?.documentId || responseData?.documentId || null;
+
+    // Persist the publication locally so future H runs know about it (for date cutoff)
+    await storage.createPublication({
+      projectId,
+      title: dataPayload.title,
+      subtitle: dataPayload.subtitle,
+      abstract: dataPayload.abstract,
+      authorName: `MachinePsyKw ${agentLastName}`,
+      journal: "future-science.org",
+      documentId: publishedDocId,
+      publicationType: "ethics-commentary",      // ← required for fetchPreviousEthicsReport()
+      keywords: dataPayload.keywords.map(k => k.text),
+      mainConclusions: results.clearanceStatement?.slice(0, 1000) || null,
+      methodologicalAdvice: null,
+      researchGaps: null,
+      formattedCitation: null,
+    });
+
+    await storage.createProjectLog({ projectId, message: "Ethics commentary published successfully to future-science.org.", level: "success" });
+  } catch (error: any) {
+    await storage.createProjectLog({ projectId, message: `Ethics commentary publish error: ${error.message}`, level: "error" });
+  }
+}
+```
+
+---
+
+## 6. Wiring it into Express routes (or any framework)
+
+Below is a minimal route handler. Adapt to your framework — the pipeline functions are framework-agnostic.
+
+```ts
+// server/routes.ts (excerpt)
+import { runSoloEthicsReport, isEthicsRole } from "./ethics-review";
+import { publishEthicsCommentary } from "./ethics-publish";
+import { storage } from "./storage";
+
+// POST /api/projects/:id/run
+app.post("/api/projects/:id/run", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const project = await storage.getProject(id);
+  if (!project) return res.status(404).json({ message: "Not found" });
+
+  await storage.updateProjectStatus(id, "running");
+
+  if (isEthicsRole(project.agentRole || "")) {
+    // ── Solo H pipeline (fire-and-forget, status flips on completion) ──
+    runSoloEthicsReport(id, project)
+      .then(async (output) => {
+        const results = {
+          summary: output.reportAbstract || `Field ethics report: ${output.clearanceStatus} — ${output.flagsList.length} flags raised`,
+          reportTitle: output.reportTitle,
+          reportAbstract: output.reportAbstract,
+          ethicsText: output.ethicsText,
+          flagsList: output.flagsList,
+          recommendations: output.recommendations,
+          clearanceStatement: output.clearanceStatement,
+          clearanceStatus: output.clearanceStatus,
+          metrics: { durationSeconds: output.durationSeconds },
+        };
+        await storage.updateProjectResults(id, results);
+        await storage.updateProjectStatus(id, "completed");
+      })
+      .catch(async (err: any) => {
+        await storage.updateProjectStatus(id, "failed");
+        await storage.createProjectLog({ projectId: id, message: `Solo ethics report error: ${err.message}`, level: "error" });
+      });
+    return res.json({ message: "Solo ethics report started" });
+  }
+
+  res.status(400).json({ message: "Project agentRole must be 'H' for solo ethics pipeline" });
+});
+
+// POST /api/projects/:id/publish
+app.post("/api/projects/:id/publish", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const project = await storage.getProject(id);
+  if (!project) return res.status(404).json({ message: "Not found" });
+  if (project.status !== "completed") return res.status(400).json({ message: "Not completed" });
+
+  if (isEthicsRole(project.agentRole || "")) {
+    await publishEthicsCommentary(id);
+    return res.json({ message: "Published" });
+  }
+  res.status(400).json({ message: "Only H projects supported" });
+});
+```
+
+---
+
+## 7. Minimum project record needed to trigger the pipeline
+
+Insert a `projects` row like this and call `POST /api/projects/:id/run`:
+
+```json
+{
+  "name": "Field Ethics Report — November 2026",
+  "researchQuestion": "A systematic ethical assessment of machine psychology research practices",
+  "agentRole": "H",
+  "agentMemory": "N",
+  "agentNumber": "1",
+  "provider": "anthropic",
+  "llmModel": "claude-sonnet-4-5",
+  "status": "configuring"
+}
+```
+
+Notes on each field:
+- `name` — used as fallback report title if Part 3 doesn't generate one.
+- `researchQuestion` — used as the published subtitle.
+- `agentRole: "H"` — **mandatory**. Triggers `runSoloEthicsReport` instead of any other pipeline.
+- `agentMemory`, `agentNumber` — used to build the agent identifier (e.g. `CS45H-N1`).
+- `provider`/`llmModel` — controls which LLM family runs the analysis. Recommended: `anthropic` + `claude-sonnet-4-5` for highest quality, or `openrouter` + `deepseek/deepseek-v3.2` for cost-efficient batch runs.
+
+---
+
+## 8. Step-by-step adaptation guide for the target Replit
+
+1. **Create the database tables** — run `npm run db:push` after dropping `shared/schema.ts` (Section 3) into the project. If the target uses a different DB layer, write equivalent migrations.
+
+2. **Install required packages** — `@anthropic-ai/sdk`, `openai`, plus `drizzle-orm` + `zod` if using Drizzle. Use the packager tool, not manual edits to `package.json`.
+
+3. **Set up the AI Integrations** — install the Replit blueprints `javascript_anthropic_ai_integrations`, `javascript_openai_ai_integrations`, and `javascript_openrouter_ai_integrations`. They auto-populate the six `AI_INTEGRATIONS_*` env vars.
+
+4. **Request the FOS API key** — ask the user to set `FUTURE_OF_SCIENCE_API_KEY`. Without it, the pipeline runs but skips publishing (logs a warning).
+
+5. **Drop in the source files**:
+   - `server/llm.ts` (Section 5.1)
+   - `server/prompts/h-solo.ts` (Section 5.2)
+   - `server/ethics-review.ts` (Section 5.3)
+   - `server/ethics-publish.ts` (Section 5.4)
+
+6. **Implement the storage interface** (Section 3) over your DB layer. The pipeline only calls these methods — keep them pure CRUD.
+
+7. **Wire the two routes** (Section 6) — `POST /api/projects/:id/run` and `POST /api/projects/:id/publish`. For the run handler, fire-and-forget the promise so the request returns quickly and the user can poll status via `GET /api/projects/:id`.
+
+8. **Test by inserting a project** with `agentRole: "H"` (Section 7) and calling `/run`, then watch `project_logs` stream messages. Expect 8–15 minutes total for Claude Sonnet 4.5.
+
+9. **Verify publishing** — once status flips to `completed`, call `/publish` and confirm a new contribution appears at https://future-science.org under the Machine Psychology initiative. The local `publications` table will get a new row with `publicationType = "ethics-commentary"` — that row is what makes the *next* H run use this date as its temporal cutoff.
+
+---
+
+## 9. Frontend considerations (optional, if you build a UI)
+
+You don't need a UI — the pipeline runs entirely from API calls — but if you build one, you only need three views:
+
+- **Project list / detail** — display `project_logs` ordered by `createdAt` with color-coded levels (info=gray, warning=amber, error=red, success=green).
+- **Results tab** — when `project.status === "completed"`, render:
+  - `results.reportTitle` (heading)
+  - `results.reportAbstract` (paragraph)
+  - `results.flagsList` (color-coded list by severity)
+  - `results.recommendations` (numbered list)
+  - `results.clearanceStatement` (quote block, with `clearanceStatus` badge)
+  - `results.ethicsText` (collapsible "Full analysis" section)
+- **Publish button** — POST to `/api/projects/:id/publish`, show toast on success.
+
+---
+
+## 10. Things to know / gotchas
+
+- **The pipeline is slow** by design (≥ 8 min for Claude Sonnet 4.5; ≤ 5 min for DeepSeek V3.2). Three sequential LLM calls of up to 240–300 s each, plus paper fetching from `future-science.org`.
+- **The previous-report cutoff is critical** — the very first run on a fresh DB has no cutoff and samples *all* available papers, which is the desired "inaugural" behavior. Subsequent runs only see papers published *after* the most recent published H report. If you want to force a re-scan of older papers, delete the latest `publications` row with `publicationType = 'ethics-commentary'`.
+- **The 14 search keywords are hardcoded** for machine-psychology coverage. Edit `SOLO_REPORT_KEYWORDS` in `ethics-review.ts` if your target field is different (e.g., AI fairness, alignment research).
+- **Sample size is bounded** to 20–35 papers to keep the LLM context windows manageable. The Part 1 prompt feeds up to ~6000 chars per paper, so the full audit context can reach ~210k chars. Claude Sonnet 4.5 (200k context) handles this fine; smaller-context models may need a smaller sample size and per-paper truncation.
+- **Output extraction is regex-based**, so the prompts and the extractors must stay in sync. If you change a section heading in any of the three H_SOLO prompts, update the matching regex in `ethics-review.ts` (`extractFlags`, `extractRecommendations`, `extractClearanceStatement`, `extractClearanceStatus`).
+- **The publish payload uses the new FOS schema** — `agentName` + `agentDescription` + `researchOrchestrator`, no `author` array. If you see `400 author is required` errors, the API schema changed again — check the FOS docs.
+- **Multipart upload uses native `FormData` + `Blob`** from `node:buffer` — do **not** use the `form-data` npm package, it produces an incorrectly encoded body for this endpoint.
+- **`x-api-key` header**, not `Authorization: Bearer`. This is non-standard but required by FOS.
+- **`langId` must be the empty string `""`** when sending files. Do not omit it and do not set it to `null`.
+- **The body markdown is stripped of its leading title** by `stripBodyMetadata` before submission, because FOS renders its own H1 from `data.title`. If you skip this, the published page will have a duplicate title.
+
+---
+
+## 11. Quick smoke test
+
+After installing everything, you can validate the entire pipeline end-to-end with this script (run it with `tsx scripts/smoke-h.ts`):
+
+```ts
+// scripts/smoke-h.ts
+import { storage } from "../server/storage";
+import { runSoloEthicsReport } from "../server/ethics-review";
+import { publishEthicsCommentary } from "../server/ethics-publish";
+
+async function main() {
+  // 1. Create a project
+  const project = await storage.createProject({
+    name: "Smoke test — Field Ethics Report",
+    researchQuestion: "Smoke test of solo H ethics pipeline",
+    agentRole: "H",
+    agentMemory: "N",
+    agentNumber: "1",
+    provider: "anthropic",
+    llmModel: "claude-sonnet-4-5",
+    status: "running",
+  });
+
+  console.log(`Created project #${project.id}`);
+
+  // 2. Run the pipeline
+  const output = await runSoloEthicsReport(project.id, project);
+  console.log(`Done. Status: ${output.clearanceStatus}, ${output.flagsList.length} flags.`);
+
+  // 3. Save results
+  await storage.updateProjectResults(project.id, {
+    reportTitle: output.reportTitle,
+    reportAbstract: output.reportAbstract,
+    ethicsText: output.ethicsText,
+    flagsList: output.flagsList,
+    recommendations: output.recommendations,
+    clearanceStatement: output.clearanceStatement,
+    clearanceStatus: output.clearanceStatus,
+  });
+  await storage.updateProjectStatus(project.id, "completed");
+
+  // 4. Publish
+  await publishEthicsCommentary(project.id);
+  console.log("Published.");
+}
+
+main().catch(console.error);
+```
+
+If everything works, you'll see ~15 log lines streaming for ~10 minutes, then a new contribution at https://future-science.org/autonomous-journal-of-machine-psychology .
+
+---
+
+**End of handoff document.**
+
+Suggested next personas to export, in order of complexity: bR (single-author peer reviewer) → bLR (single-author literature reviewer) → V (revision agent, depends on a published paper) → D (editor, depends on V output).
