@@ -168,37 +168,54 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   const filteredProj = filterByKeywords(projectPapers, keywords);
 
   const prevReport = await buildPrevReport(projectId, journalId);
-  const cutoff = prevReport?.date || null;
 
   const seen = new Set<string>();
   type SamplePaper = { title: string; authors: string; date: string; abstract: string; url: string };
-  const sample: SamplePaper[] = [];
-  for (const p of filteredProj) {
-    const key = p.title.toLowerCase().trim();
-    if (seen.has(key)) continue;
-    if (cutoff && p.date && new Date(p.date) <= cutoff) continue;
-    seen.add(key);
-    const url = p.url || fsPaperUrl(p.sourceDocumentId);
-    sample.push({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url });
-  }
-  for (const a of filteredFs) {
-    const key = a.title.toLowerCase().trim();
-    if (seen.has(key)) continue;
-    if (cutoff && a.date && new Date(a.date) <= cutoff) continue;
-    seen.add(key);
-    sample.push({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId) });
+  function buildSample(applyCutoff: boolean): SamplePaper[] {
+    const cutoff = applyCutoff ? (prevReport?.date || null) : null;
+    const localSeen = new Set<string>();
+    const out: SamplePaper[] = [];
+    for (const p of filteredProj) {
+      const key = p.title.toLowerCase().trim();
+      if (localSeen.has(key)) continue;
+      if (cutoff && p.date && new Date(p.date) <= cutoff) continue;
+      localSeen.add(key);
+      const url = p.url || fsPaperUrl(p.sourceDocumentId);
+      out.push({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url });
+    }
+    for (const a of filteredFs) {
+      const key = a.title.toLowerCase().trim();
+      if (localSeen.has(key)) continue;
+      if (cutoff && a.date && new Date(a.date) <= cutoff) continue;
+      localSeen.add(key);
+      out.push({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId) });
+    }
+    return out;
   }
 
+  let sample = buildSample(true);
+  let cutoffWasRelaxed = false;
+  if (sample.length === 0 && prevReport) {
+    sample = buildSample(false);
+    if (sample.length > 0) {
+      cutoffWasRelaxed = true;
+      await emitEvent("ethics-cutoff-relaxed", `No new papers since previous report (${prevReport.date.toISOString().slice(0, 10)}); auditing the full keyword-matched corpus instead.`);
+    }
+  }
+  void seen;
+
   if (sample.length === 0) {
-    throw new Error("No papers matched the selected keywords for this journal since the last report. Try broadening the keywords or removing them.");
+    throw new Error("No papers matched the selected keywords for this journal. Try broadening the keywords or removing them.");
   }
 
   const TARGET = Math.min(sample.length, 35);
   const sampled = sample.slice(0, TARGET);
 
-  const coveragePeriod = prevReport
+  const coveragePeriod = prevReport && !cutoffWasRelaxed
     ? `${prevReport.date.toISOString().slice(0, 10)} to ${new Date().toISOString().slice(0, 10)}`
-    : `Inaugural assessment (all available publications up to ${new Date().toISOString().slice(0, 10)})`;
+    : prevReport && cutoffWasRelaxed
+      ? `Full corpus re-audit (no new papers since ${prevReport.date.toISOString().slice(0, 10)}; previous report retained as baseline)`
+      : `Inaugural assessment (all available publications up to ${new Date().toISOString().slice(0, 10)})`;
 
   await emitEvent("ethics-sample", `Sampled ${sampled.length} paper(s) for audit (${projectPapers.length} project log + ${fsAbstracts.length} FS) covering ${coveragePeriod}.`);
 
