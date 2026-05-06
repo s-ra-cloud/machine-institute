@@ -487,6 +487,10 @@ export async function registerRoutes(
     "mirror": "mirror",
   };
 
+  const JOURNAL_DISPLAY_NAMES: Record<string, string> = {
+    "mirror": "Mirror — An Automated Journal of AI Interpretability",
+  };
+
   const ROLE_CODES: Record<string, string> = {
     "E": "Experimenter",
     "R": "Reviewer",
@@ -1825,6 +1829,8 @@ I will now provide the papers.`;
         journalId: data.journalId,
         journalName: getJournalDisplayName(data.journalId),
         initiativeDocId,
+        initiativeSlug: INITIATIVE_SLUGS[data.journalId] || data.journalId,
+        journalDisplayName: JOURNAL_DISPLAY_NAMES[data.journalId] || data.journalId,
         keywords: data.keywords,
         topic: data.topic || null,
         prompt1: data.prompt1,

@@ -117,6 +117,8 @@ interface RunOptions {
   journalId: string;
   journalName?: string;
   initiativeDocId: string;
+  initiativeSlug: string;
+  journalDisplayName: string;
   keywords: string[];
   topic?: string | null;
   prompt1: string;
@@ -141,11 +143,13 @@ async function buildPrevReport(projectId: string, journalId: string): Promise<{ 
 
 export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOutput> {
   const startTime = Date.now();
-  const { projectId, journalId, initiativeDocId, keywords, topic, prompt1, prompt2, prompt3, modelConfig, emitEvent } = opts;
-  const journalName = opts.journalName || journalId;
+  const { projectId, journalId, initiativeDocId, initiativeSlug, journalDisplayName, keywords, topic, prompt1, prompt2, prompt3, modelConfig, emitEvent } = opts;
+  const journalName = opts.journalName || journalDisplayName || journalId;
   const sub1 = applyJournalName(prompt1, journalName);
   const sub2 = applyJournalName(prompt2, journalName);
   const sub3 = applyJournalName(prompt3, journalName);
+  const fsPaperUrl = (docId: string | undefined | null): string =>
+    docId ? `https://future-science.org/${initiativeSlug}/papers/${docId}` : "";
 
   await emitEvent("ethics-init", `Starting field ethics report on ${journalId}${topic ? ` — topic "${topic}"` : ""} (${keywords.length} keyword filter(s)).`);
 
@@ -167,21 +171,22 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   const cutoff = prevReport?.date || null;
 
   const seen = new Set<string>();
-  type SamplePaper = { title: string; authors: string; date: string; abstract: string };
+  type SamplePaper = { title: string; authors: string; date: string; abstract: string; url: string };
   const sample: SamplePaper[] = [];
   for (const p of filteredProj) {
     const key = p.title.toLowerCase().trim();
     if (seen.has(key)) continue;
     if (cutoff && p.date && new Date(p.date) <= cutoff) continue;
     seen.add(key);
-    sample.push({ title: p.title, authors: p.authors, date: p.date, abstract: p.description });
+    const url = p.url || fsPaperUrl(p.sourceDocumentId);
+    sample.push({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url });
   }
   for (const a of filteredFs) {
     const key = a.title.toLowerCase().trim();
     if (seen.has(key)) continue;
     if (cutoff && a.date && new Date(a.date) <= cutoff) continue;
     seen.add(key);
-    sample.push({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract });
+    sample.push({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId) });
   }
 
   if (sample.length === 0) {
@@ -198,7 +203,7 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   await emitEvent("ethics-sample", `Sampled ${sampled.length} paper(s) for audit (${projectPapers.length} project log + ${fsAbstracts.length} FS) covering ${coveragePeriod}.`);
 
   const papersContent = sampled.map((p, i) =>
-    `## Paper ${i + 1}: ${p.title}\n**Authors:** ${p.authors} (${p.date})\n\n${(p.abstract || "").slice(0, 6000)}`
+    `## Paper ${i + 1}: ${p.title}\n**Authors:** ${p.authors} (${p.date})\n**URL:** ${p.url || "(none)"}\n**Journal:** ${journalDisplayName}\n\n${(p.abstract || "").slice(0, 6000)}`
   ).join("\n\n---\n\n");
 
   const previousReportSection = prevReport

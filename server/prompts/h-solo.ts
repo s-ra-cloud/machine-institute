@@ -40,6 +40,18 @@ For each paper, write a subsection titled with the paper's title. Under each sub
 
 If a concern is fully absent in a paper, write "No concern identified."
 
+## Citation Rules (Chicago Author-Date, Markdown Links)
+Whenever you reference any sampled paper inside its own per-paper audit (and any time you mention another sampled paper), use Chicago author-date inline citations formatted as a markdown link:
+
+    [(Author, Date)](URL)
+
+Rules:
+- Use the URL provided alongside each paper in the SAMPLE — never invent a URL.
+- The "Author" token is the first author / agent name as given. The "Date" is the year (with disambiguation letter if needed).
+- When the same author has multiple papers from the same year, disambiguate with letters: [(Author, 2026a)](URL1), [(Author, 2026b)](URL2), etc., and use the same letters consistently in Part 3's bibliography.
+- If a paper has no URL provided, keep the citation text but omit the markdown link wrapper: (Author, Date).
+- Do NOT use placeholder strings like "[Source: future-science.org]". Use real markdown links.
+
 ## Style Requirements
 - Be specific, cite paper sections or quotes where possible
 - Use a formal, measured academic tone
@@ -72,6 +84,17 @@ Identify factors in the field's structure that contribute to the observed ethica
 
 ### 8. Positive Practices and Exemplary Cases
 Identify cases in the sample where ethical standards were well upheld. What specific practices should be encouraged and replicated? Are there papers that serve as methodological models for the field?
+
+## Citation Rules (Chicago Author-Date, Markdown Links)
+Every reference to a specific sampled paper must use a Chicago author-date inline citation formatted as a markdown link:
+
+    [(Author, Date)](URL)
+
+Rules:
+- Use the URL provided with each paper in the original sample — never invent a URL.
+- Use the same author / year (with disambiguation letter where needed) you used in Part 1, so cross-references stay consistent.
+- If a paper has no URL provided, keep the citation text but omit the markdown link wrapper: (Author, Date).
+- Do NOT use placeholder strings like "[Source: future-science.org]". Use real markdown links.
 
 ## Style Requirements
 - Be analytical and evidence-based — every claim about a pattern must reference specific papers from the sample
@@ -113,7 +136,18 @@ Provide a concluding statement that:
    - **NOT CLEARED**: Systemic critical violations that undermine the epistemic reliability of the field
 
 ### Bibliography
-List all papers reviewed in this audit, formatted as: Author(s) (Year). Title. [Source: future-science.org]
+List EVERY paper reviewed in this audit (i.e. every paper from the SAMPLE provided in Part 1 — do not omit any), formatted in Chicago author-date style with the title as a markdown link to the paper's URL:
+
+    Author. Date. "[Full Paper Title](URL)." *<Journal Name>*, future-science.org.
+
+Where:
+- "Author" is the first author / agent name as given for that paper, with the same disambiguation letter (e.g. 2026a, 2026b) used in the inline citations.
+- "URL" is the URL provided alongside that paper in the sample. NEVER invent a URL.
+- "<Journal Name>" is the journal display name provided with the audit context.
+- For arXiv-only sources, use: Author(s). Date. "[Title](https://arxiv.org/abs/ID)." arXiv: ID.
+- If a paper has no URL provided, keep the citation entry but omit the markdown link wrapper around the title.
+
+After writing the bibliography, perform a SELF-CHECK: every entry must trace to a paper actually provided in the sample, no URL may be invented, and every sampled paper must appear exactly once.
 
 ## Style Requirements
 - Be definitive — the clearance statement must take a clear position
