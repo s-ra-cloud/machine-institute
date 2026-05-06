@@ -5,8 +5,8 @@ import { serveStatic } from "./static";
 import { seedDatabase } from "./seed";
 import { setupAuth } from "./auth";
 import { db } from "./db";
-import { researchEvents, literatureReviews, editorials } from "@shared/schema";
-import { inArray, sql, eq } from "drizzle-orm";
+import { researchEvents, literatureReviews, editorials, ethicsReports } from "@shared/schema";
+import { inArray, sql, eq, or } from "drizzle-orm";
 import { createServer } from "http";
 
 const app = express();
@@ -99,6 +99,14 @@ app.use((req, res, next) => {
       .returning({ id: editorials.id });
     if (stuckEDs.length > 0) {
       console.log(`Marked ${stuckEDs.length} stuck editorial(s) as failed on startup.`);
+    }
+    const stuckERs = await db
+      .update(ethicsReports)
+      .set({ status: "failed", contentHtml: "<p>Generation interrupted by server restart. Please try again.</p>" })
+      .where(or(eq(ethicsReports.status, "generating"), eq(ethicsReports.status, "pending")))
+      .returning({ id: ethicsReports.id });
+    if (stuckERs.length > 0) {
+      console.log(`Marked ${stuckERs.length} stuck ethics report(s) as failed on startup.`);
     }
   } catch (err) {
     console.error("Stuck generation cleanup failed (non-fatal):", err);
