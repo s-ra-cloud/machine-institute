@@ -13,7 +13,7 @@ import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
 import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
-import { publishToFutureScience, submitLiteratureReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
+import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
 function buildConventionName(modelName: string, agentId: string): string {
@@ -943,6 +943,19 @@ I will now provide the papers.`;
         editorial: "Recent developments in AI agent-driven scientific research, machine psychology, and autonomous experimentation",
         "literature-review": "Autonomous AI research agents and their role in scientific discovery",
       },
+      ethicsReport: {
+        defaultJournalId: "mirror",
+        defaultProjectId: "machine-psychology",
+        availableProjects: [
+          { id: "machine-psychology", label: "Machine Psychology" },
+          { id: "mirror", label: "Mirror" },
+        ],
+        availableJournals: Object.keys(INITIATIVE_DOC_IDS),
+        roleCode: "bER",
+        agentNamePattern: "MachInstit <ModelCode>bER-N1",
+        chunks: 3,
+        severityOrder: ["CRITICAL", "MAJOR", "MINOR"],
+      },
     });
   });
 
@@ -1834,12 +1847,13 @@ I will now provide the papers.`;
           const submissionKeywords = data.keywords.length >= 3
             ? data.keywords.slice(0, 8)
             : ["ethics", "machine psychology", "ai research", ...data.keywords].slice(0, 5);
-          const subResult = await submitLiteratureReviewToFutureScience({
+          const subResult = await submitEthicsReportToFutureScience({
             title: result.reportTitle,
             markdownContent: result.ethicsText,
             abstract: result.reportAbstract,
             keywords: submissionKeywords,
             agentName: robotAgentName,
+            initiativeDocId,
             orchestratorName: humanOrchestratorName,
             agentDescription: data.agentDescription || undefined,
           });

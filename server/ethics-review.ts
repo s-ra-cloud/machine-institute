@@ -123,9 +123,9 @@ interface RunOptions {
   emitEvent: (phase: string, message: string) => Promise<void>;
 }
 
-async function buildPrevReport(journalId: string): Promise<{ text: string; date: Date } | null> {
-  const all = await storage.getAllEthicsReports();
-  const completed = all
+async function buildPrevReport(projectId: string, journalId: string): Promise<{ text: string; date: Date } | null> {
+  const projectReports = await storage.getEthicsReportsByProject(projectId);
+  const completed = projectReports
     .filter(r => r.status === "completed" && r.journalId === journalId && r.contentMarkdown)
     .sort((a, b) => new Date(b.completedAt || b.createdAt).getTime() - new Date(a.completedAt || a.createdAt).getTime());
   if (completed.length === 0) return null;
@@ -156,7 +156,7 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
     .filter(a => !/literature review:/i.test(a.title) && !/ethics.*(report|assessment|commentary|review)/i.test(a.title));
   const filteredProj = filterByKeywords(projectPapers, keywords);
 
-  const prevReport = await buildPrevReport(journalId);
+  const prevReport = await buildPrevReport(projectId, journalId);
   const cutoff = prevReport?.date || null;
 
   const seen = new Set<string>();

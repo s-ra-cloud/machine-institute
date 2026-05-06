@@ -1135,7 +1135,7 @@ export default function GenerationDashboard() {
                       </button>
                     </div>
                   )}
-                  {showMetadata === rep.id && <MetadataPanel record={rep as unknown as LiteratureReviewRecord} />}
+                  {showMetadata === rep.id && <MetadataPanel record={rep} />}
                 </div>
               ))}
 
@@ -1178,7 +1178,18 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function MetadataPanel({ record }: { record: EditorialRecord | LiteratureReviewRecord }) {
+interface GenerationMetadataRecord {
+  topic?: string | null;
+  modelName: string | null;
+  modelProvider: string | null;
+  providerMode: string | null;
+  orchestratorName: string | null;
+  publishedDocumentId: string | null;
+  promptTrace: string | null;
+  sourceTrace: string | null;
+}
+
+function MetadataPanel({ record }: { record: GenerationMetadataRecord }) {
   let promptData: Record<string, unknown> | null = null;
   let sourceData: Record<string, unknown> | null = null;
 

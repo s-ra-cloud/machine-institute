@@ -162,35 +162,49 @@ export default function EthicsReportDetail() {
             </FadeIn>
           )}
 
-          {report.status === "completed" && flagsList.length > 0 && (
-            <FadeIn delay={0.2}>
-              <section className="mb-10">
-                <h2 className="text-lg font-heading font-semibold mb-4 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-yellow-400" /> Consolidated Flags ({flagsList.length})
-                </h2>
-                <div className="space-y-3">
-                  {flagsList.map((f, i) => {
-                    const sev = (f.severity || "").toLowerCase();
-                    const sevColor = sev === "critical" ? "text-red-400 border-red-400/30"
-                      : sev === "high" ? "text-orange-400 border-orange-400/30"
-                      : sev === "medium" ? "text-yellow-400 border-yellow-400/30"
-                      : "text-muted-foreground border-border/30";
-                    return (
-                      <div key={i} className="border border-border/30 bg-muted/5 p-4" data-testid={`flag-${i}`}>
-                        <div className="flex items-center gap-3 mb-2 flex-wrap">
-                          {f.category && <span className="text-[10px] font-mono uppercase tracking-widest text-primary">{f.category}</span>}
-                          {f.severity && <span className={`text-[10px] font-mono uppercase border px-2 py-0.5 ${sevColor}`}>{f.severity}</span>}
-                          {f.paperRef && <span className="text-[10px] font-mono text-muted-foreground/60">{f.paperRef}</span>}
+          {report.status === "completed" && flagsList.length > 0 && (() => {
+            const SEVERITY_ORDER: Array<"CRITICAL" | "MAJOR" | "MINOR"> = ["CRITICAL", "MAJOR", "MINOR"];
+            const severityColors: Record<string, string> = {
+              CRITICAL: "text-red-400 border-red-400/40",
+              MAJOR: "text-orange-400 border-orange-400/40",
+              MINOR: "text-yellow-400 border-yellow-400/40",
+            };
+            const grouped = SEVERITY_ORDER.map(sev => ({
+              sev,
+              items: flagsList.filter(f => (f.severity || "").toUpperCase() === sev),
+            })).filter(g => g.items.length > 0);
+            return (
+              <FadeIn delay={0.2}>
+                <section className="mb-10">
+                  <h2 className="text-lg font-heading font-semibold mb-4 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-yellow-400" /> Consolidated Flags ({flagsList.length})
+                  </h2>
+                  <div className="space-y-6">
+                    {grouped.map(group => (
+                      <div key={group.sev} data-testid={`flag-group-${group.sev.toLowerCase()}`}>
+                        <h3 className={`text-xs font-mono uppercase tracking-widest mb-2 ${severityColors[group.sev]?.split(" ")[0] || ""}`}>
+                          {group.sev} ({group.items.length})
+                        </h3>
+                        <div className="space-y-2">
+                          {group.items.map((f, i) => (
+                            <div
+                              key={`${group.sev}-${i}`}
+                              className={`border ${severityColors[group.sev] || "border-border/30"} bg-muted/5 p-4`}
+                              data-testid={`flag-${group.sev.toLowerCase()}-${i}`}
+                            >
+                              <p className="text-sm leading-relaxed" data-testid={`flag-summary-${group.sev.toLowerCase()}-${i}`}>
+                                {f.summary || "(no summary extracted)"}
+                              </p>
+                            </div>
+                          ))}
                         </div>
-                        {f.description && <p className="text-sm leading-relaxed">{f.description}</p>}
-                        {f.evidence && <p className="text-xs text-muted-foreground/70 mt-2 italic">Evidence: {f.evidence}</p>}
                       </div>
-                    );
-                  })}
-                </div>
-              </section>
-            </FadeIn>
-          )}
+                    ))}
+                  </div>
+                </section>
+              </FadeIn>
+            );
+          })()}
 
           {report.status === "completed" && recommendations.length > 0 && (
             <FadeIn delay={0.25}>

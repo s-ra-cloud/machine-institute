@@ -150,6 +150,101 @@ export async function submitLiteratureReviewToFutureScience(
   }
 }
 
+interface EthicsReportSubmitOptions {
+  title: string;
+  markdownContent: string;
+  abstract: string;
+  keywords: string[];
+  agentName: string;
+  initiativeDocId: string;
+  orchestratorName?: string;
+  agentDescription?: string;
+}
+
+const ETHICS_TYPE_FALLBACKS = ["Ethics commentary", "Ethics report", "Commentary", "Editorial", "Unreviewed manuscript"];
+
+export async function submitEthicsReportToFutureScience(
+  options: EthicsReportSubmitOptions,
+): Promise<{ documentId: string; url: string } | null> {
+  const apiKey = process.env.FUTURE_SCIENCE_API_KEY;
+  if (!apiKey) {
+    console.warn("FUTURE_SCIENCE_API_KEY is not set — skipping Future Science ethics submission.");
+    return null;
+  }
+
+  const visibleAuthorName = splitAgentNameForFutureScience(options.agentName);
+  const baseMetadata: Record<string, unknown> = {
+    title: options.title,
+    abstract: options.abstract,
+    language: "en",
+    agentName: options.agentName,
+    author: [{
+      firstName: visibleAuthorName.firstName,
+      lastName: visibleAuthorName.lastName,
+      institution: "Machine Institute",
+      email: "research@machine-institute.org",
+      links: [],
+    }],
+    initiative: options.initiativeDocId,
+    keywords: options.keywords.map((k) => ({ text: k })),
+    coauthorsNotified: true,
+    isFormatCompliant: true,
+    sourceLinkCorrect: true,
+    isMarkdown: true,
+  };
+  if (options.orchestratorName) baseMetadata.researchOrchestrator = options.orchestratorName;
+  if (options.agentDescription) baseMetadata.agentDescription = options.agentDescription;
+
+  let lastErr: string = "";
+  for (const candidateType of ETHICS_TYPE_FALLBACKS) {
+    try {
+      const metadata = { ...baseMetadata, type: candidateType };
+      const formData = new FormData();
+      formData.append("data", JSON.stringify({ data: metadata }));
+      const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
+      formData.append("file", mdBlob, "ethics-report.md");
+
+      console.log("Future Science ethics api-bot attempt:", {
+        type: candidateType,
+        agentName: options.agentName,
+        initiative: options.initiativeDocId,
+        keywordCount: options.keywords.length,
+      });
+
+      const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
+        method: "POST",
+        headers: { "x-api-key": apiKey },
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        lastErr = await resp.text();
+        if (resp.status === 400 && /type/i.test(lastErr)) {
+          console.warn(`FS rejected type "${candidateType}" — trying next fallback.`);
+          continue;
+        }
+        console.error(`Future Science ethics submission failed (${resp.status}):`, lastErr);
+        return null;
+      }
+
+      const result: FSPublishResult = await resp.json() as FSPublishResult;
+      const documentId = result?.data?.documentId || result?.documentId || result?.id;
+      const slug = result?.data?.slug || result?.slug;
+      const url = slug
+        ? `https://future-science.org/mirror/papers/${slug}`
+        : documentId
+          ? `https://future-science.org/mirror/papers/${documentId}`
+          : "";
+      return { documentId: documentId || "unknown", url };
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+      console.error(`FS ethics submission attempt ("${candidateType}") error:`, err);
+    }
+  }
+  console.error("All FS ethics type fallbacks exhausted. Last error:", lastErr);
+  return null;
+}
+
 interface PublishOptions {
   title: string;
   contentHtml: string;
