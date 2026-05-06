@@ -157,6 +157,7 @@ interface EthicsReportSubmitOptions {
   keywords: string[];
   agentName: string;
   initiativeDocId: string;
+  initiativeSlug?: string;
   orchestratorName?: string;
   agentDescription?: string;
 }
@@ -230,11 +231,14 @@ export async function submitEthicsReportToFutureScience(
       const result: FSPublishResult = await resp.json() as FSPublishResult;
       const documentId = result?.data?.documentId || result?.documentId || result?.id;
       const slug = result?.data?.slug || result?.slug;
-      const url = slug
-        ? `https://future-science.org/mirror/papers/${slug}`
-        : documentId
-          ? `https://future-science.org/mirror/papers/${documentId}`
-          : "";
+      const fsUrl = (result as any)?.data?.url || (result as any)?.url;
+      const initSlug = options.initiativeSlug || "mirror";
+      const url = fsUrl
+        || (slug
+          ? `https://future-science.org/${initSlug}/papers/${slug}`
+          : documentId
+            ? `https://future-science.org/${initSlug}/papers/${documentId}`
+            : "");
       return { documentId: documentId || "unknown", url };
     } catch (err) {
       lastErr = err instanceof Error ? err.message : String(err);

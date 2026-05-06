@@ -1867,6 +1867,7 @@ I will now provide the papers.`;
             keywords: submissionKeywords,
             agentName: robotAgentName,
             initiativeDocId,
+            initiativeSlug: data.journalId,
             orchestratorName: humanOrchestratorName,
             agentDescription: data.agentDescription || undefined,
           });
