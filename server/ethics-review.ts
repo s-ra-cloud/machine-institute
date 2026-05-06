@@ -290,7 +290,7 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);
 
   const reportDateLabel = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  const reportTitle = `Field Ethics Report on ${journalId}: ${reportDateLabel}`;
+  const reportTitle = `Field Ethics Report on ${journalDisplayName}: ${reportDateLabel}`;
 
   const critCount = flagsList.filter(f => f.severity === "CRITICAL").length;
   const majorCount = flagsList.filter(f => f.severity === "MAJOR").length;
