@@ -4,6 +4,7 @@ import {
   H_SOLO_REPORT_CHUNK_1_PROMPT,
   H_SOLO_REPORT_CHUNK_2_PROMPT,
   H_SOLO_REPORT_CHUNK_3_PROMPT,
+  applyJournalName,
 } from "./prompts/h-solo";
 import { fetchAbstractsAndKeywords, type FutureScienceAbstract } from "./future-science";
 import type { EthicsReport, ProjectPaper } from "@shared/schema";
@@ -114,6 +115,7 @@ interface RunOptions {
   agentId: string;
   agentName: string;
   journalId: string;
+  journalName?: string;
   initiativeDocId: string;
   keywords: string[];
   topic?: string | null;
@@ -140,6 +142,10 @@ async function buildPrevReport(projectId: string, journalId: string): Promise<{ 
 export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOutput> {
   const startTime = Date.now();
   const { projectId, journalId, initiativeDocId, keywords, topic, prompt1, prompt2, prompt3, modelConfig, emitEvent } = opts;
+  const journalName = opts.journalName || journalId;
+  const sub1 = applyJournalName(prompt1, journalName);
+  const sub2 = applyJournalName(prompt2, journalName);
+  const sub3 = applyJournalName(prompt3, journalName);
 
   await emitEvent("ethics-init", `Starting field ethics report on ${journalId}${topic ? ` — topic "${topic}"` : ""} (${keywords.length} keyword filter(s)).`);
 
@@ -204,21 +210,21 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   // Part 1
   await emitEvent("ethics-part-1", `Part 1/3: Paper-by-paper ethical audit (${sampled.length} papers)...`);
   const user1 = `${previousReportSection}${topicSection}## COVERAGE PERIOD\n\n${coveragePeriod}\n\n---\n\n## PAPERS FOR ETHICAL AUDIT (${sampled.length} papers)\n\n${papersContent}`;
-  const r1 = await generateWithConfig(modelConfig, prompt1, user1, { maxTokens: 8000, temperature: 0.3 });
+  const r1 = await generateWithConfig(modelConfig, sub1, user1, { maxTokens: 8000, temperature: 0.3 });
   const chunk1 = r1.content;
   await emitEvent("ethics-part-1", `Part 1/3 complete (${chunk1.length} chars).`);
 
   // Part 2
   await emitEvent("ethics-part-2", `Part 2/3: Systemic patterns and trajectory...`);
   const user2 = `${previousReportSection}## YOUR PART 1 PAPER-BY-PAPER AUDIT\n\n${chunk1}`;
-  const r2 = await generateWithConfig(modelConfig, prompt2, user2, { maxTokens: 6000, temperature: 0.3 });
+  const r2 = await generateWithConfig(modelConfig, sub2, user2, { maxTokens: 6000, temperature: 0.3 });
   const chunk2 = r2.content;
   await emitEvent("ethics-part-2", `Part 2/3 complete (${chunk2.length} chars).`);
 
   // Part 3
   await emitEvent("ethics-part-3", `Part 3/3: Synthesis, flags consolidation, and clearance...`);
   const user3 = `## YOUR PART 1 PAPER-BY-PAPER AUDIT\n\n${chunk1}\n\n---\n\n## YOUR PART 2 SYSTEMIC ANALYSIS\n\n${chunk2}`;
-  const r3 = await generateWithConfig(modelConfig, prompt3, user3, { maxTokens: 6000, temperature: 0.3 });
+  const r3 = await generateWithConfig(modelConfig, sub3, user3, { maxTokens: 6000, temperature: 0.3 });
   const chunk3 = r3.content;
   await emitEvent("ethics-part-3", `Part 3/3 complete (${chunk3.length} chars).`);
 

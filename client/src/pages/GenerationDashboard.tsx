@@ -272,9 +272,9 @@ export default function GenerationDashboard() {
   });
 
   const { data: defaultEthicsPrompts } = useQuery<{ prompt1: string; prompt2: string; prompt3: string }>({
-    queryKey: ["/api/ethics-reports/default-prompts"],
+    queryKey: ["/api/ethics-reports/default-prompts", selectedJournal],
     queryFn: async () => {
-      const res = await fetch("/api/ethics-reports/default-prompts");
+      const res = await fetch(`/api/ethics-reports/default-prompts?journalId=${encodeURIComponent(selectedJournal)}`);
       return res.json();
     },
     enabled: activeType === "ethics-report",

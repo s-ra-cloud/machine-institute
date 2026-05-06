@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport } from "@shared/schema";
-import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPORT_CHUNK_3_PROMPT } from "./prompts/h-solo";
+import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPORT_CHUNK_3_PROMPT, applyJournalName } from "./prompts/h-solo";
 import { runEthicsReport } from "./ethics-review";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
@@ -470,6 +470,14 @@ export async function registerRoutes(
   const INITIATIVE_DOC_IDS: Record<string, string> = {
     "mirror": "efyjiy34s5lgbx2gr50k5h9l",
   };
+
+  const JOURNAL_DISPLAY_NAMES: Record<string, string> = {
+    "mirror": "Mirror — An Automated Journal of AI Interpretability",
+  };
+
+  function getJournalDisplayName(journalId: string): string {
+    return JOURNAL_DISPLAY_NAMES[journalId] || journalId;
+  }
 
   const INITIATIVE_INSTITUTIONS: Record<string, string[]> = {
     "mirror": ["Machine Institute"],
@@ -940,7 +948,7 @@ I will now provide the papers.`;
       byocProviders: BYOC_PROVIDERS,
       limits: PER_USER_PLATFORM_LIMITS,
       defaultTopics: {
-        editorial: "Recent developments in AI agent-driven scientific research, machine psychology, and autonomous experimentation",
+        editorial: "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability",
         "literature-review": "Autonomous AI research agents and their role in scientific discovery",
       },
       ethicsReport: {
@@ -1646,11 +1654,15 @@ I will now provide the papers.`;
 
   const ethicsRateLimit = new Map<string, number>();
 
-  app.get("/api/ethics-reports/default-prompts", (_req, res) => {
+  app.get("/api/ethics-reports/default-prompts", (req, res) => {
+    const journalIdRaw = (req.query.journalId as string | undefined) || "";
+    const substitution = journalIdRaw && JOURNAL_DISPLAY_NAMES[journalIdRaw]
+      ? JOURNAL_DISPLAY_NAMES[journalIdRaw]
+      : "this journal";
     res.json({
-      prompt1: H_SOLO_REPORT_CHUNK_1_PROMPT,
-      prompt2: H_SOLO_REPORT_CHUNK_2_PROMPT,
-      prompt3: H_SOLO_REPORT_CHUNK_3_PROMPT,
+      prompt1: applyJournalName(H_SOLO_REPORT_CHUNK_1_PROMPT, substitution),
+      prompt2: applyJournalName(H_SOLO_REPORT_CHUNK_2_PROMPT, substitution),
+      prompt3: applyJournalName(H_SOLO_REPORT_CHUNK_3_PROMPT, substitution),
     });
   });
 
@@ -1811,6 +1823,7 @@ I will now provide the papers.`;
         agentId: data.agentId,
         agentName: robotAgentName,
         journalId: data.journalId,
+        journalName: getJournalDisplayName(data.journalId),
         initiativeDocId,
         keywords: data.keywords,
         topic: data.topic || null,
@@ -1859,7 +1872,7 @@ I will now provide the papers.`;
             : undefined;
           const submissionKeywords = data.keywords.length >= 3
             ? data.keywords.slice(0, 8)
-            : ["ethics", "machine psychology", "ai research", ...data.keywords].slice(0, 5);
+            : ["ethics", "ai research", "automated science", ...data.keywords].slice(0, 5);
           const subResult = await submitEthicsReportToFutureScience({
             title: result.reportTitle,
             markdownContent: result.ethicsText,
@@ -2095,7 +2108,7 @@ List every cited paper in Chicago author-date bibliography format:
       }
 
       const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", "O");
-      const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, machine psychology, and autonomous experimentation";
+      const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability";
 
       const modelConfig: ModelProviderConfig = {
         providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
@@ -2286,7 +2299,7 @@ List every cited paper in Chicago author-date bibliography format:
       }
       const model = resolveModelName(config);
 
-      const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, machine psychology, and autonomous experimentation";
+      const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability";
       const effectiveSystemPrompt = editablePrompt || DEFAULT_EDITORIAL_PROMPT;
 
       const userMessage = `Topic: ${effectiveTopic} — based on the institute's current publication corpus.
@@ -2425,7 +2438,7 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
             authorLastName: (editorial?.orchestratorName || "Institute").split(" ").slice(1).join(" ") || "Institute",
             authorInstitution: "Machine Institute",
             authorEmail: "research@machine-institute.org",
-            keywords: ["editorial", "AI research", "machine psychology"],
+            keywords: ["editorial", "AI research", "automated science"],
             type: "article",
             accessToken,
             initiativeSlug: "mirror",
