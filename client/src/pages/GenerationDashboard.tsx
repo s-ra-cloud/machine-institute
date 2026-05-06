@@ -411,7 +411,7 @@ export default function GenerationDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: ethicsProjectId,
-          agentId: "bER",
+          agentId: "H",
           journalId: selectedJournal,
           keywords: keywordsArr,
           topic: ethicsTopic.trim() || undefined,

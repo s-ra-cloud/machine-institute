@@ -1746,7 +1746,7 @@ I will now provide the papers.`;
       const effectiveKeywords: string[] = Array.isArray(keywords)
         ? keywords.map((k: unknown) => String(k).trim()).filter(Boolean)
         : (typeof keywords === "string" ? keywords.split(",").map((k: string) => k.trim()).filter(Boolean) : []);
-      const rawAgentId = agentId && agentId.includes("MachInstit") ? "bER" : (agentId || "bER");
+      const rawAgentId = agentId && agentId.includes("MachInstit") ? "H" : (agentId || "H");
       const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", rawAgentId);
       const effectiveTopic: string | null = typeof topic === "string" && topic.trim() ? topic.trim() : null;
       const researchQuestion = `Field-level ethics audit of ${effectiveJournalId}${effectiveTopic ? ` — topic: ${effectiveTopic}` : ""}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
@@ -1807,7 +1807,7 @@ I will now provide the papers.`;
 
     async function emit(phase: string, message: string) {
       try {
-        await storage.createResearchEvent({ source: robotAgentName, agentId: "bER", phase, message });
+        await storage.createResearchEvent({ source: robotAgentName, agentId: "H", phase, message });
       } catch (e) {
         console.error(`[Ethics ${reportId}] Failed to emit event:`, e);
       }
