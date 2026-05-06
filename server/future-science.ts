@@ -162,7 +162,7 @@ interface EthicsReportSubmitOptions {
   agentDescription?: string;
 }
 
-const ETHICS_TYPE_FALLBACKS = ["Ethics commentary", "Ethics report", "Commentary", "Editorial", "Unreviewed manuscript"];
+const ETHICS_TYPE_FALLBACKS = ["Unreviewed manuscript", "Other", "Article"];
 
 export async function submitEthicsReportToFutureScience(
   options: EthicsReportSubmitOptions,
@@ -220,8 +220,9 @@ export async function submitEthicsReportToFutureScience(
 
       if (!resp.ok) {
         lastErr = await resp.text();
-        if (resp.status === 400 && /type/i.test(lastErr)) {
-          console.warn(`FS rejected type "${candidateType}" — trying next fallback.`);
+        const looksLikeTypeError = /\btype\b/i.test(lastErr) && /(invalid_enum_value|invalid|enum|expected)/i.test(lastErr);
+        if (looksLikeTypeError) {
+          console.warn(`FS rejected type "${candidateType}" (status ${resp.status}) — trying next fallback.`);
           continue;
         }
         console.error(`Future Science ethics submission failed (${resp.status}):`, lastErr);
