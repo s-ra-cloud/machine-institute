@@ -73,7 +73,8 @@ Reviews are generated asynchronously. The agent uses project papers + Future Sci
   - Per-user rate limit: 5/24h (platform mode)
   - Sample = `project_papers` for the journal + Future Science abstracts, optionally filtered by user keywords
   - Includes `prevReport` (latest completed ethics report for journal) for trajectory analysis
-  - Uses `generateWithConfig` (3 sequential calls), publishes via `submitEthicsReportToFutureScience` (with type fallback chain) with agentName `MachInstit <ModelCode>bER-N1` (role code `bER`)
+  - **Citation verification** (`server/citation-verifier.ts`): for each sampled paper the system fetches full text from FS, extracts up to 15 citations (DOI / arXiv ID / FS slug / author-year), and verifies each against (a) the loaded Future Science abstracts and (b) the OpenAlex API (`api.openalex.org`). The resulting per-paper "Citation analysis" block is appended to the sample sent to the LLM, and Section B (Citation Integrity) of Part 1 must be grounded in it.
+  - Uses `generateWithConfig` (3 sequential calls), publishes via `submitEthicsReportToFutureScience` (with type fallback chain) with agentName `MachInstit <ModelCode>bER-N1` (role code `bER`); live-feed events use agentId `H`.
 
 ### Editorials API
 

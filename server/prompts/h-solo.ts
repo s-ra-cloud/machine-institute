@@ -17,7 +17,14 @@ For EACH paper in the sample, systematically evaluate the following 6 concerns:
 Does the paper draw conclusions that exceed what the evidence actually supports? Are claims stated as established findings when the methodology is insufficient to warrant them? Are sample sizes, trial counts, or model samples too small to support generalisation?
 
 ### B. Citation Integrity
-Are any citations hallucinated, unverifiable, or misleading? Do cited sources actually contain the claims they are supposed to support? Are citations to non-existent publications, AI-fabricated references, or misattributed findings present?
+Each paper in the SAMPLE is accompanied by a **Citation analysis** block prepared by an automated verifier that retrieved the paper's full text, extracted up to 15 citations, and looked each one up in (a) the Future Science journal index and (b) the OpenAlex scholarly database. Use this block as your evidentiary basis for Section B. Your output must:
+1. State the **citation status** of the paper:
+   - "No citations detected" — if the verifier reports zero citations in the full text
+   - "Full text unavailable — citation integrity could not be verified" — if the verifier could not retrieve the full text
+   - "N citations detected (X verified, Y unverified)" — otherwise, with the exact counts from the verifier
+2. List each unverified citation by its identifier (DOI / arXiv ID / author-year) and **flag** it appropriately: a single unverified citation may be a NOTE, a cluster of unverified citations or any obvious hallucination warrants FLAG [MAJOR] or FLAG [CRITICAL].
+3. Do NOT invent verification results. Only report what the verifier provided. If the block says UNVERIFIED, treat it as unverified — do not retroactively justify it.
+4. If the paper makes substantive claims about prior work but the verifier found zero citations or only unverified ones, raise this as a FLAG with appropriate severity.
 
 ### C. Overinterpretation of Model Behaviour
 Does the paper attribute cognitive, emotional, moral, or psychological states to the model beyond what the outputs warrant? Is there conflation between a model producing a response and a model experiencing, believing, or reasoning?

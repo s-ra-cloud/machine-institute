@@ -7,6 +7,13 @@ import {
   applyJournalName,
 } from "./prompts/h-solo";
 import { fetchAbstractsAndKeywords, type FutureScienceAbstract } from "./future-science";
+import {
+  fetchFsPaperContent,
+  extractCitations,
+  verifyCitations,
+  formatVerificationReport,
+  type PaperVerification,
+} from "./citation-verifier";
 import type { EthicsReport, ProjectPaper } from "@shared/schema";
 
 export interface EthicsFlag {
@@ -170,7 +177,7 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   const prevReport = await buildPrevReport(projectId, journalId);
 
   const seen = new Set<string>();
-  type SamplePaper = { title: string; authors: string; date: string; abstract: string; url: string };
+  type SamplePaper = { title: string; authors: string; date: string; abstract: string; url: string; documentId?: string };
   function buildSample(applyCutoff: boolean): SamplePaper[] {
     const cutoff = applyCutoff ? (prevReport?.date || null) : null;
     const localSeen = new Set<string>();
@@ -181,14 +188,14 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
       if (cutoff && p.date && new Date(p.date) <= cutoff) continue;
       localSeen.add(key);
       const url = p.url || fsPaperUrl(p.sourceDocumentId);
-      out.push({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url });
+      out.push({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url, documentId: p.sourceDocumentId || undefined });
     }
     for (const a of filteredFs) {
       const key = a.title.toLowerCase().trim();
       if (localSeen.has(key)) continue;
       if (cutoff && a.date && new Date(a.date) <= cutoff) continue;
       localSeen.add(key);
-      out.push({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId) });
+      out.push({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId });
     }
     return out;
   }
@@ -219,9 +226,33 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
 
   await emitEvent("ethics-sample", `Sampled ${sampled.length} paper(s) for audit (${projectPapers.length} project log + ${fsAbstracts.length} FS) covering ${coveragePeriod}.`);
 
-  const papersContent = sampled.map((p, i) =>
-    `## Paper ${i + 1}: ${p.title}\n**Authors:** ${p.authors} (${p.date})\n**URL:** ${p.url || "(none)"}\n**Journal:** ${journalDisplayName}\n\n${(p.abstract || "").slice(0, 6000)}`
-  ).join("\n\n---\n\n");
+  await emitEvent("ethics-citations", `Fetching full text and verifying citations against Future Science + OpenAlex for ${sampled.length} paper(s)...`);
+  const verifications: PaperVerification[] = [];
+  let totalCitations = 0;
+  let totalVerified = 0;
+  for (const p of sampled) {
+    let fullText: string | null = null;
+    if (p.documentId) {
+      fullText = await fetchFsPaperContent(p.documentId);
+    }
+    const sourceText = fullText && fullText.length > 200 ? fullText : "";
+    if (sourceText) {
+      const citations = extractCitations(sourceText);
+      const verified = await verifyCitations(citations, fsAbstracts);
+      totalCitations += verified.length;
+      totalVerified += verified.filter(v => v.verifiedSource !== "none").length;
+      verifications.push({ paperTitle: p.title, hadFullText: true, citations: verified });
+    } else {
+      verifications.push({ paperTitle: p.title, hadFullText: false, citations: [] });
+    }
+  }
+  await emitEvent("ethics-citations", `Citation verification complete: ${totalVerified}/${totalCitations} citations verified across ${sampled.length} paper(s) (${verifications.filter(v => v.hadFullText).length} had full text available).`);
+
+  const papersContent = sampled.map((p, i) => {
+    const v = verifications[i];
+    const verificationBlock = formatVerificationReport(v);
+    return `## Paper ${i + 1}: ${p.title}\n**Authors:** ${p.authors} (${p.date})\n**URL:** ${p.url || "(none)"}\n**Journal:** ${journalDisplayName}\n\n**Abstract:**\n${(p.abstract || "").slice(0, 4000)}\n\n${verificationBlock}`;
+  }).join("\n\n---\n\n");
 
   const previousReportSection = prevReport
     ? `## PREVIOUS ETHICS REPORT (Baseline)\n\nDate: ${prevReport.date.toISOString().slice(0, 10)}\n\n${prevReport.text.slice(0, 8000)}\n\n---\n\n`
