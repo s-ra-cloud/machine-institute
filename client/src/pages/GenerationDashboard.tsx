@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { ModelSelector, type ModelConfig } from "@/components/ModelSelector";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   PenTool,
   BookOpen,
@@ -201,6 +201,8 @@ export default function GenerationDashboard() {
   const [selectedJournal, setSelectedJournal] = useState<string>("mirror");
   const [ethicsProjectId, setEthicsProjectId] = useState<string>("machine-psychology");
   const [ethicsKeywords, setEthicsKeywords] = useState<string>("");
+  const [ethicsTopic, setEthicsTopic] = useState<string>("");
+  const [, navigate] = useLocation();
   const [ethicsPrompt1, setEthicsPrompt1] = useState<string>("");
   const [ethicsPrompt2, setEthicsPrompt2] = useState<string>("");
   const [ethicsPrompt3, setEthicsPrompt3] = useState<string>("");
@@ -395,6 +397,7 @@ export default function GenerationDashboard() {
           agentId: "bER",
           journalId: selectedJournal,
           keywords: keywordsArr,
+          topic: ethicsTopic.trim() || undefined,
           prompt1: ethicsPrompt1Edited ? ethicsPrompt1 : undefined,
           prompt2: ethicsPrompt2Edited ? ethicsPrompt2 : undefined,
           prompt3: ethicsPrompt3Edited ? ethicsPrompt3 : undefined,
@@ -412,9 +415,10 @@ export default function GenerationDashboard() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: { id?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/ethics-reports-all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
+      if (data?.id) navigate(`/ethics-reports/${data.id}`);
     },
   });
 
@@ -711,7 +715,24 @@ export default function GenerationDashboard() {
                 </div>
 
                 {activeType === "ethics-report" && (
-                  <div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                        Topic / Audit Focus (optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={ethicsTopic}
+                        onChange={(e) => setEthicsTopic(e.target.value)}
+                        className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
+                        placeholder="e.g. citation integrity in interpretability research"
+                        data-testid="input-ethics-topic"
+                      />
+                      <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
+                        Optional thematic focus passed to the audit prompts. Leave empty for an unscoped field-level audit.
+                      </p>
+                    </div>
+                    <div>
                     <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
                       Keyword Filters (optional, comma-separated)
                     </label>
@@ -726,6 +747,7 @@ export default function GenerationDashboard() {
                     <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
                       Restrict the audit to papers whose title or abstract matches any of these keywords. Leave empty to audit all available papers.
                     </p>
+                    </div>
                   </div>
                 )}
 

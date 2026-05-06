@@ -116,6 +116,7 @@ interface RunOptions {
   journalId: string;
   initiativeDocId: string;
   keywords: string[];
+  topic?: string | null;
   prompt1: string;
   prompt2: string;
   prompt3: string;
@@ -138,9 +139,9 @@ async function buildPrevReport(projectId: string, journalId: string): Promise<{ 
 
 export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOutput> {
   const startTime = Date.now();
-  const { projectId, journalId, initiativeDocId, keywords, prompt1, prompt2, prompt3, modelConfig, emitEvent } = opts;
+  const { projectId, journalId, initiativeDocId, keywords, topic, prompt1, prompt2, prompt3, modelConfig, emitEvent } = opts;
 
-  await emitEvent("ethics-init", `Starting field ethics report on ${journalId} (${keywords.length} keyword filter(s)).`);
+  await emitEvent("ethics-init", `Starting field ethics report on ${journalId}${topic ? ` — topic "${topic}"` : ""} (${keywords.length} keyword filter(s)).`);
 
   // Sample sources: project_papers (DB) + Future Science abstracts for the journal
   const projectPapers: ProjectPaper[] = await storage.getProjectPapers(projectId);
@@ -198,9 +199,11 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
     ? `## PREVIOUS ETHICS REPORT (Baseline)\n\nDate: ${prevReport.date.toISOString().slice(0, 10)}\n\n${prevReport.text.slice(0, 8000)}\n\n---\n\n`
     : `## PREVIOUS ETHICS REPORT\n\nNone available. This is the inaugural field ethics assessment.\n\n---\n\n`;
 
+  const topicSection = topic ? `## AUDIT FOCUS TOPIC\n\nThe orchestrator has highlighted the following topical focus for this audit. Weight your assessment toward ethical issues relevant to this topic, but DO NOT ignore other categories of concern.\n\n> ${topic}\n\n---\n\n` : "";
+
   // Part 1
   await emitEvent("ethics-part-1", `Part 1/3: Paper-by-paper ethical audit (${sampled.length} papers)...`);
-  const user1 = `${previousReportSection}## COVERAGE PERIOD\n\n${coveragePeriod}\n\n---\n\n## PAPERS FOR ETHICAL AUDIT (${sampled.length} papers)\n\n${papersContent}`;
+  const user1 = `${previousReportSection}${topicSection}## COVERAGE PERIOD\n\n${coveragePeriod}\n\n---\n\n## PAPERS FOR ETHICAL AUDIT (${sampled.length} papers)\n\n${papersContent}`;
   const r1 = await generateWithConfig(modelConfig, prompt1, user1, { maxTokens: 8000, temperature: 0.3 });
   const chunk1 = r1.content;
   await emitEvent("ethics-part-1", `Part 1/3 complete (${chunk1.length} chars).`);

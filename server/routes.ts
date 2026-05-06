@@ -1681,7 +1681,7 @@ I will now provide the papers.`;
   app.post("/api/ethics-reports", requireAuth, async (req, res) => {
     try {
       const {
-        projectId, agentId, journalId, keywords, prompt1, prompt2, prompt3,
+        projectId, agentId, journalId, keywords, topic, prompt1, prompt2, prompt3,
         modelProvider, modelName, providerMode, byocApiKey,
         orchestratorName, agentDescription,
       } = req.body;
@@ -1736,7 +1736,8 @@ I will now provide the papers.`;
         : (typeof keywords === "string" ? keywords.split(",").map((k: string) => k.trim()).filter(Boolean) : []);
       const rawAgentId = agentId && agentId.includes("MachInstit") ? "bER" : (agentId || "bER");
       const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", rawAgentId);
-      const researchQuestion = `Field-level ethics audit of ${effectiveJournalId}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
+      const effectiveTopic: string | null = typeof topic === "string" && topic.trim() ? topic.trim() : null;
+      const researchQuestion = `Field-level ethics audit of ${effectiveJournalId}${effectiveTopic ? ` — topic: ${effectiveTopic}` : ""}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
 
       const modelConfig: ModelProviderConfig = {
         providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
@@ -1751,6 +1752,7 @@ I will now provide the papers.`;
         journalId: effectiveJournalId,
         keywords: effectiveKeywords,
         researchQuestion,
+        topic: effectiveTopic,
         prompt1: prompt1 || H_SOLO_REPORT_CHUNK_1_PROMPT,
         prompt2: prompt2 || H_SOLO_REPORT_CHUNK_2_PROMPT,
         prompt3: prompt3 || H_SOLO_REPORT_CHUNK_3_PROMPT,
@@ -1780,7 +1782,7 @@ I will now provide the papers.`;
 
   async function generateEthicsReportBackground(
     reportId: string,
-    data: { projectId: string; agentId: string; journalId: string; keywords: string[]; prompt1: string; prompt2: string; prompt3: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
+    data: { projectId: string; agentId: string; journalId: string; keywords: string[]; topic?: string | null; prompt1: string; prompt2: string; prompt3: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
     modelConfig: ModelProviderConfig,
   ) {
     const initiativeDocId = INITIATIVE_DOC_IDS[data.journalId] || INITIATIVE_DOC_IDS["mirror"];
@@ -1811,6 +1813,7 @@ I will now provide the papers.`;
         journalId: data.journalId,
         initiativeDocId,
         keywords: data.keywords,
+        topic: data.topic || null,
         prompt1: data.prompt1,
         prompt2: data.prompt2,
         prompt3: data.prompt3,

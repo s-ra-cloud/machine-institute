@@ -59,10 +59,36 @@ export default function EthicsReportDetail() {
   const completedDate = report.completedAt ? new Date(report.completedAt) : null;
   const durationSec = completedDate ? Math.round((completedDate.getTime() - createdDate.getTime()) / 1000) : null;
 
-  let flagsList: any[] = [];
-  let recommendations: string[] = [];
-  try { if (report.flagsJson) flagsList = JSON.parse(report.flagsJson); } catch {}
-  try { if (report.recommendationsJson) recommendations = JSON.parse(report.recommendationsJson); } catch {}
+  interface EthicsFlag { severity: string; summary: string }
+  function parseFlags(raw: string | null): EthicsFlag[] {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((f): f is { severity?: unknown; summary?: unknown } => f !== null && typeof f === "object")
+        .map((f) => ({
+          severity: typeof f.severity === "string" ? f.severity : "MINOR",
+          summary: typeof f.summary === "string" ? f.summary : "",
+        }))
+        .filter((f) => f.summary.length > 0);
+    } catch (err) {
+      console.warn("Failed to parse ethics flagsJson:", err);
+      return [];
+    }
+  }
+  function parseRecommendations(raw: string | null): string[] {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((r): r is string => typeof r === "string") : [];
+    } catch (err) {
+      console.warn("Failed to parse ethics recommendationsJson:", err);
+      return [];
+    }
+  }
+  const flagsList: EthicsFlag[] = parseFlags(report.flagsJson);
+  const recommendations: string[] = parseRecommendations(report.recommendationsJson);
 
   const clearance = report.clearanceStatus || "";
   const clearanceNorm = clearance.toLowerCase();
