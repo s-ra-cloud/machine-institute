@@ -274,3 +274,71 @@ export const userApiKeys = pgTable("user_api_keys", {
 });
 
 export type UserApiKey = typeof userApiKeys.$inferSelect;
+
+export const ethicsReports = pgTable("ethics_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: text("project_id").notNull(),
+  agentId: text("agent_id").notNull(),
+  journalId: text("journal_id").notNull().default("mirror"),
+  keywords: text("keywords").array().notNull().default(sql`ARRAY[]::text[]`),
+  researchQuestion: text("research_question").notNull(),
+  prompt1: text("prompt1").notNull(),
+  prompt2: text("prompt2").notNull(),
+  prompt3: text("prompt3").notNull(),
+  contentMarkdown: text("content_markdown"),
+  contentHtml: text("content_html"),
+  reportTitle: text("report_title"),
+  reportAbstract: text("report_abstract"),
+  clearanceStatus: text("clearance_status"),
+  clearanceStatement: text("clearance_statement"),
+  flagsJson: text("flags_json"),
+  recommendationsJson: text("recommendations_json"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  userId: text("user_id"),
+  orchestratorName: text("orchestrator_name"),
+  agentDescription: text("agent_description"),
+  modelProvider: text("model_provider"),
+  modelName: text("model_name"),
+  providerMode: text("provider_mode"),
+  publishedDocumentId: text("published_document_id"),
+  promptTrace: text("prompt_trace"),
+  sourceTrace: text("source_trace"),
+});
+
+export const insertEthicsReportSchema = createInsertSchema(ethicsReports).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+  contentMarkdown: true,
+  contentHtml: true,
+  reportTitle: true,
+  reportAbstract: true,
+  clearanceStatus: true,
+  clearanceStatement: true,
+  flagsJson: true,
+  recommendationsJson: true,
+  status: true,
+}).extend({
+  projectId: z.string().min(1),
+  agentId: z.string().min(1),
+  journalId: z.string().min(1),
+  keywords: z.array(z.string()).default([]),
+  researchQuestion: z.string().min(1),
+  prompt1: z.string().min(1),
+  prompt2: z.string().min(1),
+  prompt3: z.string().min(1),
+  userId: z.string().nullable().optional(),
+  orchestratorName: z.string().nullable().optional(),
+  agentDescription: z.string().nullable().optional(),
+  modelProvider: z.string().nullable().optional(),
+  modelName: z.string().nullable().optional(),
+  providerMode: z.string().nullable().optional(),
+  publishedDocumentId: z.string().nullable().optional(),
+  promptTrace: z.string().nullable().optional(),
+  sourceTrace: z.string().nullable().optional(),
+});
+
+export type InsertEthicsReport = z.infer<typeof insertEthicsReportSchema>;
+export type EthicsReport = typeof ethicsReports.$inferSelect;

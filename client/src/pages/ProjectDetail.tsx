@@ -20,6 +20,20 @@ interface LiteratureReview {
   status: string;
 }
 
+interface EthicsReportSummary {
+  id: string;
+  projectId: string;
+  agentId: string;
+  reportTitle: string | null;
+  researchQuestion: string;
+  clearanceStatus: string | null;
+  orchestratorName: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  status: string;
+  keywords?: string[];
+}
+
 interface FSAuthor {
   firstName?: string;
   lastName?: string;
@@ -43,6 +57,16 @@ export default function ProjectDetail() {
   const project = projects.find((p) => p.id === id);
   const queryClient = useQueryClient();
   const { isAdmin } = useAuth();
+
+  const { data: ethicsReports, isLoading: ethicsLoading } = useQuery<EthicsReportSummary[]>({
+    queryKey: ["/api/ethics-reports", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/ethics-reports?projectId=${id}`);
+      if (!res.ok) throw new Error("Failed to fetch ethics reports");
+      return res.json();
+    },
+    enabled: !!id && !!project && project.status !== "locked",
+  });
 
   const { data: literatureReviews, isLoading: reviewsLoading } = useQuery<LiteratureReview[]>({
     queryKey: ["/api/literature-reviews", id],
@@ -225,6 +249,60 @@ export default function ProjectDetail() {
                       data-testid={`link-review-${review.id}`}
                     >
                       View review <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </FadeIn>
+
+          <FadeIn delay={0.25} className="mt-16">
+            <div className="flex items-center gap-3 mb-6">
+              <h2 className="text-2xl font-heading font-bold" data-testid="heading-ethics-reports">Ethics Reports</h2>
+            </div>
+            {ethicsLoading ? (
+              <p className="text-sm text-muted-foreground font-mono" data-testid="status-ethics-loading">Loading reports…</p>
+            ) : !ethicsReports || ethicsReports.filter(r => r.status === "completed").length === 0 ? (
+              <div className="border border-border/20 bg-muted/5 p-8 text-center" data-testid="empty-state-ethics">
+                <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground font-mono">No ethics reports yet for this project.</p>
+              </div>
+            ) : (
+              <div className="space-y-3" data-testid="list-ethics-reports">
+                {ethicsReports.filter(r => r.status === "completed").map((rep) => (
+                  <div
+                    key={rep.id}
+                    className="border border-border/20 bg-muted/5 p-4 flex items-start justify-between gap-4"
+                    data-testid={`card-ethics-${rep.id}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" data-testid={`text-ethics-title-${rep.id}`}>
+                        {rep.reportTitle || rep.researchQuestion}
+                      </p>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground font-mono flex-wrap">
+                        <span data-testid={`text-ethics-agent-${rep.id}`}>
+                          {rep.orchestratorName || rep.agentId}
+                        </span>
+                        <span>·</span>
+                        <span data-testid={`text-ethics-date-${rep.id}`}>
+                          {rep.completedAt
+                            ? new Date(rep.completedAt).toLocaleDateString()
+                            : new Date(rep.createdAt).toLocaleDateString()}
+                        </span>
+                        {rep.clearanceStatus && (
+                          <>
+                            <span>·</span>
+                            <span className="text-yellow-400/80">{rep.clearanceStatus.replace(/_/g, " ")}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <Link
+                      href={`/ethics-reports/${rep.id}`}
+                      className="text-xs font-mono text-primary hover:underline whitespace-nowrap flex items-center gap-1"
+                      data-testid={`link-ethics-${rep.id}`}
+                    >
+                      View report <ExternalLink className="w-3 h-3" />
                     </Link>
                   </div>
                 ))}

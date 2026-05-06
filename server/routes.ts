@@ -1,7 +1,9 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport } from "@shared/schema";
+import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPORT_CHUNK_3_PROMPT } from "./prompts/h-solo";
+import { runEthicsReport } from "./ethics-review";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -488,6 +490,7 @@ export async function registerRoutes(
     "iR": "Innovation Reviewer",
     "bLR": "Basic Literature Reviewer",
     "aLR": "Adversarial Literature Reviewer",
+    "bER": "Basic Ethics Reviewer",
     "H": "Ethicist",
     "V": "Reviser",
     "N": "Manager",
@@ -960,6 +963,7 @@ I will now provide the papers.`;
     try {
       await storage.deleteAllLiteratureReviews();
       await storage.deleteAllEditorials();
+      await storage.deleteAllEthicsReports();
       return res.json({ success: true });
     } catch (err: any) {
       console.error("Error clearing generation history:", err);
@@ -975,13 +979,16 @@ I will now provide the papers.`;
         return res.json({
           editorial: { remaining: null, max: null, resetAt: null },
           "literature-review": { remaining: null, max: null, resetAt: null },
+          "ethics-report": { remaining: null, max: null, resetAt: null },
         });
       }
 
       const editorialLimit = await storage.getUserRateLimit(user.id, "editorial");
       const reviewLimit = await storage.getUserRateLimit(user.id, "literature-review");
+      const ethicsLimit = await storage.getUserRateLimit(user.id, "ethics-report");
       const editorialConfig = PER_USER_PLATFORM_LIMITS["editorial"];
       const reviewConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
+      const ethicsConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
 
       const now = Date.now();
       const editorialRemaining = editorialLimit
@@ -994,10 +1001,16 @@ I will now provide the papers.`;
           ? reviewConfig.max
           : Math.max(0, reviewConfig.max - reviewLimit.count))
         : reviewConfig.max;
+      const ethicsRemaining = ethicsLimit
+        ? (now - ethicsLimit.windowStart.getTime() >= ethicsConfig.windowMs
+          ? ethicsConfig.max
+          : Math.max(0, ethicsConfig.max - ethicsLimit.count))
+        : ethicsConfig.max;
 
       return res.json({
         editorial: { remaining: editorialRemaining, max: editorialConfig.max, resetAt: editorialLimit ? editorialLimit.windowStart.getTime() + editorialConfig.windowMs : null },
         "literature-review": { remaining: reviewRemaining, max: reviewConfig.max, resetAt: reviewLimit ? reviewLimit.windowStart.getTime() + reviewConfig.windowMs : null },
+        "ethics-report": { remaining: ethicsRemaining, max: ethicsConfig.max, resetAt: ethicsLimit ? ethicsLimit.windowStart.getTime() + ethicsConfig.windowMs : null },
       });
     } catch (err: any) {
       return res.status(500).json({ error: "Internal server error" });
@@ -1600,6 +1613,255 @@ I will now provide the papers.`;
       const safeError = (err.message || "Unknown error").replace(/[<>&"']/g, "");
       await emitLREvent("failure", `Literature review generation failed: ${safeError}`);
       await storage.updateLiteratureReview(reviewId, {
+        status: "failed",
+        contentHtml: `<p>Generation failed: ${safeError}</p>`,
+      });
+    }
+  }
+
+  const ethicsRateLimit = new Map<string, number>();
+
+  app.get("/api/ethics-reports/default-prompts", (_req, res) => {
+    res.json({
+      prompt1: H_SOLO_REPORT_CHUNK_1_PROMPT,
+      prompt2: H_SOLO_REPORT_CHUNK_2_PROMPT,
+      prompt3: H_SOLO_REPORT_CHUNK_3_PROMPT,
+    });
+  });
+
+  app.get("/api/ethics-reports", async (req, res) => {
+    try {
+      const projectId = req.query.projectId as string | undefined;
+      const reports = projectId
+        ? await storage.getEthicsReportsByProject(projectId)
+        : await storage.getAllEthicsReports();
+      return res.json(reports);
+    } catch (err: any) {
+      console.error("Error fetching ethics reports:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/ethics-reports/:id", async (req, res) => {
+    try {
+      const report = await storage.getEthicsReportById(req.params.id);
+      if (!report) return res.status(404).json({ error: "Ethics report not found" });
+      return res.json(report);
+    } catch (err: any) {
+      console.error("Error fetching ethics report:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/ethics-reports", requireAuth, async (req, res) => {
+    try {
+      const {
+        projectId, agentId, journalId, keywords, prompt1, prompt2, prompt3,
+        modelProvider, modelName, providerMode, byocApiKey,
+        orchestratorName, agentDescription,
+      } = req.body;
+
+      const VALID_PROVIDER_MODES = ["platform", "byoc"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) {
+        return res.status(400).json({ error: `Invalid providerMode.` });
+      }
+      if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) {
+        return res.status(400).json({ error: `Invalid modelProvider.` });
+      }
+
+      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
+      const user = (req as any).user;
+      const isPlatform = providerMode !== "byoc";
+
+      if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
+      }
+
+      if (isPlatform) {
+        if (!process.env.OPENROUTER_API_KEY) {
+          return res.status(503).json({ error: "Ethics report generation is not configured. OPENROUTER_API_KEY is missing." });
+        }
+        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+          const limitConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
+          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "ethics-report", limitConfig.max, limitConfig.windowMs);
+          if (!rateCheck.allowed) {
+            return res.status(429).json({ error: `Ethics report generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
+          }
+        }
+      }
+
+      if (providerMode === "byoc") {
+        if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
+        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
+        if (!keyValidation.valid) {
+          return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
+        }
+        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
+      }
+
+      const clientIp = req.ip || "unknown";
+      const last = ethicsRateLimit.get(clientIp) || 0;
+      if (Date.now() - last < 30000) {
+        return res.status(429).json({ error: "Please wait at least 30 seconds between ethics report requests." });
+      }
+      ethicsRateLimit.set(clientIp, Date.now());
+
+      const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
+      const effectiveKeywords: string[] = Array.isArray(keywords)
+        ? keywords.map((k: unknown) => String(k).trim()).filter(Boolean)
+        : (typeof keywords === "string" ? keywords.split(",").map((k: string) => k.trim()).filter(Boolean) : []);
+      const rawAgentId = agentId && agentId.includes("MachInstit") ? "bER" : (agentId || "bER");
+      const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", rawAgentId);
+      const researchQuestion = `Field-level ethics audit of ${effectiveJournalId}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
+
+      const modelConfig: ModelProviderConfig = {
+        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
+        provider: modelProvider || "openrouter",
+        modelName: modelName || "",
+        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
+      };
+
+      const parsed = insertEthicsReportSchema.safeParse({
+        projectId,
+        agentId: agentId || effectiveOrchestratorName,
+        journalId: effectiveJournalId,
+        keywords: effectiveKeywords,
+        researchQuestion,
+        prompt1: prompt1 || H_SOLO_REPORT_CHUNK_1_PROMPT,
+        prompt2: prompt2 || H_SOLO_REPORT_CHUNK_2_PROMPT,
+        prompt3: prompt3 || H_SOLO_REPORT_CHUNK_3_PROMPT,
+        userId: user?.id || null,
+        orchestratorName: effectiveOrchestratorName,
+        agentDescription: agentDescription || null,
+        modelProvider: modelConfig.provider,
+        modelName: resolveModelName(modelConfig),
+        providerMode: modelConfig.providerMode,
+      });
+
+      if (!parsed.success) {
+        return res.status(400).json({ error: fromZodError(parsed.error).message });
+      }
+
+      const report = await storage.createEthicsReport(parsed.data);
+      res.status(201).json(report);
+
+      generateEthicsReportBackground(report.id, parsed.data, modelConfig).catch(err => {
+        console.error("Background ethics report generation failed:", err);
+      });
+    } catch (err: any) {
+      console.error("Error creating ethics report:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  async function generateEthicsReportBackground(
+    reportId: string,
+    data: { projectId: string; agentId: string; journalId: string; keywords: string[]; prompt1: string; prompt2: string; prompt3: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
+    modelConfig: ModelProviderConfig,
+  ) {
+    const initiativeDocId = INITIATIVE_DOC_IDS[data.journalId] || INITIATIVE_DOC_IDS["mirror"];
+    if (modelConfig.providerMode === "byoc" && !modelConfig.apiKey && data.userId) {
+      const stored = getEphemeralKey(data.userId, modelConfig.provider);
+      if (stored) modelConfig.apiKey = stored;
+    }
+    const resolvedModel = resolveModelName(modelConfig);
+    const robotAgentName = buildConventionName(resolvedModel, "bER");
+
+    async function emit(phase: string, message: string) {
+      try {
+        await storage.createResearchEvent({ source: robotAgentName, agentId: "bER", phase, message });
+      } catch (e) {
+        console.error(`[Ethics ${reportId}] Failed to emit event:`, e);
+      }
+    }
+
+    try {
+      await storage.updateEthicsReport(reportId, { status: "generating" });
+      await emit("ethics-init", `Field ethics report started for journal ${data.journalId}.`);
+
+      const result = await runEthicsReport({
+        reportId,
+        projectId: data.projectId,
+        agentId: data.agentId,
+        agentName: robotAgentName,
+        journalId: data.journalId,
+        initiativeDocId,
+        keywords: data.keywords,
+        prompt1: data.prompt1,
+        prompt2: data.prompt2,
+        prompt3: data.prompt3,
+        modelConfig: { ...modelConfig, modelName: resolvedModel },
+        emitEvent: emit,
+      });
+
+      const rawHtml = markdownToHtml(result.ethicsText);
+      const safeHtml = sanitizeHtml(rawHtml);
+
+      const promptTrace = JSON.stringify({
+        prompt1: data.prompt1, prompt2: data.prompt2, prompt3: data.prompt3,
+        model: resolvedModel, provider: modelConfig.provider, providerMode: modelConfig.providerMode,
+        timestamp: new Date().toISOString(),
+      });
+      const sourceTrace = JSON.stringify({
+        journalId: data.journalId,
+        keywordsFilter: data.keywords,
+        papersUsed: result.papersUsed,
+      });
+
+      const updates: Partial<EthicsReport> = {
+        contentMarkdown: result.ethicsText,
+        contentHtml: safeHtml,
+        reportTitle: result.reportTitle,
+        reportAbstract: result.reportAbstract,
+        clearanceStatus: result.clearanceStatus,
+        clearanceStatement: result.clearanceStatement,
+        flagsJson: JSON.stringify(result.flagsList),
+        recommendationsJson: JSON.stringify(result.recommendations),
+        promptTrace,
+        sourceTrace,
+        status: "completed",
+        completedAt: new Date(),
+      };
+
+      if (!process.env.FUTURE_SCIENCE_API_KEY) {
+        await emit("fs-submission-skipped", "Future Science submission skipped: FUTURE_SCIENCE_API_KEY is not configured.");
+      } else {
+        try {
+          const humanOrchestratorName = data.orchestratorName && data.orchestratorName !== robotAgentName
+            ? data.orchestratorName
+            : undefined;
+          const submissionKeywords = data.keywords.length >= 3
+            ? data.keywords.slice(0, 8)
+            : ["ethics", "machine psychology", "ai research", ...data.keywords].slice(0, 5);
+          const subResult = await submitLiteratureReviewToFutureScience({
+            title: result.reportTitle,
+            markdownContent: result.ethicsText,
+            abstract: result.reportAbstract,
+            keywords: submissionKeywords,
+            agentName: robotAgentName,
+            orchestratorName: humanOrchestratorName,
+            agentDescription: data.agentDescription || undefined,
+          });
+          if (subResult) {
+            updates.publishedDocumentId = subResult.documentId;
+            await emit("fs-submission-success", `Ethics report submitted to Future Science. Document ID: ${subResult.documentId}`);
+          } else {
+            await emit("fs-submission-failed", "Future Science submission failed (non-fatal).");
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          await emit("fs-submission-failed", `Future Science submission failed: ${msg}`);
+        }
+      }
+
+      await storage.updateEthicsReport(reportId, updates);
+      await emit("ethics-completed", `Field ethics report completed (${result.flagsList.length} flag(s), status: ${result.clearanceStatus}).`);
+    } catch (err: any) {
+      console.error(`[Ethics ${reportId}] Generation failed:`, err);
+      const safeError = (err.message || "Unknown error").replace(/[<>&"']/g, "");
+      await emit("failure", `Ethics report generation failed: ${safeError}`);
+      await storage.updateEthicsReport(reportId, {
         status: "failed",
         contentHtml: `<p>Generation failed: ${safeError}</p>`,
       });

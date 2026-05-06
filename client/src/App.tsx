@@ -16,6 +16,7 @@ import EditorialDetail from "@/pages/EditorialDetail";
 import History from "@/pages/History";
 import PaperDetail from "@/pages/PaperDetail";
 import LiteratureReviewDetail from "@/pages/LiteratureReviewDetail";
+import EthicsReportDetail from "@/pages/EthicsReportDetail";
 import GenerationDashboard from "@/pages/GenerationDashboard";
 
 function ScrollToTop() {
@@ -41,6 +42,7 @@ function Router() {
         <Route path="/history" component={History} />
         <Route path="/papers/:slug" component={PaperDetail} />
         <Route path="/literature-reviews/:id" component={LiteratureReviewDetail} />
+        <Route path="/ethics-reports/:id" component={EthicsReportDetail} />
         <Route component={NotFound} />
       </Switch>
     </>

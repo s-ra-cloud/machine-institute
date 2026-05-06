@@ -23,7 +23,7 @@ import {
   FlaskConical,
 } from "lucide-react";
 
-type GenerationType = "editorial" | "literature-review";
+type GenerationType = "editorial" | "literature-review" | "ethics-report";
 
 interface RateLimitStatus {
   remaining: number | null;
@@ -50,6 +50,29 @@ interface EditorialRecord {
   publishedDocumentId: string | null;
   promptTrace: string | null;
   sourceTrace: string | null;
+}
+
+interface EthicsReportRecord {
+  id: string;
+  projectId: string;
+  agentId: string;
+  journalId: string;
+  keywords: string[];
+  researchQuestion: string;
+  status: string;
+  reportTitle: string | null;
+  reportAbstract: string | null;
+  clearanceStatus: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  orchestratorName: string | null;
+  modelProvider: string | null;
+  modelName: string | null;
+  providerMode: string | null;
+  publishedDocumentId: string | null;
+  promptTrace: string | null;
+  sourceTrace: string | null;
+  topic?: string | null;
 }
 
 interface LiteratureReviewRecord {
@@ -116,8 +139,8 @@ const labWorkflowCards = [
     title: "Ethics analysis of false citations",
     description: "Audit literature for citation integrity, unsupported claims, and fabricated references.",
     icon: Info,
-    status: "Coming soon",
-    locked: true,
+    status: "Available",
+    locked: false,
   },
   {
     id: "semi-autonomous-cycle",
@@ -176,6 +199,15 @@ export default function GenerationDashboard() {
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
   const [selectedJournal, setSelectedJournal] = useState<string>("mirror");
+  const [ethicsProjectId, setEthicsProjectId] = useState<string>("machine-psychology");
+  const [ethicsKeywords, setEthicsKeywords] = useState<string>("");
+  const [ethicsPrompt1, setEthicsPrompt1] = useState<string>("");
+  const [ethicsPrompt2, setEthicsPrompt2] = useState<string>("");
+  const [ethicsPrompt3, setEthicsPrompt3] = useState<string>("");
+  const [ethicsPrompt1Edited, setEthicsPrompt1Edited] = useState(false);
+  const [ethicsPrompt2Edited, setEthicsPrompt2Edited] = useState(false);
+  const [ethicsPrompt3Edited, setEthicsPrompt3Edited] = useState(false);
+  const [ethicsPromptsExpanded, setEthicsPromptsExpanded] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -220,6 +252,26 @@ export default function GenerationDashboard() {
     enabled: activeType === "literature-review",
   });
 
+  const { data: defaultEthicsPrompts } = useQuery<{ prompt1: string; prompt2: string; prompt3: string }>({
+    queryKey: ["/api/ethics-reports/default-prompts"],
+    queryFn: async () => {
+      const res = await fetch("/api/ethics-reports/default-prompts");
+      return res.json();
+    },
+    enabled: activeType === "ethics-report",
+  });
+
+  const { data: ethicsStatus } = useQuery<RateLimitStatus>({
+    queryKey: ["/api/generation/rate-limit-status", "ethics-report"],
+    queryFn: async () => {
+      const res = await fetch("/api/generation/rate-limit-status");
+      const data = await res.json();
+      return data["ethics-report"] as RateLimitStatus;
+    },
+    enabled: authenticated,
+    refetchInterval: 10000,
+  });
+
   useEffect(() => {
     if (activeType === "editorial" && defaultEditorialPrompt?.prompt && !promptManuallyEdited) {
       setPrompt(defaultEditorialPrompt.prompt);
@@ -227,7 +279,12 @@ export default function GenerationDashboard() {
     if (activeType === "literature-review" && defaultReviewPrompt?.prompt && !promptManuallyEdited) {
       setPrompt(defaultReviewPrompt.prompt);
     }
-  }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, reviewMode]);
+    if (activeType === "ethics-report" && defaultEthicsPrompts) {
+      if (!ethicsPrompt1Edited) setEthicsPrompt1(defaultEthicsPrompts.prompt1);
+      if (!ethicsPrompt2Edited) setEthicsPrompt2(defaultEthicsPrompts.prompt2);
+      if (!ethicsPrompt3Edited) setEthicsPrompt3(defaultEthicsPrompts.prompt3);
+    }
+  }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, defaultEthicsPrompts, reviewMode]);
 
   useEffect(() => {
     if (user?.displayName) {
@@ -239,6 +296,16 @@ export default function GenerationDashboard() {
     queryKey: ["/api/editorials"],
     queryFn: async () => {
       const res = await fetch("/api/editorials");
+      return res.json();
+    },
+    enabled: authenticated,
+    refetchInterval: 8000,
+  });
+
+  const { data: recentEthics } = useQuery<EthicsReportRecord[]>({
+    queryKey: ["/api/ethics-reports-all"],
+    queryFn: async () => {
+      const res = await fetch("/api/ethics-reports");
       return res.json();
     },
     enabled: authenticated,
@@ -317,6 +384,40 @@ export default function GenerationDashboard() {
     },
   });
 
+  const generateEthicsMutation = useMutation({
+    mutationFn: async () => {
+      const keywordsArr = ethicsKeywords.split(",").map(k => k.trim()).filter(Boolean);
+      const res = await fetch("/api/ethics-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: ethicsProjectId,
+          agentId: "bER",
+          journalId: selectedJournal,
+          keywords: keywordsArr,
+          prompt1: ethicsPrompt1Edited ? ethicsPrompt1 : undefined,
+          prompt2: ethicsPrompt2Edited ? ethicsPrompt2 : undefined,
+          prompt3: ethicsPrompt3Edited ? ethicsPrompt3 : undefined,
+          orchestratorName: orchestratorName || undefined,
+          agentDescription: agentDescription || undefined,
+          providerMode: modelConfig.providerMode,
+          modelProvider: modelConfig.provider,
+          modelName: modelConfig.modelName,
+          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to generate ethics report");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/ethics-reports-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
+    },
+  });
+
   const clearHistoryMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/generation/history", { method: "DELETE" });
@@ -356,14 +457,19 @@ export default function GenerationDashboard() {
 
   const editorialIsPending = generateEditorialMutation.isPending;
   const reviewIsPending = generateReviewMutation.isPending;
+  const ethicsIsPending = generateEthicsMutation.isPending;
   const hasGeneratingEditorial = recentEditorials?.some(e => e.status === "pending" || e.status === "generating");
   const hasGeneratingReview = recentReviews?.some(r => r.status === "pending" || r.status === "generating");
+  const hasGeneratingEthics = recentEthics?.some(r => r.status === "pending" || r.status === "generating");
 
   const byocReady = modelConfig.providerMode === "byoc" ? !!modelConfig.keyValidated : true;
   const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && byocReady &&
     (modelConfig.providerMode === "byoc" || editorialStatus?.remaining === null || (editorialStatus?.remaining ?? 1) > 0);
   const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && byocReady &&
     (modelConfig.providerMode === "byoc" || reviewStatus?.remaining === null || (reviewStatus?.remaining ?? 1) > 0);
+  const canSubmitEthics = !ethicsIsPending && !hasGeneratingEthics && byocReady &&
+    ethicsPrompt1.trim().length > 0 && ethicsPrompt2.trim().length > 0 && ethicsPrompt3.trim().length > 0 &&
+    (modelConfig.providerMode === "byoc" || ethicsStatus?.remaining === null || (ethicsStatus?.remaining ?? 1) > 0);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -442,9 +548,20 @@ export default function GenerationDashboard() {
                             </div>
                           ) : (
                             <button
-                              onClick={() => { setActiveType("literature-review"); setPromptManuallyEdited(false); setPrompt(""); }}
+                              onClick={() => {
+                                if (workflow.id === "ethics-citations") {
+                                  setActiveType("ethics-report");
+                                  setEthicsPrompt1Edited(false);
+                                  setEthicsPrompt2Edited(false);
+                                  setEthicsPrompt3Edited(false);
+                                } else {
+                                  setActiveType("literature-review");
+                                  setPromptManuallyEdited(false);
+                                  setPrompt("");
+                                }
+                              }}
                               className="relative h-full min-h-[260px] w-full border border-border/50 bg-background/60 p-6 hover:bg-muted/10 hover:border-primary/30 transition-all text-left group"
-                              data-testid="button-workflow-literature-review"
+                              data-testid={`button-workflow-${workflow.id}`}
                             >
                               {CardContent}
                             </button>
@@ -483,6 +600,8 @@ export default function GenerationDashboard() {
                   <h2 className="text-2xl font-heading font-semibold mb-1 flex items-center gap-3">
                     {activeType === "editorial" ? (
                       <><PenTool className="w-5 h-5 text-primary" /> Generate Editorial</>
+                    ) : activeType === "ethics-report" ? (
+                      <><Info className="w-5 h-5 text-primary" /> Generate Field Ethics Report</>
                     ) : (
                       <><BookOpen className="w-5 h-5 text-primary" /> Generate Literature Review</>
                     )}
@@ -490,6 +609,8 @@ export default function GenerationDashboard() {
                   <p className="text-sm text-muted-foreground">
                     {activeType === "editorial"
                       ? "Configure and generate an editorial synthesizing recent research."
+                      : activeType === "ethics-report"
+                      ? "Run a structured 3-part ethics audit (paper-by-paper → systemic → consolidated flags) of a journal's recent publications."
                       : "Configure and generate a literature review on a specific research question."}
                   </p>
                 </div>
@@ -550,6 +671,32 @@ export default function GenerationDashboard() {
                   </div>
                 </div>
 
+                {activeType === "ethics-report" && (
+                  <div>
+                    <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
+                      Project (paper log used as ethics audit sample)
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => setEthicsProjectId("machine-psychology")}
+                        className={`p-4 border text-left transition-all ${ethicsProjectId === "machine-psychology" ? "border-primary bg-primary/10" : "border-border/50 bg-muted/5 hover:border-primary/40"}`}
+                        data-testid="button-ethics-project-machine-psychology"
+                      >
+                        <div className="text-xs font-heading font-semibold mb-1">Machine Psychology</div>
+                        <div className="text-[10px] font-mono text-muted-foreground">Primary corpus for the inaugural field ethics audit.</div>
+                      </button>
+                      <button
+                        onClick={() => setEthicsProjectId("mirror")}
+                        className={`p-4 border text-left transition-all ${ethicsProjectId === "mirror" ? "border-primary bg-primary/10" : "border-border/50 bg-muted/5 hover:border-primary/40"}`}
+                        data-testid="button-ethics-project-mirror"
+                      >
+                        <div className="text-xs font-heading font-semibold mb-1">Mirror</div>
+                        <div className="text-[10px] font-mono text-muted-foreground">Automated Journal of AI Interpretability.</div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
                     2. Model Selection
@@ -557,11 +704,30 @@ export default function GenerationDashboard() {
                   <ModelSelector
                     value={modelConfig}
                     onChange={setModelConfig}
-                    rateLimitInfo={activeType === "editorial" ? editorialStatus : reviewStatus}
-                    limitLabel={activeType === "editorial" ? "editorial generations" : "review generations"}
+                    rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : reviewStatus}
+                    limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "ethics report generations" : "review generations"}
                     hasPlatformAccess={hasPlatformAccess}
                   />
                 </div>
+
+                {activeType === "ethics-report" && (
+                  <div>
+                    <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                      Keyword Filters (optional, comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={ethicsKeywords}
+                      onChange={(e) => setEthicsKeywords(e.target.value)}
+                      className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
+                      placeholder="e.g. citation, bias, replication"
+                      data-testid="input-ethics-keywords"
+                    />
+                    <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
+                      Restrict the audit to papers whose title or abstract matches any of these keywords. Leave empty to audit all available papers.
+                    </p>
+                  </div>
+                )}
 
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
@@ -591,23 +757,67 @@ export default function GenerationDashboard() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
-                    4. Topic
-                  </label>
-                  <input
-                    type="text"
-                    value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm focus:outline-none focus:border-primary/50"
-                    placeholder={activeType === "editorial"
-                      ? "Recent developments in AI agent-driven scientific research..."
-                      : "Enter a topic focus (optional)"}
-                    data-testid="input-topic"
-                  />
-                </div>
+                {activeType !== "ethics-report" && (
+                  <div>
+                    <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                      4. Topic
+                    </label>
+                    <input
+                      type="text"
+                      value={topic}
+                      onChange={(e) => setTopic(e.target.value)}
+                      className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm focus:outline-none focus:border-primary/50"
+                      placeholder={activeType === "editorial"
+                        ? "Recent developments in AI agent-driven scientific research..."
+                        : "Enter a topic focus (optional)"}
+                      data-testid="input-topic"
+                    />
+                  </div>
+                )}
+
+                {activeType === "ethics-report" && (
+                  <div>
+                    <button
+                      onClick={() => setEthicsPromptsExpanded(!ethicsPromptsExpanded)}
+                      className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest hover:text-muted-foreground transition-colors mb-2"
+                      data-testid="button-toggle-ethics-prompts"
+                    >
+                      {ethicsPromptsExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      5. Chain-of-Prompts (Part 1, 2, 3 — each editable)
+                    </button>
+                    {ethicsPromptsExpanded && (
+                      <div className="space-y-6">
+                        {[
+                          { idx: 1, label: "Part 1 — Paper-by-paper audit", value: ethicsPrompt1, set: setEthicsPrompt1, edited: ethicsPrompt1Edited, setEdited: setEthicsPrompt1Edited, dflt: defaultEthicsPrompts?.prompt1 },
+                          { idx: 2, label: "Part 2 — Systemic patterns & trajectory", value: ethicsPrompt2, set: setEthicsPrompt2, edited: ethicsPrompt2Edited, setEdited: setEthicsPrompt2Edited, dflt: defaultEthicsPrompts?.prompt2 },
+                          { idx: 3, label: "Part 3 — Consolidated flags & clearance", value: ethicsPrompt3, set: setEthicsPrompt3, edited: ethicsPrompt3Edited, setEdited: setEthicsPrompt3Edited, dflt: defaultEthicsPrompts?.prompt3 },
+                        ].map(p => (
+                          <div key={p.idx} className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-mono text-primary/80 uppercase tracking-widest">{p.label}{p.edited && <span className="ml-2 text-yellow-400/70">(edited)</span>}</span>
+                              <button
+                                onClick={() => { p.setEdited(false); if (p.dflt) p.set(p.dflt); }}
+                                className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                                data-testid={`button-reset-ethics-prompt-${p.idx}`}
+                              >
+                                <RotateCcw className="w-3 h-3" /> Reset
+                              </button>
+                            </div>
+                            <textarea
+                              value={p.value}
+                              onChange={(e) => { p.set(e.target.value); p.setEdited(true); }}
+                              className="w-full h-48 bg-background border border-border/50 px-4 py-3 text-xs text-foreground/70 resize-none focus:outline-none focus:border-primary/50 font-mono"
+                              data-testid={`input-ethics-prompt-${p.idx}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {activeType === "literature-review" && (
+                  <>
                   <div>
                     <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
                       Review Mode
@@ -642,9 +852,6 @@ export default function GenerationDashboard() {
                         : "Critically examines literature for weaknesses, flaws, and contradictions."}
                     </p>
                   </div>
-                )}
-
-                {activeType === "literature-review" && (
                   <div>
                     <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
                       Research Question <span className="text-red-400">*</span>
@@ -660,8 +867,10 @@ export default function GenerationDashboard() {
                       <p className="text-[10px] font-mono text-red-400 mt-1">Research question must be at least 10 characters.</p>
                     )}
                   </div>
+                  </>
                 )}
 
+                {activeType !== "ethics-report" && (
                 <div>
                   <button
                     onClick={() => setPromptExpanded(!promptExpanded)}
@@ -693,21 +902,23 @@ export default function GenerationDashboard() {
                     </div>
                   )}
                 </div>
+                )}
 
                 <div className="border-t border-border/30 pt-6">
                   <button
                     onClick={() => {
                       if (activeType === "editorial") generateEditorialMutation.mutate();
+                      else if (activeType === "ethics-report") generateEthicsMutation.mutate();
                       else generateReviewMutation.mutate();
                     }}
-                    disabled={activeType === "editorial" ? !canSubmitEditorial : !canSubmitReview}
+                    disabled={activeType === "editorial" ? !canSubmitEditorial : activeType === "ethics-report" ? !canSubmitEthics : !canSubmitReview}
                     className="px-8 py-3 bg-primary text-white font-mono text-sm tracking-widest hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(124,58,237,0.2)] hover:shadow-[0_0_30px_rgba(124,58,237,0.4)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none flex items-center gap-2"
                     data-testid="button-generate"
                   >
-                    {(editorialIsPending || reviewIsPending) ? (
+                    {(editorialIsPending || reviewIsPending || ethicsIsPending) ? (
                       <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</>
                     ) : (
-                      <>{activeType === "editorial" ? <PenTool className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />} Generate</>
+                      <>{activeType === "editorial" ? <PenTool className="w-4 h-4" /> : activeType === "ethics-report" ? <Info className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />} Generate</>
                     )}
                   </button>
 
@@ -721,9 +932,14 @@ export default function GenerationDashboard() {
                       Literature review submitted — generation in progress.
                     </p>
                   )}
-                  {(generateEditorialMutation.isError || generateReviewMutation.isError) && (
+                  {generateEthicsMutation.isSuccess && (
+                    <p className="text-[10px] font-mono text-green-400 mt-3" data-testid="text-success-ethics">
+                      Ethics report submitted — 3-part audit in progress. This may take several minutes.
+                    </p>
+                  )}
+                  {(generateEditorialMutation.isError || generateReviewMutation.isError || generateEthicsMutation.isError) && (
                     <p className="text-[10px] font-mono text-red-400 mt-3" data-testid="text-error">
-                      {((generateEditorialMutation.error || generateReviewMutation.error) as Error)?.message}
+                      {((generateEditorialMutation.error || generateReviewMutation.error || generateEthicsMutation.error) as Error)?.message}
                     </p>
                   )}
                 </div>
@@ -734,7 +950,7 @@ export default function GenerationDashboard() {
           <FadeIn className="mt-16">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-heading font-semibold">Recent Generations</h2>
-              {isAdmin && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0)) > 0 && (
+              {isAdmin && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0) + (recentEthics?.length ?? 0)) > 0 && (
                 <button
                   onClick={() => {
                     if (confirm("Clear all generation history? This cannot be undone.")) {
@@ -861,7 +1077,69 @@ export default function GenerationDashboard() {
                 </div>
               ))}
 
-              {(!recentEditorials?.length && !recentReviews?.length) && (
+              {(recentEthics || []).slice(0, 5).map((rep) => (
+                <div key={rep.id} className="border border-border/40 bg-muted/5 p-5" data-testid={`card-ethics-${rep.id}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <Info className="w-4 h-4 text-primary/60" />
+                      <span className="text-[10px] font-mono text-primary uppercase tracking-widest">Ethics Report</span>
+                      <StatusBadge status={rep.status} />
+                      {rep.clearanceStatus && (
+                        <span className="text-[10px] font-mono text-yellow-400/80 border border-yellow-400/20 px-2 py-0.5">
+                          {rep.clearanceStatus.replace(/_/g, " ")}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-mono text-muted-foreground/40">
+                      {new Date(rep.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <h3 className="font-heading font-semibold mb-1">
+                    {rep.status === "completed" ? (
+                      <Link href={`/ethics-reports/${rep.id}`} className="hover:text-primary transition-colors">
+                        {rep.reportTitle || rep.researchQuestion}
+                      </Link>
+                    ) : (
+                      rep.reportTitle || rep.researchQuestion
+                    )}
+                  </h3>
+                  {rep.keywords && rep.keywords.length > 0 && (
+                    <p className="text-[10px] font-mono text-muted-foreground/50">
+                      Filters: {rep.keywords.join(", ")}
+                    </p>
+                  )}
+
+                  {(rep.status === "pending" || rep.status === "generating") && (
+                    <div className="flex items-center gap-2 mt-3 text-xs font-mono text-primary/50">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Running 3-part audit...</span>
+                    </div>
+                  )}
+
+                  {rep.status === "completed" && (
+                    <div className="mt-3 flex items-center gap-4">
+                      <Link
+                        href={`/ethics-reports/${rep.id}`}
+                        className="text-[10px] font-mono text-primary hover:underline flex items-center gap-1"
+                        data-testid={`link-view-ethics-${rep.id}`}
+                      >
+                        View full report <ExternalLink className="w-3 h-3" />
+                      </Link>
+                      <button
+                        onClick={() => setShowMetadata(showMetadata === rep.id ? null : rep.id)}
+                        className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                        data-testid={`button-metadata-${rep.id}`}
+                      >
+                        <Info className="w-3 h-3" />
+                        {showMetadata === rep.id ? "Hide" : "Show"} metadata
+                      </button>
+                    </div>
+                  )}
+                  {showMetadata === rep.id && <MetadataPanel record={rep as unknown as LiteratureReviewRecord} />}
+                </div>
+              ))}
+
+              {(!recentEditorials?.length && !recentReviews?.length && !recentEthics?.length) && (
                 <div className="text-center py-12 border border-border/30 bg-muted/5">
                   <p className="text-muted-foreground font-mono text-sm">No generations yet.</p>
                   <p className="text-[10px] font-mono text-muted-foreground/40 mt-2">

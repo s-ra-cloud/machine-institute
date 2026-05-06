@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, type EthicsReport, type InsertEthicsReport, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys, ethicsReports } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lt, lte, inArray, and, notInArray } from "drizzle-orm";
 
@@ -60,6 +60,13 @@ export interface IStorage {
   storeUserApiKeyRecord(userId: string, provider: string, keyHash: string, expiresAt: Date): Promise<UserApiKey>;
   getUserApiKeyRecord(userId: string, provider: string): Promise<UserApiKey | null>;
   deleteExpiredApiKeys(): Promise<void>;
+
+  createEthicsReport(report: InsertEthicsReport): Promise<EthicsReport>;
+  getEthicsReportById(id: string): Promise<EthicsReport | undefined>;
+  getEthicsReportsByProject(projectId: string): Promise<EthicsReport[]>;
+  getAllEthicsReports(): Promise<EthicsReport[]>;
+  updateEthicsReport(id: string, updates: Partial<EthicsReport>): Promise<EthicsReport>;
+  deleteAllEthicsReports(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -388,6 +395,32 @@ export class DatabaseStorage implements IStorage {
     await db.delete(userApiKeys).where(lte(userApiKeys.expiresAt, new Date()));
   }
 
+  async createEthicsReport(report: InsertEthicsReport): Promise<EthicsReport> {
+    const [created] = await db.insert(ethicsReports).values(report).returning();
+    return created;
+  }
+
+  async getEthicsReportById(id: string): Promise<EthicsReport | undefined> {
+    const [row] = await db.select().from(ethicsReports).where(eq(ethicsReports.id, id));
+    return row;
+  }
+
+  async getEthicsReportsByProject(projectId: string): Promise<EthicsReport[]> {
+    return db.select().from(ethicsReports).where(eq(ethicsReports.projectId, projectId)).orderBy(desc(ethicsReports.createdAt));
+  }
+
+  async getAllEthicsReports(): Promise<EthicsReport[]> {
+    return db.select().from(ethicsReports).orderBy(desc(ethicsReports.createdAt));
+  }
+
+  async updateEthicsReport(id: string, updates: Partial<EthicsReport>): Promise<EthicsReport> {
+    const [updated] = await db.update(ethicsReports).set(updates).where(eq(ethicsReports.id, id)).returning();
+    return updated;
+  }
+
+  async deleteAllEthicsReports(): Promise<void> {
+    await db.delete(ethicsReports);
+  }
 }
 
 export const storage = new DatabaseStorage();
