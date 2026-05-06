@@ -988,17 +988,29 @@ I will now provide the papers.`;
     try {
       const user = (req as any).user;
       const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
-      if (PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+      const isPlatformMember = PLATFORM_ACCESS_EMAILS.includes(user.email);
+      const ethicsLimit = await storage.getUserRateLimit(user.id, "ethics-report");
+
+      if (isPlatformMember) {
+        const ethicsConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
+        const now = Date.now();
+        const ethicsRemaining = ethicsLimit
+          ? (now - ethicsLimit.windowStart.getTime() >= ethicsConfig.windowMs
+            ? ethicsConfig.max
+            : Math.max(0, ethicsConfig.max - ethicsLimit.count))
+          : ethicsConfig.max;
+        const ethicsResetAt = ethicsLimit
+          ? new Date(ethicsLimit.windowStart.getTime() + ethicsConfig.windowMs).toISOString()
+          : null;
         return res.json({
           editorial: { remaining: null, max: null, resetAt: null },
           "literature-review": { remaining: null, max: null, resetAt: null },
-          "ethics-report": { remaining: null, max: null, resetAt: null },
+          "ethics-report": { remaining: ethicsRemaining, max: ethicsConfig.max, resetAt: ethicsResetAt },
         });
       }
 
       const editorialLimit = await storage.getUserRateLimit(user.id, "editorial");
       const reviewLimit = await storage.getUserRateLimit(user.id, "literature-review");
-      const ethicsLimit = await storage.getUserRateLimit(user.id, "ethics-report");
       const editorialConfig = PER_USER_PLATFORM_LIMITS["editorial"];
       const reviewConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
       const ethicsConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
@@ -1695,12 +1707,10 @@ I will now provide the papers.`;
         if (!process.env.OPENROUTER_API_KEY) {
           return res.status(503).json({ error: "Ethics report generation is not configured. OPENROUTER_API_KEY is missing." });
         }
-        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-          const limitConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
-          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "ethics-report", limitConfig.max, limitConfig.windowMs);
-          if (!rateCheck.allowed) {
-            return res.status(429).json({ error: `Ethics report generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
-          }
+        const limitConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
+        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "ethics-report", limitConfig.max, limitConfig.windowMs);
+        if (!rateCheck.allowed) {
+          return res.status(429).json({ error: `Ethics report generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
         }
       }
 
