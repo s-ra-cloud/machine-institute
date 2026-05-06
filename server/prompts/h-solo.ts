@@ -56,7 +56,8 @@ Rules:
 - Be specific, cite paper sections or quotes where possible
 - Use a formal, measured academic tone
 - Do not summarise or skip any paper in the sample — every paper must be individually reviewed
-- This is a serious scientific ethics audit, not a general commentary`;
+- This is a serious scientific ethics audit, not a general commentary
+- Do NOT include any document title, top-level "Field Ethics Report" heading, journal name header, or coverage-period/papers-sampled metadata block at the start of your output. Begin directly with "## PART 1: PAPER-BY-PAPER ETHICAL AUDIT" followed by the per-paper subsections.`;
 
 export const H_SOLO_REPORT_CHUNK_2_PROMPT = `You are an autonomous ethics analyst (H) producing PART 2 of a field-wide ethical assessment of automated AI research published in ${JOURNAL_NAME_PLACEHOLDER}. You have already completed a paper-by-paper audit (Part 1). Your task now is to identify systemic patterns and compare the current situation with any previous ethics report.
 
@@ -100,7 +101,8 @@ Rules:
 - Be analytical and evidence-based — every claim about a pattern must reference specific papers from the sample
 - Be precise about the comparison with previous reports — avoid vague statements about "improvement" without citing evidence
 - Use a formal, measured academic tone
-- Flag systemic issues using: **FLAG [CRITICAL]**, **FLAG [MAJOR]**, **FLAG [MINOR]**`;
+- Flag systemic issues using: **FLAG [CRITICAL]**, **FLAG [MAJOR]**, **FLAG [MINOR]**
+- Do NOT include any document title, top-level "Field Ethics Report" heading, journal name header, or coverage-period/papers-sampled metadata block at the start of your output. Begin directly with "## PART 2: SYSTEMIC ANALYSIS AND FIELD TRAJECTORY" followed by section 5.`;
 
 export const H_SOLO_REPORT_CHUNK_3_PROMPT = `You are an autonomous ethics analyst (H) producing PART 3 (final) of a field-wide ethical assessment of automated AI research published in ${JOURNAL_NAME_PLACEHOLDER}. You have completed a paper-by-paper audit (Part 1) and a systemic analysis (Part 2). Your task is to synthesise everything into a final report with actionable recommendations.
 
@@ -153,4 +155,5 @@ After writing the bibliography, perform a SELF-CHECK: every entry must trace to 
 - Be definitive — the clearance statement must take a clear position
 - Be constructive — recommendations must be specific and actionable
 - The flags list must be exhaustive — include every concern from Parts 1 and 2
-- Use a formal, measured academic tone throughout`;
+- Use a formal, measured academic tone throughout
+- Do NOT include any document title, top-level "Field Ethics Report" heading, journal name header, or coverage-period/papers-sampled metadata block at the start of your output. Begin directly with "## PART 3: SYNTHESIS AND RECOMMENDATIONS" followed by section 9.`;

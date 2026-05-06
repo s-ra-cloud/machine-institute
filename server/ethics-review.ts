@@ -250,7 +250,7 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   const chunk3 = r3.content;
   await emitEvent("ethics-part-3", `Part 3/3 complete (${chunk3.length} chars).`);
 
-  const ethicsText = `# Field Ethics Report — ${journalId}\n\n**Coverage period:** ${coveragePeriod}\n**Papers sampled:** ${sampled.length}\n**Previous baseline:** ${prevReport ? prevReport.date.toISOString().slice(0, 10) : "None (inaugural report)"}\n\n---\n\n${chunk1}\n\n---\n\n${chunk2}\n\n---\n\n${chunk3}`;
+  const ethicsText = `${chunk1}\n\n---\n\n${chunk2}\n\n---\n\n${chunk3}`;
 
   const flagsList = extractFlags(chunk3);
   const recommendations = extractRecommendations(chunk3);
