@@ -199,7 +199,7 @@ export default function GenerationDashboard() {
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
   const [selectedJournal, setSelectedJournal] = useState<string>("mirror");
-  const [ethicsProjectId, setEthicsProjectId] = useState<string>("machine-psychology");
+  const ethicsProjectId = selectedJournal;
   const [ethicsKeywords, setEthicsKeywords] = useState<string>("");
   const [ethicsTopic, setEthicsTopic] = useState<string>("");
   const [, navigate] = useLocation();
@@ -685,32 +685,6 @@ export default function GenerationDashboard() {
                     </div>
                   </div>
                 </div>
-
-                {activeType === "ethics-report" && (
-                  <div>
-                    <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
-                      Project (paper log used as ethics audit sample)
-                    </label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => setEthicsProjectId("machine-psychology")}
-                        className={`p-4 border text-left transition-all ${ethicsProjectId === "machine-psychology" ? "border-primary bg-primary/10" : "border-border/50 bg-muted/5 hover:border-primary/40"}`}
-                        data-testid="button-ethics-project-machine-psychology"
-                      >
-                        <div className="text-xs font-heading font-semibold mb-1">Machine Psychology</div>
-                        <div className="text-[10px] font-mono text-muted-foreground">Primary corpus for the inaugural field ethics audit.</div>
-                      </button>
-                      <button
-                        onClick={() => setEthicsProjectId("mirror")}
-                        className={`p-4 border text-left transition-all ${ethicsProjectId === "mirror" ? "border-primary bg-primary/10" : "border-border/50 bg-muted/5 hover:border-primary/40"}`}
-                        data-testid="button-ethics-project-mirror"
-                      >
-                        <div className="text-xs font-heading font-semibold mb-1">Mirror</div>
-                        <div className="text-[10px] font-mono text-muted-foreground">Automated Journal of AI Interpretability.</div>
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 <div>
                   <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
