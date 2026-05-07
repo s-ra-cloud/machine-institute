@@ -159,7 +159,7 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   const fsPaperUrl = (docId: string | undefined | null): string =>
     docId ? `https://future-science.org/${initiativeSlug}/papers/${docId}` : "";
 
-  await emitEvent("ethics-init", `Starting field ethics report on ${journalId}${topic ? ` — topic "${topic}"` : ""} (${keywords.length} keyword filter(s)).`);
+  await emitEvent("ethics-init", `Starting field ethics report on ${journalDisplayName}${topic ? ` — topic "${topic}"` : ""} (${keywords.length} keyword filter(s)).`);
 
   // Sample sources: project_papers (DB) + Future Science abstracts for the journal
   const projectPapers: ProjectPaper[] = await storage.getProjectPapers(projectId);

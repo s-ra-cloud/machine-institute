@@ -1745,7 +1745,7 @@ I will now provide the papers.`;
       const rawAgentId = agentId && agentId.includes("MachInstit") ? "H" : (agentId || "H");
       const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", rawAgentId);
       const effectiveTopic: string | null = typeof topic === "string" && topic.trim() ? topic.trim() : null;
-      const researchQuestion = `Field-level ethics audit of ${effectiveJournalId}${effectiveTopic ? ` — topic: ${effectiveTopic}` : ""}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
+      const researchQuestion = `Field-level ethics audit of ${getJournalDisplayName(effectiveJournalId)}${effectiveTopic ? ` — topic: ${effectiveTopic}` : ""}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
 
       const modelConfig: ModelProviderConfig = {
         providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
