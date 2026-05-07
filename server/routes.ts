@@ -997,28 +997,18 @@ I will now provide the papers.`;
       const user = (req as any).user;
       const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
       const isPlatformMember = PLATFORM_ACCESS_EMAILS.includes(user.email);
-      const ethicsLimit = await storage.getUserRateLimit(user.id, "ethics-report");
 
       if (isPlatformMember) {
-        const ethicsConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
-        const now = Date.now();
-        const ethicsRemaining = ethicsLimit
-          ? (now - ethicsLimit.windowStart.getTime() >= ethicsConfig.windowMs
-            ? ethicsConfig.max
-            : Math.max(0, ethicsConfig.max - ethicsLimit.count))
-          : ethicsConfig.max;
-        const ethicsResetAt = ethicsLimit
-          ? new Date(ethicsLimit.windowStart.getTime() + ethicsConfig.windowMs).toISOString()
-          : null;
         return res.json({
           editorial: { remaining: null, max: null, resetAt: null },
           "literature-review": { remaining: null, max: null, resetAt: null },
-          "ethics-report": { remaining: ethicsRemaining, max: ethicsConfig.max, resetAt: ethicsResetAt },
+          "ethics-report": { remaining: null, max: null, resetAt: null },
         });
       }
 
       const editorialLimit = await storage.getUserRateLimit(user.id, "editorial");
       const reviewLimit = await storage.getUserRateLimit(user.id, "literature-review");
+      const ethicsLimit = await storage.getUserRateLimit(user.id, "ethics-report");
       const editorialConfig = PER_USER_PLATFORM_LIMITS["editorial"];
       const reviewConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
       const ethicsConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
@@ -1097,12 +1087,14 @@ I will now provide the papers.`;
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
 
-      const clientIp = req.ip || "unknown";
-      const lastRequest = reviewRateLimit.get(clientIp) || 0;
-      if (Date.now() - lastRequest < 30000) {
-        return res.status(429).json({ error: "Please wait at least 30 seconds between review requests." });
+      if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        const clientIp = req.ip || "unknown";
+        const lastRequest = reviewRateLimit.get(clientIp) || 0;
+        if (Date.now() - lastRequest < 30000) {
+          return res.status(429).json({ error: "Please wait at least 30 seconds between review requests." });
+        }
+        reviewRateLimit.set(clientIp, Date.now());
       }
-      reviewRateLimit.set(clientIp, Date.now());
 
       const defaultPrompt = (agentId && agentId.includes("aLR")) ? DEFAULT_ALR_PROMPT : DEFAULT_BLR_PROMPT;
       const rawAgentId = agentId && agentId.includes("MachInstit") ? (agentId.includes("aLR") ? "aLR" : "bLR") : (agentId || "bLR");
@@ -1719,10 +1711,12 @@ I will now provide the papers.`;
         if (!process.env.OPENROUTER_API_KEY) {
           return res.status(503).json({ error: "Ethics report generation is not configured. OPENROUTER_API_KEY is missing." });
         }
-        const limitConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
-        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "ethics-report", limitConfig.max, limitConfig.windowMs);
-        if (!rateCheck.allowed) {
-          return res.status(429).json({ error: `Ethics report generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
+        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+          const limitConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
+          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "ethics-report", limitConfig.max, limitConfig.windowMs);
+          if (!rateCheck.allowed) {
+            return res.status(429).json({ error: `Ethics report generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
+          }
         }
       }
 
@@ -1735,12 +1729,14 @@ I will now provide the papers.`;
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
 
-      const clientIp = req.ip || "unknown";
-      const last = ethicsRateLimit.get(clientIp) || 0;
-      if (Date.now() - last < 30000) {
-        return res.status(429).json({ error: "Please wait at least 30 seconds between ethics report requests." });
+      if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        const clientIp = req.ip || "unknown";
+        const last = ethicsRateLimit.get(clientIp) || 0;
+        if (Date.now() - last < 30000) {
+          return res.status(429).json({ error: "Please wait at least 30 seconds between ethics report requests." });
+        }
+        ethicsRateLimit.set(clientIp, Date.now());
       }
-      ethicsRateLimit.set(clientIp, Date.now());
 
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
       const effectiveKeywords: string[] = Array.isArray(keywords)
