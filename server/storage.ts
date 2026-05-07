@@ -64,6 +64,7 @@ export interface IStorage {
   createEthicsReport(report: InsertEthicsReport): Promise<EthicsReport>;
   getEthicsReportById(id: string): Promise<EthicsReport | undefined>;
   getEthicsReportsByProject(projectId: string): Promise<EthicsReport[]>;
+  getCompletedEthicsReportsByJournal(journalId: string): Promise<EthicsReport[]>;
   getAllEthicsReports(): Promise<EthicsReport[]>;
   updateEthicsReport(id: string, updates: Partial<EthicsReport>): Promise<EthicsReport>;
   deleteAllEthicsReports(): Promise<void>;
@@ -407,6 +408,12 @@ export class DatabaseStorage implements IStorage {
 
   async getEthicsReportsByProject(projectId: string): Promise<EthicsReport[]> {
     return db.select().from(ethicsReports).where(eq(ethicsReports.projectId, projectId)).orderBy(desc(ethicsReports.createdAt));
+  }
+
+  async getCompletedEthicsReportsByJournal(journalId: string): Promise<EthicsReport[]> {
+    return db.select().from(ethicsReports)
+      .where(and(eq(ethicsReports.journalId, journalId), eq(ethicsReports.status, "completed")))
+      .orderBy(desc(ethicsReports.createdAt));
   }
 
   async getAllEthicsReports(): Promise<EthicsReport[]> {

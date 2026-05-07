@@ -33,7 +33,8 @@ export interface EthicsReviewOutput {
   reportTitle: string;
   reportAbstract: string;
   durationSeconds: number;
-  papersUsed: { title: string; authors: string; date: string }[];
+  papersUsed: { title: string; authors: string; date: string; documentId?: string }[];
+  auditedPaperIds: string[];
 }
 
 export function extractFlags(ethicsText: string): EthicsFlag[] {
@@ -176,53 +177,57 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
 
   const prevReport = await buildPrevReport(projectId, journalId);
 
-  const seen = new Set<string>();
+  // Global deduplication: collect IDs of every paper already audited in any prior completed report for this journal (across all users/projects).
+  const priorReports = await storage.getCompletedEthicsReportsByJournal(journalId);
+  const previouslyAudited = new Set<string>();
+  for (const r of priorReports) {
+    for (const id of r.auditedPaperIds || []) {
+      if (id) previouslyAudited.add(id);
+    }
+  }
+  const isAlreadyAudited = (documentId: string | undefined | null, title: string): boolean => {
+    if (documentId && previouslyAudited.has(`doc:${documentId}`)) return true;
+    if (title && previouslyAudited.has(`title:${title.toLowerCase().trim()}`)) return true;
+    return false;
+  };
+
   type SamplePaper = { title: string; authors: string; date: string; abstract: string; url: string; documentId?: string };
-  function buildSample(applyCutoff: boolean): SamplePaper[] {
-    const cutoff = applyCutoff ? (prevReport?.date || null) : null;
-    const localSeen = new Set<string>();
-    const out: SamplePaper[] = [];
-    for (const p of filteredProj) {
-      const key = p.title.toLowerCase().trim();
-      if (localSeen.has(key)) continue;
-      if (cutoff && p.date && new Date(p.date) <= cutoff) continue;
-      localSeen.add(key);
-      const url = p.url || fsPaperUrl(p.sourceDocumentId);
-      out.push({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url, documentId: p.sourceDocumentId || undefined });
-    }
-    for (const a of filteredFs) {
-      const key = a.title.toLowerCase().trim();
-      if (localSeen.has(key)) continue;
-      if (cutoff && a.date && new Date(a.date) <= cutoff) continue;
-      localSeen.add(key);
-      out.push({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId });
-    }
-    return out;
+  const localSeen = new Set<string>();
+  const sample: SamplePaper[] = [];
+  let skippedAlreadyAudited = 0;
+  for (const p of filteredProj) {
+    const key = p.title.toLowerCase().trim();
+    if (localSeen.has(key)) continue;
+    if (isAlreadyAudited(p.sourceDocumentId, p.title)) { skippedAlreadyAudited++; continue; }
+    localSeen.add(key);
+    const url = p.url || fsPaperUrl(p.sourceDocumentId);
+    sample.push({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url, documentId: p.sourceDocumentId || undefined });
+  }
+  for (const a of filteredFs) {
+    const key = a.title.toLowerCase().trim();
+    if (localSeen.has(key)) continue;
+    if (isAlreadyAudited(a.documentId, a.title)) { skippedAlreadyAudited++; continue; }
+    localSeen.add(key);
+    sample.push({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId });
   }
 
-  let sample = buildSample(true);
-  let cutoffWasRelaxed = false;
-  if (sample.length === 0 && prevReport) {
-    sample = buildSample(false);
-    if (sample.length > 0) {
-      cutoffWasRelaxed = true;
-      await emitEvent("ethics-cutoff-relaxed", `No new papers since previous report (${prevReport.date.toISOString().slice(0, 10)}); auditing the full keyword-matched corpus instead.`);
-    }
+  if (skippedAlreadyAudited > 0) {
+    await emitEvent("ethics-dedup", `Excluded ${skippedAlreadyAudited} paper(s) already audited in prior ethics reports for this journal (global deduplication).`);
   }
-  void seen;
 
   if (sample.length === 0) {
+    if (previouslyAudited.size > 0) {
+      throw new Error(`All papers matching the selected keywords for this journal have already been audited in prior ethics reports (${previouslyAudited.size} previously audited paper(s) excluded). Wait for new publications or broaden the keywords.`);
+    }
     throw new Error("No papers matched the selected keywords for this journal. Try broadening the keywords or removing them.");
   }
 
   const TARGET = Math.min(sample.length, 35);
   const sampled = sample.slice(0, TARGET);
 
-  const coveragePeriod = prevReport && !cutoffWasRelaxed
-    ? `${prevReport.date.toISOString().slice(0, 10)} to ${new Date().toISOString().slice(0, 10)}`
-    : prevReport && cutoffWasRelaxed
-      ? `Full corpus re-audit (no new papers since ${prevReport.date.toISOString().slice(0, 10)}; previous report retained as baseline)`
-      : `Inaugural assessment (all available publications up to ${new Date().toISOString().slice(0, 10)})`;
+  const coveragePeriod = prevReport
+    ? `${prevReport.date.toISOString().slice(0, 10)} to ${new Date().toISOString().slice(0, 10)} (papers not audited in any prior report)`
+    : `Inaugural assessment (all available publications up to ${new Date().toISOString().slice(0, 10)})`;
 
   await emitEvent("ethics-sample", `Sampled ${sampled.length} paper(s) for audit (${projectPapers.length} project log + ${fsAbstracts.length} FS) covering ${coveragePeriod}.`);
 
@@ -298,11 +303,19 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   const comparisonNote = prevReport
     ? ` This report compares findings against a previous assessment dated ${prevReport.date.toISOString().slice(0, 10)} to evaluate whether ethical standards have improved, worsened, or remained stable.`
     : " This is the inaugural field ethics assessment for this journal.";
-  const reportAbstract = `This report presents a systematic field-level ethical assessment of ${journalId} research. A total of ${sampled.length} studies (covering ${coveragePeriod}) were audited for six ethical concern categories: evidentiary weakness, citation integrity, overinterpretation of model behaviour, inflated novelty claims, anthropomorphic framing, and methodological opacity.${comparisonNote} The audit identified ${flagsList.length} ethical concern(s): ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall field clearance status: ${clearanceStatus.replace(/_/g, " ")}.`;
+  const reportAbstract = `This report presents a systematic field-level research-ethics audit of ${journalDisplayName}. A total of ${sampled.length} studies (covering ${coveragePeriod}) were audited across eight ethics categories: citation fraud, data fabrication, selective reporting, plagiarism, undisclosed conflicts of interest or AI involvement, replication-blocking non-disclosure, scope misrepresentation, and irresponsible safety disclosure.${comparisonNote} The audit identified ${flagsList.length} ethics concern(s): ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall field clearance status: ${clearanceStatus.replace(/_/g, " ")}.`;
+
+  // Stable identifiers for global deduplication on the next run. We store both the documentId (when available) and a normalised title key as a fallback so project-log papers without a FS link are also tracked.
+  const auditedPaperIds: string[] = [];
+  for (const p of sampled) {
+    if (p.documentId) auditedPaperIds.push(`doc:${p.documentId}`);
+    auditedPaperIds.push(`title:${p.title.toLowerCase().trim()}`);
+  }
 
   return {
     ethicsText, chunk1, chunk2, chunk3, flagsList, recommendations,
     clearanceStatement, clearanceStatus, reportTitle, reportAbstract, durationSeconds,
-    papersUsed: sampled.map(p => ({ title: p.title, authors: p.authors, date: p.date })),
+    papersUsed: sampled.map(p => ({ title: p.title, authors: p.authors, date: p.date, documentId: p.documentId })),
+    auditedPaperIds,
   };
 }

@@ -306,6 +306,7 @@ export const ethicsReports = pgTable("ethics_reports", {
   publishedDocumentId: text("published_document_id"),
   promptTrace: text("prompt_trace"),
   sourceTrace: text("source_trace"),
+  auditedPaperIds: text("audited_paper_ids").array().notNull().default(sql`ARRAY[]::text[]`),
 });
 
 export const insertEthicsReportSchema = createInsertSchema(ethicsReports).omit({

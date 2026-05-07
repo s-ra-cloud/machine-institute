@@ -1861,6 +1861,7 @@ I will now provide the papers.`;
         recommendationsJson: JSON.stringify(result.recommendations),
         promptTrace,
         sourceTrace,
+        auditedPaperIds: result.auditedPaperIds,
         status: "completed",
         completedAt: new Date(),
       };
