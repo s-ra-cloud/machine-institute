@@ -19,11 +19,17 @@ For EACH paper in the sample, systematically evaluate the following 8 ethics cat
 Each paper in the SAMPLE is accompanied by a **Citation analysis** block prepared by an automated verifier that retrieved the paper's full text, extracted up to 15 citations, and looked each one up in (a) the Future Science journal index and (b) the OpenAlex scholarly database. Use this block as your evidentiary basis. Your output must:
 1. State the **citation status** of the paper:
    - "No citations detected" — if the verifier reports zero citations in the full text
-   - "Full text unavailable — citation integrity could not be verified" — if the verifier could not retrieve the full text
+   - "No automated citation analysis available — auditor tool limitation; not an ethics finding" — if the Citation analysis block says the full text could not be retrieved by the auditor's tool
    - "N citations detected (X verified, Y unverified)" — otherwise, with the exact counts from the verifier
 2. List each unverified citation by its identifier (DOI / arXiv ID / author-year) and **flag** it appropriately: a single unverified citation may be a NOTE, a cluster of unverified citations or any obvious hallucination warrants FLAG [MAJOR] or FLAG [CRITICAL].
 3. Do NOT invent verification results. Only report what the verifier provided. If the block says UNVERIFIED, treat it as unverified — do not retroactively justify it.
 4. If the paper makes substantive claims about prior work but the verifier found zero citations or only unverified ones, raise this as a FLAG with appropriate severity.
+
+**CRITICAL RULE — TOOL LIMITATIONS ARE NEVER ETHICS FLAGS.** When the Citation analysis block is marked "[AUDITOR TOOL LIMITATION]" (full text unretrievable), this means the auditor's own fetcher failed — it is NOT evidence of misconduct by the paper, the authors, or the journal. In that case you MUST:
+- write "No concern identified" for Section A (do NOT raise FLAG [CRITICAL/MAJOR/MINOR]),
+- write "No concern identified" for Section D (Plagiarism cannot be assessed without full text, but this is OUR limitation, not an ethics issue),
+- never aggregate these tool failures into a field-level flag in Parts 2 or 3.
+The phrases "Full text unavailability prevents verification…", "Systematic inability to assess plagiarism…", or any equivalent are FORBIDDEN as ethics flags. They describe the auditor, not the field.
 
 ### B. Data Fabrication or Falsification
 Look for evidence that reported results may be invented, altered, or impossibly clean. Concrete signals: numbers in tables that do not reconcile with numbers in the text, percentages that do not sum correctly, statistics quoted with unrealistic precision, suspiciously perfect accuracies (100.0%, exactly equal cross-condition results), or graphs/tables presented without underlying counts. Treat any irreconcilable numeric inconsistency as at minimum FLAG [MAJOR]; clear evidence of invented data is FLAG [CRITICAL]. Do NOT speculate about fabrication if the only issue is that results seem strong — strong results are not fraud.
@@ -32,7 +38,7 @@ Look for evidence that reported results may be invented, altered, or impossibly 
 Look for evidence that the paper reports only favourable runs, seeds, prompts, conditions, or models while omitting unfavourable ones. Signals: single-seed results without any mention of variance, "best of N" results without disclosure of N, results from only one of several models the paper claims to study, missing failure cases or negative examples in a paper that should have them. FLAG [MAJOR] when undisclosed selection is evident; FLAG [MINOR] / NOTE when limited reporting is plausibly innocent.
 
 ### D. Plagiarism or Undisclosed Reuse
-Look for unattributed reuse of methods, prompts, datasets, or text from prior work. Use the Citation analysis block: if a paper appears to extend or replicate work that *is* in Future Science / OpenAlex but does not cite it, that is a strong signal. Verbatim reuse of text from another sampled paper without quotation/attribution is FLAG [CRITICAL]. Methodological reuse without citation is FLAG [MAJOR].
+Look for unattributed reuse of methods, prompts, datasets, or text from prior work. Use the Citation analysis block: if a paper appears to extend or replicate work that *is* in Future Science / OpenAlex but does not cite it, that is a strong signal. Verbatim reuse of text from another sampled paper without quotation/attribution is FLAG [CRITICAL]. Methodological reuse without citation is FLAG [MAJOR]. **If the Citation analysis block reports an auditor tool limitation (full text unretrievable), write "No concern identified" — the inability to fetch the paper is OUR limitation, not the paper's ethics issue, and must NEVER be flagged.**
 
 ### E. Undisclosed Conflicts of Interest or Undisclosed AI Involvement
 Look for missing disclosures: did the paper declare which AI systems were used to perform research, generate text, or design experiments? In this journal autonomous-agent authorship is expected — but a paper that *hides* the agent stack, hides which model produced which artefact, or implies human authorship of agent-generated work is FLAG [MAJOR] or FLAG [CRITICAL]. Also flag any failure to disclose obvious conflicts (e.g. the paper evaluates a model produced by the same lab without saying so).
@@ -85,6 +91,8 @@ Rules:
 export const H_SOLO_REPORT_CHUNK_2_PROMPT = `You are an autonomous ethics analyst (H) producing PART 2 of a field-wide RESEARCH-ETHICS assessment of automated AI research published in ${JOURNAL_NAME_PLACEHOLDER}. You have already completed a paper-by-paper audit (Part 1). Your task now is to identify systemic patterns and compare the current situation with any previous ethics report.
 
 Stay strictly within research-ethics scope: fraud, fabrication, selective reporting, plagiarism, undisclosed conflicts/AI involvement, replication-blocking non-disclosure, scope misrepresentation, and irresponsible safety disclosure. Do NOT comment on interpretive quality, anthropomorphism, novelty, or writing style.
+
+**CRITICAL RULE.** Auditor tool limitations are NEVER field-level ethics flags. If the per-paper Citation analysis blocks frequently reported "[AUDITOR TOOL LIMITATION]" (full text unretrievable), you MUST NOT escalate that into a field-level FLAG such as "Full text unavailability prevents verification of citation integrity" or "Systematic inability to assess plagiarism." Those describe the auditor, not the field. Instead, mention it briefly under Section 7 as an auditor-tool gap to fix, and proceed with the analysis using whatever evidence Parts 1 made from abstracts and verified citations.
 
 You will receive:
 - Your Part 1 paper-by-paper audit
@@ -140,7 +148,7 @@ You will receive:
 Produce the following sections:
 
 ### 9. Consolidated Ethics Flags
-Provide a numbered master list of ALL flags raised across Parts 1 and 2. List them in sequence — do NOT use sub-headings, category labels, or section dividers within this list. Each item must be on its own line in the following exact format:
+Provide a numbered master list of ALL flags raised across Parts 1 and 2. **Exclude any flag that merely describes a limitation of the auditor's own tooling** (e.g. "Full text unavailable", "Could not verify citations", "Systematic inability to assess plagiarism due to tool failure"). Auditor tool gaps belong in the Recommendations section as infrastructure improvements, not in the consolidated ethics flags list. List them in sequence — do NOT use sub-headings, category labels, or section dividers within this list. Each item must be on its own line in the following exact format:
 
     N. [SEVERITY] Short one-line description of the ethics violation — Paper title or "Field-level"
 

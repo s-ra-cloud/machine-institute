@@ -238,7 +238,7 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   for (const p of sampled) {
     let fullText: string | null = null;
     if (p.documentId) {
-      fullText = await fetchFsPaperContent(p.documentId);
+      fullText = await fetchFsPaperContent(p.documentId, initiativeSlug);
     }
     const sourceText = fullText && fullText.length > 200 ? fullText : "";
     if (sourceText) {

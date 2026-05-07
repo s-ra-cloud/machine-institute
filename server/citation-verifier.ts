@@ -39,33 +39,63 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-export async function fetchFsPaperContent(documentId: string): Promise<string | null> {
+function deepFindLongString(node: unknown, minLen: number, depth = 0): string | null {
+  if (depth > 6 || node == null) return null;
+  if (typeof node === "string") return node.length >= minLen ? node : null;
+  if (Array.isArray(node)) {
+    for (const v of node) {
+      const r = deepFindLongString(v, minLen, depth + 1);
+      if (r) return r;
+    }
+    return null;
+  }
+  if (typeof node === "object") {
+    const obj = node as Record<string, unknown>;
+    const preferred = ["content", "contentMarkdown", "contentHtml", "body", "bodyHtml", "markdown", "html", "text", "fullText", "documentContent", "richContent"];
+    for (const k of preferred) {
+      if (k in obj) {
+        const r = deepFindLongString(obj[k], minLen, depth + 1);
+        if (r) return r;
+      }
+    }
+    for (const k of Object.keys(obj)) {
+      if (preferred.includes(k)) continue;
+      const r = deepFindLongString(obj[k], minLen, depth + 1);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+export async function fetchFsPaperContent(documentId: string, slug: string = "mirror"): Promise<string | null> {
   if (!documentId) return null;
   const candidates = [
-    `${FS_API_BASE}/contributions/${encodeURIComponent(documentId)}`,
+    `https://future-science.org/${slug}/papers/${encodeURIComponent(documentId)}`,
     `${FS_API_BASE}/public/contributions/${encodeURIComponent(documentId)}`,
+    `${FS_API_BASE}/contributions/${encodeURIComponent(documentId)}`,
   ];
   for (const url of candidates) {
     try {
-      const resp = await fetch(url);
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 8000);
+      const resp = await fetch(url, {
+        headers: { "User-Agent": "MachineInstitute-EthicsAuditor", "Accept": "text/html,application/json" },
+        signal: ctrl.signal,
+      });
+      clearTimeout(timeout);
       if (!resp.ok) continue;
-      const json: unknown = await resp.json();
-      const root = (json && typeof json === "object" ? (json as Record<string, unknown>) : {});
-      const data = (root.data && typeof root.data === "object" ? root.data as Record<string, unknown> : root);
-      const candidatesText = [
-        data.content,
-        data.contentMarkdown,
-        data.contentHtml,
-        data.body,
-        data.markdown,
-        data.html,
-        data.text,
-      ];
-      for (const c of candidatesText) {
-        if (typeof c === "string" && c.length > 50) {
-          return c.includes("<") ? stripHtml(c) : c;
-        }
+      const ctype = (resp.headers.get("content-type") || "").toLowerCase();
+      if (ctype.includes("application/json")) {
+        const json: unknown = await resp.json();
+        const found = deepFindLongString(json, 200);
+        if (found) return found.includes("<") ? stripHtml(found) : found;
+        continue;
       }
+      const html = await resp.text();
+      if (!html || html.length < 200) continue;
+      const stripped = stripHtml(html);
+      // The page shell alone is short; require enough content to look like a paper body.
+      if (stripped.length >= 800) return stripped;
     } catch {
       // try next
     }
@@ -203,7 +233,7 @@ export async function verifyCitations(citations: ExtractedCitation[], fsAbstract
 
 export function formatVerificationReport(v: PaperVerification): string {
   if (!v.hadFullText) {
-    return `**Citation analysis:** Full text not available — only the abstract was retrievable. Section B must explicitly note this limitation and that no automated citation verification could be performed.`;
+    return `**Citation analysis:** [AUDITOR TOOL LIMITATION] The auditor's automated full-text fetcher could not retrieve this paper's body content from Future Science. Only the abstract is available. THIS IS AN INTERNAL LIMITATION OF THE AUDITING TOOL — IT IS NOT EVIDENCE OF MISCONDUCT BY THE PAPER, ITS AUTHORS, OR THE JOURNAL. Do NOT raise any FLAG (CRITICAL, MAJOR, or MINOR) under Section A (Citation Fraud) or Section D (Plagiarism) on the basis of this limitation. Write exactly: "No automated citation analysis available — auditor tool limitation; not an ethics finding." and move on. Other categories (B/C/E/F/G/H) may still be assessed from the abstract where evidence exists.`;
   }
   if (v.citations.length === 0) {
     return `**Citation analysis:** Full text retrieved. Zero citations to external works detected. Section B must note this explicitly (the paper makes no verifiable references).`;
