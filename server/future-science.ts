@@ -101,7 +101,10 @@ export async function submitLiteratureReviewToFutureScience(
       metadata.researchOrchestrator = options.orchestratorName;
     }
     if (options.agentDescription) {
-      metadata.agentDescription = options.agentDescription;
+      const MAX_AGENT_DESC = 500;
+      metadata.agentDescription = options.agentDescription.length > MAX_AGENT_DESC
+        ? options.agentDescription.slice(0, MAX_AGENT_DESC - 1).trimEnd() + "…"
+        : options.agentDescription;
     }
 
     console.log("Future Science literature review api-bot payload fields:", {
@@ -166,27 +169,8 @@ interface EthicsReportSubmitOptions {
   linkOriginalContribution?: string;
 }
 
-// FS api-bots is currently rejecting most ethics-flavoured types with a generic
-// 500 "Failed to create contribution". The only type we have empirically seen
-// succeed via api-bots in production is "Literature review" (used by the LR
-// pipeline). We keep the ethics-specific types at the head of each chain so we
-// honour FS's preferred labelling when it's available, but fall through to
-// "Literature review" as a guaranteed-acceptable last resort so the audit at
-// least gets onto FS instead of being silently lost.
-const ETHICS_TYPE_FALLBACKS_FIELD = [
-  "Ethics report",
-  "Ethics commentary",
-  "Commentary",
-  "Editorial",
-  "Unreviewed manuscript",
-  "Other",
-  "Article",
-  "Literature review",
-];
-const ETHICS_TYPE_FALLBACKS_RESPONSE = [
-  "Response to a contribution",
-  ...ETHICS_TYPE_FALLBACKS_FIELD,
-];
+const ETHICS_TYPE_FALLBACKS_FIELD = ["Unreviewed manuscript", "Other", "Article"];
+const ETHICS_TYPE_FALLBACKS_RESPONSE = ["Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
 
 export async function submitEthicsReportToFutureScience(
   options: EthicsReportSubmitOptions,
@@ -218,7 +202,16 @@ export async function submitEthicsReportToFutureScience(
     isMarkdown: true,
   };
   if (options.orchestratorName) baseMetadata.researchOrchestrator = options.orchestratorName;
-  if (options.agentDescription) baseMetadata.agentDescription = options.agentDescription;
+  if (options.agentDescription) {
+    // FS / Strapi appears to enforce a length cap on agentDescription; long
+    // strings cause the api-bots endpoint to return a generic 500 "Failed to
+    // create contribution". Truncate defensively to stay well under any
+    // typical Strapi text-field limit.
+    const MAX_AGENT_DESC = 500;
+    baseMetadata.agentDescription = options.agentDescription.length > MAX_AGENT_DESC
+      ? options.agentDescription.slice(0, MAX_AGENT_DESC - 1).trimEnd() + "…"
+      : options.agentDescription;
+  }
   if (options.linkOriginalContribution) {
     baseMetadata.linkOriginalContribution = options.linkOriginalContribution;
   }
@@ -336,7 +329,9 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
       payload.metadata = {
         generatedBy: "Machine Institute AI Pipeline",
         orchestratorName: options.metadata.orchestratorName,
-        agentDescription: options.metadata.agentDescription,
+        agentDescription: options.metadata.agentDescription && options.metadata.agentDescription.length > 500
+          ? options.metadata.agentDescription.slice(0, 499).trimEnd() + "…"
+          : options.metadata.agentDescription,
         topic: options.metadata.topic,
         modelProvider: options.metadata.modelProvider,
         modelName: options.metadata.modelName,
