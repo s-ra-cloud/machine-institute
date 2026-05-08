@@ -295,10 +295,7 @@ Bullet list of every flag raised above, in the form \`FLAG [SEVERITY] — <categ
 3–8 specific, actionable recommendations to the authors / journal.
 
 ### L. Clearance Statement
-One paragraph (≤200 words) that ends with EXACTLY one of: "Overall paper clearance: CLEARED", "Overall paper clearance: CLEARED WITH CONDITIONS", or "Overall paper clearance: NOT CLEARED".
-
-### M. Bibliography
-List every external work referenced in your audit (NOT the citations IN the paper — only works YOU cited in your audit). Use Chicago author-date.
+One paragraph (≤200 words) that ends with EXACTLY one of: "Overall paper clearance: CLEARED", "Overall paper clearance: CLEARED WITH CONDITIONS", or "Overall paper clearance: NOT CLEARED". This is the FINAL section of the report — do NOT emit any further headings, bibliography, appendices, or trailing notes after the clearance line. The external works you consulted are already enumerated in the Citation analysis and Link analysis blocks; do not restate them.
 
 ## Style
 - Formal, measured academic tone.

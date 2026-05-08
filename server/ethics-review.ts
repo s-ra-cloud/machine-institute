@@ -97,8 +97,14 @@ export function extractRecommendations(ethicsText: string): string[] {
 }
 
 export function extractClearanceStatement(ethicsText: string): string {
-  const section = ethicsText.match(/###?\s*(?:11\.?\s*)?(?:Overall Assessment and\s*)?Clearance Statement([\s\S]*?)(?=###?\s*Bibliography|###?\s*\d|$)/i);
-  if (section && section[1].trim().length > 10) return section[1].trim().slice(0, 2000);
+  const section = ethicsText.match(/###?\s*(?:11\.?\s*)?(?:L\.?\s*)?(?:Overall Assessment and\s*)?Clearance Statement([\s\S]*?)(?=###?\s+(?:[A-Z]\.|\d+\.?|Bibliography|Appendix|Notes?)\b|$)/i);
+  if (section && section[1].trim().length > 10) {
+    let text = section[1].trim();
+    const cutoff = text.search(/\n\s*###?\s+/);
+    if (cutoff > 50) text = text.slice(0, cutoff).trim();
+    text = text.replace(/\*+\s*\.?\s*###?\s+[A-Z]\..*$/s, "").trim();
+    return text.slice(0, 2000);
+  }
   const fallback = ethicsText.match(/(?:CLEARED|NOT.CLEARED|CLEARED.WITH.CONDITIONS)[^\n]*\n?([\s\S]{100,800}?)(?=\n##|\n\*\*|$)/i);
   if (fallback) return fallback[0].trim().slice(0, 2000);
   return "Ethics clearance status could not be determined from the analysis.";
