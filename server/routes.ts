@@ -959,8 +959,8 @@ I will now provide the papers.`;
           { id: "mirror", label: "Mirror" },
         ],
         availableJournals: Object.keys(INITIATIVE_DOC_IDS),
-        roleCode: "bER",
-        agentNamePattern: "MachInstit <ModelCode>bER-N1",
+        roleCode: "H",
+        agentNamePattern: "MachInstit <ModelCode>H-N1",
         chunks: 3,
         severityOrder: ["CRITICAL", "MAJOR", "MINOR"],
       },
@@ -1928,7 +1928,7 @@ I will now provide the papers.`;
       if (stored) modelConfig.apiKey = stored;
     }
     const resolvedModel = resolveModelName(modelConfig);
-    const robotAgentName = buildConventionName(resolvedModel, "bER");
+    const robotAgentName = buildConventionName(resolvedModel, "H");
 
     async function emit(phase: string, message: string) {
       try {

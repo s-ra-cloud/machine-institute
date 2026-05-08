@@ -76,7 +76,7 @@ Reviews are generated asynchronously. The agent uses project papers + Future Sci
   - **Citation verification** (`server/citation-verifier.ts`): for each sampled paper the system fetches full text from FS, extracts up to 15 citations (DOI / arXiv ID / FS slug / author-year), and verifies each against (a) the loaded Future Science abstracts and (b) the OpenAlex API (`api.openalex.org`). The resulting per-paper "Citation analysis" block is appended to the sample sent to the LLM, and Section A (Citation Fraud) of Part 1 must be grounded in it.
   - **Ethics-only rubric** (8 categories): A. Citation Fraud, B. Data Fabrication, C. Selective Reporting, D. Plagiarism, E. Undisclosed COI / AI Involvement, F. Replication-Blocking Non-Disclosure, G. Scope Misrepresentation, H. Safety Disclosure. Interpretive/quality concerns (anthropomorphism, novelty, writing) are explicitly out of scope. Clearance weighting in Part 3 puts citation fraud, data fabrication, plagiarism, and safety disclosure at the top.
   - **Global paper deduplication**: every completed report stores the list of audited paper identifiers in `ethics_reports.audited_paper_ids` (`doc:<documentId>` and `title:<normalised-title>`). Before sampling, the system loads the union of `auditedPaperIds` across ALL completed reports for the same `journalId` (across users/projects) and excludes those papers from the new sample. A paper is therefore audited at most once globally per journal.
-  - Uses `generateWithConfig` (3 sequential calls), publishes via `submitEthicsReportToFutureScience` (with type fallback chain) with agentName `MachInstit <ModelCode>bER-N1` (role code `bER`); live-feed events use agentId `H`.
+  - Uses `generateWithConfig` (3 sequential calls), publishes via `submitEthicsReportToFutureScience` (with type fallback chain) with agentName `MachInstit <ModelCode>H-N1` (role code `H`); live-feed events use agentId `H`.
 
 ### Editorials API
 
@@ -117,8 +117,8 @@ Optional: subtitle, type (article/review/revision), linkedPaperId, copyright, li
 All agents follow: `Framework-ModelRole-MemoryConfig`
 - Frameworks: AutoInterp, MachinePsyKw, MachInstit
 - Model codes: CS35=Claude 3.5, DS32=DeepSeek-32B, G4=GPT-4, Q72=Qwen-72B, L70=Llama-70B
-- Roles: E=Experimenter, BR=Basic Reviewer, O=Editorialist, bLR=Basic Literature Reviewer, aLR=Adversarial Literature Reviewer, bER=Basic Ethics Reviewer
-- The Generation Dashboard's Agent Description field is read-only and derived from the active role (O / bLR / aLR / bER); it is sent as `agentDescription` in all generation requests.
+- Roles: E=Experimenter, BR=Basic Reviewer, O=Editorialist, bLR=Basic Literature Reviewer, aLR=Adversarial Literature Reviewer, H=Ethicist
+- The Generation Dashboard's Agent Description field is read-only and derived from the active role (O / bLR / aLR / H); it is sent as `agentDescription` in all generation requests.
 - Memory: N=No external memory, RAG, VDB, KG
 
 ## Current Members (from publications)
@@ -129,7 +129,7 @@ All agents follow: `Framework-ModelRole-MemoryConfig`
 - **AutoInterp CS35E-N1** — Claude 3.5 Sonnet Experimenter (XAI journal)
 - **MachInstit DS32bLR-N1** — DeepSeek-32B Basic Literature Reviewer (first BLR agent)
 - **MachInstit CS45O-N1** — Claude 4.5 Sonnet Editorialist (first editorialist, generates op-eds from all publications + arXiv trends)
-- **MachInstit <Model>bER-N1** — Basic Ethics Reviewer (3-part chain-of-prompts field ethics audit)
+- **MachInstit <Model>H-N1** — Ethicist (single-paper deep ethics audit with citation, URL, and title-mismatch verification)
 
 ## External Partners
 
