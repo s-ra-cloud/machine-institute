@@ -1,0 +1,1169 @@
+# bR Persona — Peer Review Pipeline
+
+**Handoff document for porting the bR (basic Reviewer) persona — single-author peer review of a published manuscript — to another Replit project.**
+
+This document is self-contained: architecture, every required prompt, every required source file, the database schema, the environment variables, and step-by-step adaptation instructions. Feed it directly to another Replit Agent.
+
+> **Sister documents:** `H_PERSONA_HANDOFF.md` covers the H solo ethics report. The bR pipeline below is structurally similar but reviews **one specific paper** instead of auditing a sample of the field.
+
+---
+
+## 1. What the bR persona does
+
+The **bR persona** is an autonomous AI peer reviewer for `future-science.org`. It produces a **rigorous academic referee report** for a single submitted manuscript and publishes that report back to the journal as a `Peer-review` contribution linked to the original paper.
+
+There are three flavours of the same pipeline (same plumbing, different prompts):
+
+| Role | Tone | Use case |
+|---|---|---|
+| **`bR`** — Basic Reviewer (default) | Balanced, formal academic | Standard peer review |
+| **`aR`** — Adversarial Reviewer | Demanding, sceptical, high bar | Stress-test high-impact claims |
+| **`iR`** — Innovation Reviewer | Forward-looking, novelty-focused | Weight on contribution, not methodology |
+
+This document covers all three — the only difference between them is which set of three system prompts is loaded. Default to `bR` unless you have a reason otherwise.
+
+### Pipeline at a glance
+
+```
+[trigger: user clicks "Run" on a project where agentRole === "bR"
+ (or "aR" / "iR") and researchQuestion === "<publicationId>"]
+        │
+        ▼
+1. Look up the target publication in the local DB by id.
+   Refuse if it is already peer_reviewed.
+        │
+        ▼
+2. Fetch the paper from future-science.org public API
+   (by documentId, or by title search as fallback).
+        │
+        ▼
+3. Download the paper body (.md/.txt main file + .json supplements).
+   Refuse if no readable full-text file exists.
+        │
+        ▼
+4. Fetch related prior work — keyword search on the paper's
+   own keywords (top 5 keywords × 20 results).
+        │
+        ▼
+5. Load all stored methodological_advices from the local DB
+   to inject as best-practice references.
+        │
+        ▼
+6. LLM Part 1 — Sections 1–4: Paper Summary, Readability,
+   Methodology, Interpretation. Citing methodological advices.
+        │
+        ▼
+7. LLM Part 2 — Sections 5–6: Comparison with Prior Literature,
+   Strengths. Citing related contributions.
+        │
+        ▼
+8. LLM Part 3 — Sections 7–9 + Bibliography: Weaknesses,
+   Required Revisions, Final Recommendation, full Bibliography.
+        │
+        ▼
+9. Concatenate the three chunks into one Markdown review and
+   save to projects.results.reviewText.
+        │
+        ▼
+10. Publish to future-science.org:
+    - POST multipart/form-data to
+      https://future-science.org/api/v1/contributions/api-bots
+    - type: "Peer-review"
+    - linkOriginalContribution:
+        https://future-science.org/autonomous-journal-of-machine-psychology/{docId}
+    - file: the Markdown review
+    - Auth: x-api-key header.
+        │
+        ▼
+11. Save a local publications row (publicationType=peer-review,
+    isPeerReview=true, reviewedPublicationId={target}, reviewStatus=peer_reviewed).
+    Increment review count on the target publication.
+```
+
+---
+
+## 2. Required environment variables / secrets
+
+Identical to the H persona:
+
+| Name | Purpose |
+|---|---|
+| `FUTURE_OF_SCIENCE_API_KEY` | API key for `future-science.org`. Required for publishing. Without it, the review still runs but isn't published. |
+| `AI_INTEGRATIONS_ANTHROPIC_API_KEY` + `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | If running on Claude (default). |
+| `AI_INTEGRATIONS_OPENAI_API_KEY` + `AI_INTEGRATIONS_OPENAI_BASE_URL` | If running on GPT-* models. |
+| `AI_INTEGRATIONS_OPENROUTER_API_KEY` + `AI_INTEGRATIONS_OPENROUTER_BASE_URL` | If running on OpenRouter models (e.g. DeepSeek, Qwen). |
+
+---
+
+## 3. Database schema (Drizzle / Postgres)
+
+Identical schema to the H pipeline, plus two columns on `publications` that **must** be present:
+
+- `reviewStatus` enum: `unreviewed | reviewed_once | peer_reviewed | revised`
+- `reviewCount` integer
+- `isPeerReview` boolean
+- `reviewedPublicationId` integer (FK to the paper being reviewed)
+
+Full minimal schema:
+
+```ts
+// shared/schema.ts (only the parts bR needs)
+import { pgTable, text, integer, jsonb, timestamp, boolean, pgEnum } from "drizzle-orm/pg-core";
+
+export const projectStatusEnum = pgEnum("project_status", [
+  "configuring", "queued", "running", "completed", "failed", "cancelled",
+]);
+
+export const reviewStatusEnum = pgEnum("review_status", [
+  "unreviewed", "reviewed_once", "peer_reviewed", "revised",
+]);
+
+export const projects = pgTable("projects", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull().default("Auto-generated project"),
+  status: projectStatusEnum("status").notNull().default("configuring"),
+  // For bR: store the target publication ID as a string here.
+  // The pipeline parses parseInt(researchQuestion) at start.
+  researchQuestion: text("research_question"),
+  provider: text("provider").notNull().default("anthropic"),
+  llmModel: text("llm_model").notNull().default("claude-sonnet-4-5"),
+  agentRole: text("agent_role").notNull().default("E"),  // "bR", "aR", or "iR"
+  agentMemory: text("agent_memory").notNull().default("N"),
+  agentNumber: text("agent_number").notNull().default("1"),
+  results: jsonb("results"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const projectLogs = pgTable("project_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  projectId: integer("project_id").notNull(),
+  message: text("message").notNull(),
+  level: text("level").notNull().default("info"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const publications = pgTable("publications", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  projectId: integer("project_id").notNull(),
+  title: text("title").notNull(),
+  subtitle: text("subtitle").notNull(),
+  abstract: text("abstract").notNull(),
+  authorName: text("author_name").notNull(),
+  journal: text("journal").notNull().default("future-science.org"),
+  documentId: text("document_id"),                    // Strapi documentId
+  reviewStatus: reviewStatusEnum("review_status").notNull().default("unreviewed"),
+  reviewCount: integer("review_count").notNull().default(0),
+  isPeerReview: boolean("is_peer_review").notNull().default(false),
+  publishedAt: timestamp("published_at").notNull().defaultNow(),
+  publicationType: text("publication_type"),          // for bR: "peer-review"
+  keywords: text("keywords").array(),
+  mainConclusions: text("main_conclusions"),
+  methodologicalAdvice: text("methodological_advice"),
+  researchGaps: text("research_gaps").array(),
+  formattedCitation: text("formatted_citation"),
+  reviewedPublicationId: integer("reviewed_publication_id"),  // ← the paper this review is OF
+});
+
+export const methodologicalAdvices = pgTable("methodological_advices", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  advice: text("advice").notNull(),
+  source: text("source"),
+  sourceReviewId: text("source_review_id"),
+  sourceAuthors: text("source_authors"),
+  sourceYear: text("source_year"),
+  sourceTitle: text("source_title"),
+  usageCount: integer("usage_count").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type Project = typeof projects.$inferSelect;
+export type Publication = typeof publications.$inferSelect;
+export type MethodologicalAdvice = typeof methodologicalAdvices.$inferSelect;
+```
+
+### Storage interface used by the pipeline
+
+```ts
+interface IStorage {
+  // Projects
+  getProject(id: number): Promise<Project | undefined>;
+  updateProjectFields(id: number, fields: Partial<Project>): Promise<void>;
+  updateProjectResults(id: number, results: any): Promise<void>;
+  updateProjectStatus(id: number, status: string): Promise<void>;
+
+  // Logs (append-only, ordered by createdAt)
+  createProjectLog(input: {
+    projectId: number;
+    message: string;
+    level: "info" | "warning" | "error" | "success";
+  }): Promise<void>;
+
+  // Publications
+  getPublications(): Promise<Publication[]>;
+  createPublication(input: Omit<Publication, "id" | "publishedAt"> & { publishedAt?: Date }): Promise<Publication>;
+  updatePublicationDocumentId(id: number, documentId: string): Promise<void>;
+  incrementPublicationReviewCount(id: number): Promise<void>;
+
+  // Methodological advices
+  getMethodologicalAdvices(): Promise<MethodologicalAdvice[]>;
+}
+```
+
+---
+
+## 4. Required NPM packages
+
+Same as H: `@anthropic-ai/sdk`, `openai`, plus optional `drizzle-orm` + `zod`. Native `fetch` / `FormData` / `Blob`. Node 18+.
+
+---
+
+## 5. Source files
+
+### 5.1 `server/llm.ts` — multi-provider LLM client
+
+**Identical** to the file in `H_PERSONA_HANDOFF.md` Section 5.1. The bR pipeline only uses `callInvestigator(systemPrompt, userPrompt, model, provider, options)`. Copy that file verbatim.
+
+### 5.2 `server/prompts/review.ts` — the nine peer-review prompts (3 roles × 3 chunks)
+
+The bR pipeline uses three sequential system prompts. There are three sets — one per review style. **Do not modify them lightly:** the publish step expects the bibliography to appear at the end of chunk 3 in the format used here.
+
+```ts
+// server/prompts/review.ts
+
+// ═══════════════════════════════════════════════════════════════════
+// bR — BASIC REVIEWER (balanced, default)
+// ═══════════════════════════════════════════════════════════════════
+
+export const REVIEW_CHUNK_1_PROMPT = `You are a peer-review agent for a scientific journal in Machine Psychology. You are producing PART 1 of a multi-section peer review. Your task is to evaluate the submitted research paper and produce sections 1–4 of the review.
+
+Machine psychology studies the behavior, cognition, and responses of artificial agents (LLMs or other AI systems) using methods derived from experimental psychology, cognitive science, and computational social science.
+
+The submission you receive contains:
+- A research paper (text)
+- Methodological Advice (best practices for experimental design, statistics, reproducibility)
+
+Produce the following four sections:
+
+### 1. Paper Summary
+Provide a clear and precise summary of the paper: research question, hypotheses, experimental setup, data collection procedure, analysis method, main findings, and claimed contributions. The summary should demonstrate that you fully understood the work.
+
+### 2. Evaluation of Readability and Structure
+Evaluate whether the paper is clearly written, has a logical structure, explains the experimental design adequately, defines all important concepts, and presents figures, tables, or data in a readable way. Identify unclear passages, missing explanations, or ambiguous terminology.
+
+### 3. Evaluation of Experimental Methodology
+Using the Methodological Advice reference section: assess whether the experimental design is valid, verify whether the statistical methods are appropriate, check whether sample sizes, controls, and evaluation metrics are adequate, evaluate reproducibility, and determine whether the experiment could be replicated. Your critique must cite specific methodological guidance from the Methodological Advice section, citing each entry using its exact source reference as listed there (Author (Year). "Title").
+
+### 4. Evaluation of the Interpretation of Results
+Assess whether the conclusions follow logically from the results. Check for overgeneralization, causal claims without evidence, unsupported theoretical claims, and misinterpretation of statistical results. Explain precisely where the reasoning is sound and where it is not.
+
+## Style Requirements
+- Follow a formal academic tone
+- Include citations from the Methodological Advice section, citing each entry using its exact source reference as listed there (Author (Year). "Title")
+- Provide precise reasoning rather than general statements
+- Be thorough — each section should be detailed and substantive`;
+
+export const REVIEW_CHUNK_2_PROMPT = `You are a peer-review agent for a scientific journal in Machine Psychology. You are producing PART 2 of a multi-section peer review. Your task is to evaluate the submitted research paper and produce sections 5–6 of the review.
+
+Machine psychology studies the behavior, cognition, and responses of artificial agents (LLMs or other AI systems) using methods derived from experimental psychology, cognitive science, and computational social science.
+
+The submission you receive contains:
+- A research paper (text)
+- Publications (relevant prior work from the journal)
+
+Produce the following two sections:
+
+### 5. Comparison with Prior Literature
+Using the Publications reference section: identify relevant prior work, compare the paper's results with existing literature, determine whether the contribution is novel, and identify missing citations or ignored debates. Your analysis must cite specific works from the Publications section using Chicago inline style (Author, Year).
+
+### 6. Strengths
+Identify the strongest aspects of the paper: originality, methodological rigor, dataset quality, theoretical contribution, and relevance for machine psychology. Be specific about what the paper does well.
+
+## Style Requirements
+- Follow a formal academic tone
+- Include comparisons with works from the Publications section using Chicago inline style (Author, Year)
+- Provide precise reasoning rather than general statements
+- Be thorough — each section should be detailed and substantive`;
+
+export const REVIEW_CHUNK_3_PROMPT = `You are a peer-review agent for a scientific journal in Machine Psychology. You are producing PART 3 (final part) of a multi-section peer review. Your task is to synthesize your earlier analysis and produce sections 7–9 plus a complete bibliography.
+
+Machine psychology studies the behavior, cognition, and responses of artificial agents (LLMs or other AI systems) using methods derived from experimental psychology, cognitive science, and computational social science.
+
+The submission you receive contains:
+- Your earlier review sections (Part 1: summary, readability, methodology, interpretation; Part 2: prior literature comparison, strengths)
+
+Using your earlier analysis as foundation, produce the following sections:
+
+### 7. Weaknesses
+Provide a detailed list of weaknesses: methodological flaws, unclear experimental setup, insufficient statistical analysis, weak theoretical grounding, and lack of comparison with prior work. Reference specific issues you identified in your earlier sections.
+
+### 8. Required Revisions
+Provide concrete recommendations for improvement. Distinguish between:
+- **Major revisions**: fundamental issues that must be addressed
+- **Minor revisions**: smaller improvements that would strengthen the paper
+
+### 9. Final Recommendation
+Give a final editorial recommendation: Accept, Minor Revision, Major Revision, or Reject. Provide a clear justification for the decision, referencing the key findings from all sections of your review.
+
+### Bibliography
+End with a complete bibliography of ALL works cited across all three parts of the review. For Publications, use Chicago style. For Methodological Advice entries, list each individual source exactly as it appears in the provided section (Author (Year). "Title") — do not group them into a single manual entry.
+
+## Style Requirements
+- Follow a formal academic tone
+- Synthesize and reference your earlier analysis rather than repeating it
+- Provide precise reasoning rather than general statements
+- The bibliography must be comprehensive, covering all citations from all three parts of the review`;
+
+// ═══════════════════════════════════════════════════════════════════
+// aR — ADVERSARIAL REVIEWER (sceptical, demanding, high bar)
+// ═══════════════════════════════════════════════════════════════════
+
+export const AR_REVIEW_CHUNK_1_PROMPT = `You are an adversarial peer-review agent for a scientific journal in Machine Psychology. You are producing PART 1 of a rigorous, demanding peer review. Your role (aR — Adversarial Reviewer) is to probe every weakness, challenge every assumption, and hold the paper to the highest possible standards.
+
+Machine psychology studies the behavior, cognition, and responses of artificial agents (LLMs or other AI systems) using methods derived from experimental psychology, cognitive science, and computational social science.
+
+The submission you receive contains:
+- A research paper (text)
+- Methodological Advice (best practices for experimental design, statistics, reproducibility)
+
+Produce the following four sections with a critical, adversarial stance:
+
+### 1. Paper Summary
+Summarize the paper's claims, methods, and findings. Identify from the outset any vague, overstated, or unverifiable claims in the abstract and introduction.
+
+### 2. Evaluation of Readability and Structure
+Identify every instance of unclear writing, missing definitions, logical gaps in the narrative, and structural problems. Be specific about which passages are confusing and why. Do not give the benefit of the doubt.
+
+### 3. Evaluation of Experimental Methodology
+Apply the Methodological Advice rigorously. Challenge every methodological decision: Are the controls adequate? Is the sample size justified? Are the statistical methods appropriate and correctly applied? Is the experiment reproducible as described? Identify threats to validity that the authors did not address. Cite specific methodological guidance using the exact source reference as listed in the Methodological Advice section (Author (Year). "Title"). Be exhaustive — list every flaw you can identify.
+
+### 4. Evaluation of the Interpretation of Results
+Challenge every conclusion. Identify causal overclaims, missing alternative explanations, statistical misinterpretations, and unsupported generalizations. Assess whether the results actually support the claims being made.
+
+## Style Requirements
+- Maintain a formal but demanding academic tone
+- Do not soften criticism — be direct and specific
+- Cite methodological guidance using the exact source reference as listed in the Methodological Advice section (Author (Year). "Title")
+- The burden of proof is always on the authors`;
+
+export const AR_REVIEW_CHUNK_2_PROMPT = `You are an adversarial peer-review agent for a scientific journal in Machine Psychology. You are producing PART 2 of a rigorous, demanding peer review. Your role (aR — Adversarial Reviewer) is to probe every weakness, challenge novelty claims, and identify missing prior work.
+
+Machine psychology studies the behavior, cognition, and responses of artificial agents (LLMs or other AI systems) using methods derived from experimental psychology, cognitive science, and computational social science.
+
+The submission you receive contains:
+- A research paper (text)
+- Publications (relevant prior work from the journal)
+
+Produce the following two sections with a critical, adversarial stance:
+
+### 5. Comparison with Prior Literature
+Identify all relevant prior work the authors failed to cite or engage with. Challenge every novelty claim — has this been done before? Are the differences from prior work significant? Point out where the paper replicates existing findings without sufficient acknowledgment. Cite specific works using Chicago inline style (Author, Year).
+
+### 6. Strengths
+List only the genuine strengths that are clearly supported by evidence. Do not inflate this section — if the paper has few genuine strengths, say so explicitly. Be brief and precise.
+
+## Style Requirements
+- Maintain a formal but demanding academic tone
+- Challenge novelty claims aggressively
+- Cite prior work using Chicago inline style (Author, Year)`;
+
+export const AR_REVIEW_CHUNK_3_PROMPT = `You are an adversarial peer-review agent for a scientific journal in Machine Psychology. You are producing PART 3 (final part) of a rigorous, demanding peer review. Your role (aR — Adversarial Reviewer) is to deliver a comprehensive verdict that reflects the full weight of all identified problems.
+
+The submission you receive contains:
+- Your earlier review sections (Part 1: summary, readability, methodology, interpretation; Part 2: prior literature comparison, strengths)
+
+Using your earlier analysis as foundation, produce the following sections:
+
+### 7. Weaknesses
+Provide an exhaustive, numbered list of all weaknesses identified across all sections. Group by severity. Do not omit any flaw you identified in your earlier analysis. Be specific — each weakness must reference a concrete problem in the paper.
+
+### 8. Required Revisions
+List all required revisions. Classify as:
+- **Major revisions** (must be resolved before the paper can be reconsidered — list all of them)
+- **Minor revisions** (secondary issues)
+
+If a flaw cannot be fixed through revision (e.g., a fatally flawed experimental design), state this explicitly.
+
+### 9. Final Recommendation
+Give a final editorial recommendation: Accept, Minor Revision, Major Revision, or Reject. Given the adversarial standard, your bar for acceptance is high. Justify your recommendation by referencing the specific weight of identified problems. If recommending rejection, explain precisely why revision would be insufficient.
+
+### Bibliography
+End with a complete bibliography of ALL works cited across all three parts of the review. For Publications, use Chicago style. For Methodological Advice entries, list each individual source exactly as it appears in the provided section (Author (Year). "Title") — do not group them into a single manual entry.
+
+## Style Requirements
+- Formal, demanding academic tone
+- The final recommendation must be fully justified by the evidence in your review
+- Do not pull punches — be direct`;
+
+// ═══════════════════════════════════════════════════════════════════
+// iR — INNOVATION REVIEWER (novelty-focused, forward-looking)
+// ═══════════════════════════════════════════════════════════════════
+
+export const IR_REVIEW_CHUNK_1_PROMPT = `You are an innovation-focused peer-review agent for a scientific journal in Machine Psychology. You are producing PART 1 of a peer review. Your role (iR — Innovation Reviewer) emphasizes assessing the originality and novelty of the contribution. You spend less time on detailed methodological critique and more time evaluating whether this work represents a genuine advance.
+
+Machine psychology studies the behavior, cognition, and responses of artificial agents (LLMs or other AI systems) using methods derived from experimental psychology, cognitive science, and computational social science.
+
+The submission you receive contains:
+- A research paper (text)
+- Methodological Advice (best practices for experimental design, statistics, reproducibility)
+
+Produce the following four sections, with emphasis on innovation over methodological detail:
+
+### 1. Paper Summary
+Summarize the paper's research question, approach, and claimed contribution. Immediately identify: what is the novel claim? What would the field lose if this paper didn't exist?
+
+### 2. Evaluation of Readability and Structure
+Briefly assess whether the paper clearly communicates its novel contribution. Focus on whether the innovation is properly foregrounded and explained. Note major structural issues only.
+
+### 3. Evaluation of Experimental Methodology
+Briefly assess whether the methodology is adequate to support the innovation claims — not whether it is perfect. Does the experimental design actually test what the authors claim is new? Note only major methodological red flags that would undermine the novelty claims. Cite methodological guidance using the exact source reference as listed in the Methodological Advice section (Author (Year). "Title") where relevant.
+
+### 4. Evaluation of the Interpretation of Results
+Assess whether the conclusions support the innovation claims. Are the claimed advances actually demonstrated? Note any overclaiming or underclaiming relative to what the results show.
+
+## Style Requirements
+- Formal academic tone with a constructive, forward-looking perspective
+- Focus on novelty assessment over exhaustive methodological critique
+- Cite methodological guidance using the exact source reference as listed in the Methodological Advice section (Author (Year). "Title") only for major issues`;
+
+export const IR_REVIEW_CHUNK_2_PROMPT = `You are an innovation-focused peer-review agent for a scientific journal in Machine Psychology. You are producing PART 2 of a peer review. Your role (iR — Innovation Reviewer) focuses intensely on assessing novelty and positioning relative to existing literature.
+
+Machine psychology studies the behavior, cognition, and responses of artificial agents (LLMs or other AI systems) using methods derived from experimental psychology, cognitive science, and computational social science.
+
+The submission you receive contains:
+- A research paper (text)
+- Publications (relevant prior work from the journal)
+
+Produce the following two sections, with deep focus on innovation assessment:
+
+### 5. Comparison with Prior Literature and Innovation Assessment
+This is your primary section. Conduct a thorough mapping of this paper against prior work. Answer these questions:
+- What has already been established in the literature on this topic?
+- What specific gap does this paper claim to fill?
+- Does it genuinely fill that gap, or does it replicate existing work?
+- What is the marginal contribution relative to the most relevant prior papers?
+- Is the novelty incremental, substantial, or transformative?
+Cite all relevant prior work using Chicago inline style (Author, Year). Be specific about which aspects are novel versus derivative.
+
+### 6. Strengths — Innovation and Contribution Value
+Identify the genuine innovative strengths: originality of research question, novelty of experimental design in machine psychology, new insights into AI behavior, theoretical contributions. Assess the potential impact of this work on the field.
+
+## Style Requirements
+- Formal, analytical academic tone
+- Deep engagement with prior literature — this is the core of your role
+- Cite all relevant prior works using Chicago inline style (Author, Year)`;
+
+export const IR_REVIEW_CHUNK_3_PROMPT = `You are an innovation-focused peer-review agent for a scientific journal in Machine Psychology. You are producing PART 3 (final part) of a peer review. Your role (iR — Innovation Reviewer) delivers a verdict that primarily weighs the novelty and innovation value of the work.
+
+The submission you receive contains:
+- Your earlier review sections (Part 1: summary, readability, methodology, interpretation; Part 2: prior literature comparison and innovation assessment, strengths)
+
+Using your earlier analysis as foundation, produce the following sections:
+
+### 7. Weaknesses
+Focus on weaknesses that specifically undermine the innovation claims: insufficient differentiation from prior work, overclaiming novelty, missing key citations, or failure to connect findings to the broader theoretical landscape. Include methodological weaknesses only where they directly threaten the validity of the innovation claims.
+
+### 8. Required Revisions
+Provide revision recommendations focused on:
+- **Major revisions**: issues that need to be resolved to validate the novelty claims (e.g., missing comparison with key prior work, insufficient demonstration that the claimed advance is real)
+- **Minor revisions**: clarity and presentation improvements
+
+### 9. Final Recommendation
+Give a final editorial recommendation: Accept, Minor Revision, Major Revision, or Reject. Weight your recommendation primarily on the novelty and value of the contribution to machine psychology. A paper with minor methodological imperfections but genuine innovation should be treated more favorably than a technically sound but derivative paper. Justify your recommendation clearly.
+
+### Bibliography
+End with a complete bibliography of ALL works cited across all three parts of the review. For Publications, use Chicago style. For Methodological Advice entries, list each individual source exactly as it appears in the provided section (Author (Year). "Title") — do not group them into a single manual entry.
+
+## Style Requirements
+- Constructive, forward-looking academic tone
+- Novelty and innovation are the primary criteria — make this explicit in your recommendation`;
+```
+
+### 5.3 `server/review.ts` — the peer-review pipeline
+
+```ts
+// server/review.ts
+import { storage } from "./storage";
+import { callInvestigator } from "./llm";
+import {
+  REVIEW_CHUNK_1_PROMPT, REVIEW_CHUNK_2_PROMPT, REVIEW_CHUNK_3_PROMPT,
+  AR_REVIEW_CHUNK_1_PROMPT, AR_REVIEW_CHUNK_2_PROMPT, AR_REVIEW_CHUNK_3_PROMPT,
+  IR_REVIEW_CHUNK_1_PROMPT, IR_REVIEW_CHUNK_2_PROMPT, IR_REVIEW_CHUNK_3_PROMPT,
+} from "./prompts/review";
+import type { Project, MethodologicalAdvice } from "@shared/schema";
+
+export function isReviewRole(role: string): boolean {
+  return role === "bR" || role === "aR" || role === "iR";
+}
+
+function getReviewChunkPrompts(agentRole: string): [string, string, string] {
+  switch (agentRole) {
+    case "aR": return [AR_REVIEW_CHUNK_1_PROMPT, AR_REVIEW_CHUNK_2_PROMPT, AR_REVIEW_CHUNK_3_PROMPT];
+    case "iR": return [IR_REVIEW_CHUNK_1_PROMPT, IR_REVIEW_CHUNK_2_PROMPT, IR_REVIEW_CHUNK_3_PROMPT];
+    default:   return [REVIEW_CHUNK_1_PROMPT,    REVIEW_CHUNK_2_PROMPT,    REVIEW_CHUNK_3_PROMPT];
+  }
+}
+
+const PUBLIC_API = "https://future-science.org/api/v1/public";
+const BASE_URL = "https://future-science.org";
+
+interface ContributionFile {
+  id?: number; name: string; url: string; ext?: string; mime?: string;
+}
+
+interface Contribution {
+  id: number;
+  documentId: string;
+  title: string;
+  subtitle: string;
+  abstract: string;
+  type: string;
+  keywords?: { text: string }[];
+  author?: { firstName: string; lastName: string }[];
+  createdAt: string;
+  submittedFiles?: { cover?: ContributionFile | null; file?: ContributionFile | null; isMarkdown?: boolean };
+  additionalMaterials?: { url: string; name: string }[];
+  additionalMaterialsFiles?: ContributionFile[];
+}
+
+function resolveFileUrl(urlStr: string): string {
+  if (urlStr.startsWith("/")) return `${BASE_URL}${urlStr}`;
+  return urlStr;
+}
+
+function getFileExtensions(file: { url: string; name: string; ext?: string }): Set<string> {
+  const exts = new Set<string>();
+  if (file.ext) exts.add(file.ext.toLowerCase());
+  if (file.name?.includes(".")) exts.add(file.name.slice(file.name.lastIndexOf(".")).toLowerCase());
+  try {
+    const pathname = new URL(resolveFileUrl(file.url)).pathname;
+    const lastSegment = pathname.split("/").pop() || "";
+    if (lastSegment.includes(".")) exts.add(lastSegment.slice(lastSegment.lastIndexOf(".")).toLowerCase());
+  } catch {}
+  return exts;
+}
+
+// ── Source paper fetching ──────────────────────────────────────
+
+async function fetchContributionByDocumentId(documentId: string): Promise<Contribution | null> {
+  const resp = await fetch(`${PUBLIC_API}/contributions/${documentId}`, { signal: AbortSignal.timeout(30000) });
+  if (!resp.ok) return null;
+  const json = await resp.json();
+  return json.data || json;
+}
+
+async function fetchContributionByTitle(title: string): Promise<Contribution | null> {
+  const resp = await fetch(`${PUBLIC_API}/contributions?search=${encodeURIComponent(title)}&limit=10`, { signal: AbortSignal.timeout(30000) });
+  if (!resp.ok) return null;
+  const json = await resp.json();
+  const items: Contribution[] = json.data || [];
+  return items.find(c => c.title?.toLowerCase() === title.toLowerCase()) || null;
+}
+
+async function fetchContributionContent(contribution: Contribution): Promise<string> {
+  const allFiles: { url: string; name: string; source: string; ext?: string }[] = [];
+  if (contribution.submittedFiles?.file?.url) {
+    allFiles.push({ ...contribution.submittedFiles.file, source: "submittedFiles.file" });
+  }
+  if (contribution.additionalMaterialsFiles?.length) {
+    for (const f of contribution.additionalMaterialsFiles) allFiles.push({ ...f, source: "additionalMaterialsFiles" });
+  }
+
+  const fileDescriptions: string[] = [];
+  let mainContent = "";
+  const supplementaryJsonParts: { name: string; content: string }[] = [];
+
+  for (const file of allFiles) {
+    const exts = getFileExtensions(file);
+    const resolvedUrl = file.url ? resolveFileUrl(file.url) : "";
+    fileDescriptions.push(`${file.name} (${file.url})`);
+    if (!file.url) continue;
+
+    const isText = exts.has(".md") || exts.has(".txt");
+    const isJson = exts.has(".json");
+
+    if (isText && !mainContent) {
+      try {
+        const r = await fetch(resolvedUrl, { signal: AbortSignal.timeout(30000) });
+        if (r.ok) {
+          const text = await r.text();
+          if (text.length > 100) mainContent = text;
+        }
+      } catch {}
+    } else if (isJson) {
+      try {
+        const r = await fetch(resolvedUrl, { signal: AbortSignal.timeout(30000) });
+        if (r.ok) {
+          const text = await r.text();
+          const parsed = JSON.parse(text);
+          const formatted = JSON.stringify(parsed, null, 2);
+          if (formatted.length > 100) supplementaryJsonParts.push({ name: file.name, content: formatted });
+        }
+      } catch {}
+    }
+  }
+
+  if (!mainContent && supplementaryJsonParts.length === 0) {
+    const fileList = fileDescriptions.length ? fileDescriptions.join(", ") : "none";
+    throw new Error(`Peer review failed: paper has no readable full-text file (.md/.txt/.json). Found files: [${fileList}]`);
+  }
+
+  let result = mainContent || "";
+  if (supplementaryJsonParts.length > 0) {
+    if (result) result += "\n\n";
+    for (const part of supplementaryJsonParts) {
+      result += `## Supplementary Material: ${part.name}\n\n\`\`\`json\n${part.content}\n\`\`\`\n\n`;
+    }
+  }
+  return result;
+}
+
+// ── Prior work fetching (top 5 keywords × 20 results) ──────────
+
+async function fetchRelatedContributions(keywords: string[]): Promise<Contribution[]> {
+  const related: Contribution[] = [];
+  const seen = new Set<string>();
+  for (const keyword of keywords.slice(0, 5)) {
+    try {
+      const resp = await fetch(`${PUBLIC_API}/contributions?search=${encodeURIComponent(keyword)}&limit=20`, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) continue;
+      const json = await resp.json();
+      const items: Contribution[] = json.data || [];
+      for (const item of items) {
+        if (!seen.has(item.documentId)) {
+          seen.add(item.documentId);
+          related.push(item);
+        }
+      }
+    } catch {}
+  }
+  return related;
+}
+
+function formatPriorWork(contributions: Contribution[]): string {
+  if (contributions.length === 0) return "No related prior work found.";
+  return contributions.map((c, i) => {
+    const authors = c.author?.map(a => `${a.lastName}, ${a.firstName.charAt(0)}.`).join(", ") || "Unknown";
+    const year = c.createdAt ? new Date(c.createdAt).getFullYear() : "n.d.";
+    return `[${i + 1}] ${authors} (${year}). "${c.title}." ${c.subtitle || ""}\nAbstract: ${c.abstract || "N/A"}\nType: ${c.type || "Unknown"}`;
+  }).join("\n\n");
+}
+
+function formatMethodologicalAdvices(advices: MethodologicalAdvice[]): string {
+  if (advices.length === 0) return "No methodological advices available.";
+  return advices.map((a, i) => {
+    const source = a.sourceAuthors || "Machine Institute";
+    const year = a.sourceYear || "n.d.";
+    const titlePart = a.sourceTitle ? `. "${a.sourceTitle}"` : "";
+    return `[MA-${i + 1}] ${source} (${year})${titlePart}: ${a.advice}`;
+  }).join("\n\n");
+}
+
+// ── Three-chunk review runner ──────────────────────────────────
+
+async function runChunkedReview(
+  paperContent: string, priorWorkText: string, advicesText: string,
+  model: string, provider: string | undefined,
+  projectId: number, project: Project
+): Promise<{ reviewText: string; durationSeconds: number }> {
+  const chunkOpts = { timeoutMs: 180_000, maxRetries: 3 };
+  const startTime = Date.now();
+  const [c1sys, c2sys, c3sys] = getReviewChunkPrompts(project.agentRole || "bR");
+
+  const chunk1Prompt = `## PAPER UNDER REVIEW\n\n${paperContent}\n\n---\n\n## METHODOLOGICAL ADVICE (Best Practices for Reference)\n\n${advicesText}\n\n---\n\nProduce sections 1–4 of the peer review (Paper Summary, Readability, Methodology, Interpretation) following your instructions.`;
+  const chunk1 = await callInvestigator(c1sys, chunk1Prompt, model, provider, chunkOpts);
+  await storage.createProjectLog({ projectId, message: `Review step 1/3 complete — Content Analysis (${chunk1.length} chars).`, level: "info" });
+
+  const chunk2Prompt = `## PAPER UNDER REVIEW\n\n${paperContent}\n\n---\n\n## PUBLICATIONS (Prior Work for Reference)\n\n${priorWorkText}\n\n---\n\nProduce sections 5–6 of the peer review (Comparison with Prior Literature, Strengths) following your instructions.`;
+  const chunk2 = await callInvestigator(c2sys, chunk2Prompt, model, provider, chunkOpts);
+  await storage.createProjectLog({ projectId, message: `Review step 2/3 complete — Literature Comparison (${chunk2.length} chars).`, level: "info" });
+
+  const chunk3Prompt = `## YOUR EARLIER REVIEW SECTIONS\n\n### Part 1 — Content Analysis (sections 1–4)\n\n${chunk1}\n\n---\n\n### Part 2 — Literature Comparison (sections 5–6)\n\n${chunk2}\n\n---\n\nBased on your prior analysis above, produce sections 7–9 plus a complete bibliography (Weaknesses, Required Revisions, Final Recommendation, Bibliography) following your instructions. The bibliography must consolidate all citations from all three parts.`;
+  const chunk3 = await callInvestigator(c3sys, chunk3Prompt, model, provider, { timeoutMs: 300_000, maxRetries: 3 });
+  await storage.createProjectLog({ projectId, message: `Review step 3/3 complete — Editorial Verdict (${chunk3.length} chars).`, level: "info" });
+
+  const reviewText = chunk1 + "\n\n---\n\n" + chunk2 + "\n\n---\n\n" + chunk3;
+  return { reviewText, durationSeconds: Math.round((Date.now() - startTime) / 1000) };
+}
+
+// ── MAIN ENTRY POINT ──────────────────────────────────────────
+
+export async function runReviewPipeline(projectId: number, project: Project): Promise<void> {
+  // 1. Resolve target publication
+  const publicationId = parseInt(project.researchQuestion || "");
+  if (isNaN(publicationId)) {
+    await storage.updateProjectStatus(projectId, "failed");
+    await storage.createProjectLog({ projectId, message: "Review failed: no valid publication ID provided.", level: "error" });
+    return;
+  }
+
+  const publications = await storage.getPublications();
+  const targetPub = publications.find(p => p.id === publicationId);
+  if (!targetPub) {
+    await storage.updateProjectStatus(projectId, "failed");
+    await storage.createProjectLog({ projectId, message: `Review failed: publication #${publicationId} not found.`, level: "error" });
+    return;
+  }
+
+  if (targetPub.reviewStatus === "peer_reviewed") {
+    await storage.updateProjectStatus(projectId, "failed");
+    await storage.createProjectLog({ projectId, message: `Review failed: publication #${publicationId} is already peer reviewed.`, level: "error" });
+    return;
+  }
+
+  // 2. Set the project name to something useful
+  await storage.updateProjectFields(projectId, { name: `Peer Review: ${targetPub.title}`.slice(0, 100) });
+  await storage.createProjectLog({ projectId, message: `Starting peer review of: "${targetPub.title}"`, level: "info" });
+
+  // 3. Fetch the paper from FOS
+  let contribution: Contribution | null = null;
+  if (targetPub.documentId) {
+    await storage.createProjectLog({ projectId, message: `Fetching paper from future-science.org (documentId: ${targetPub.documentId})...`, level: "info" });
+    contribution = await fetchContributionByDocumentId(targetPub.documentId);
+  }
+  if (!contribution) {
+    await storage.createProjectLog({ projectId, message: `Searching for paper by title: "${targetPub.title}"...`, level: "info" });
+    contribution = await fetchContributionByTitle(targetPub.title);
+    if (contribution?.documentId && !targetPub.documentId) {
+      await storage.updatePublicationDocumentId(targetPub.id, contribution.documentId);
+    }
+  }
+  if (!contribution) {
+    await storage.updateProjectStatus(projectId, "failed");
+    await storage.createProjectLog({ projectId, message: `Peer review failed: could not find paper "${targetPub.title}" on future-science.org API.`, level: "error" });
+    return;
+  }
+
+  let paperContent: string;
+  try {
+    paperContent = await fetchContributionContent(contribution);
+    await storage.createProjectLog({ projectId, message: `Paper content retrieved (${paperContent.length} chars).`, level: "info" });
+  } catch (err: any) {
+    await storage.updateProjectStatus(projectId, "failed");
+    await storage.createProjectLog({ projectId, message: err.message, level: "error" });
+    return;
+  }
+
+  // 4. Fetch related prior work
+  await storage.createProjectLog({ projectId, message: "Fetching related prior work from future-science.org...", level: "info" });
+  const keywords = contribution.keywords?.map(k => k.text) || [targetPub.title.split(" ").slice(0, 3).join(" ")];
+  const relatedContributions = await fetchRelatedContributions(keywords);
+  const filteredRelated = relatedContributions.filter(c => c.documentId !== contribution.documentId);
+  await storage.createProjectLog({ projectId, message: `Found ${filteredRelated.length} related contributions.`, level: "info" });
+
+  // 5. Load methodological advices
+  const advices = await storage.getMethodologicalAdvices();
+  await storage.createProjectLog({ projectId, message: `Loaded ${advices.length} methodological advices.`, level: "info" });
+
+  const priorWorkText = formatPriorWork(filteredRelated);
+  const advicesText = formatMethodologicalAdvices(advices);
+
+  // 6. Run the three-chunk review
+  await storage.createProjectLog({ projectId, message: `Starting chunked peer review (3 steps, model: ${project.llmModel})...`, level: "info" });
+  const resolvedDocumentId = contribution.documentId || targetPub.documentId || null;
+
+  try {
+    const { reviewText, durationSeconds } = await runChunkedReview(
+      paperContent, priorWorkText, advicesText,
+      project.llmModel, project.provider, projectId, project,
+    );
+
+    await storage.updateProjectResults(projectId, {
+      summary: `Peer review of "${targetPub.title}"`,
+      reviewText,
+      reviewedPublicationId: publicationId,
+      reviewedDocumentId: resolvedDocumentId,
+      metrics: { durationSeconds, iterationsUsed: 3 },
+      relatedPapersCount: filteredRelated.length,
+      methodologicalAdvicesUsed: advices.length,
+    });
+    await storage.updateProjectStatus(projectId, "completed");
+
+    await storage.createProjectLog({
+      projectId,
+      message: `Peer review completed (${reviewText.length} chars total, ${durationSeconds}s).`,
+      level: "success",
+    });
+  } catch (error: any) {
+    await storage.updateProjectStatus(projectId, "failed");
+    await storage.createProjectLog({ projectId, message: `Review LLM call failed: ${error.message}`, level: "error" });
+  }
+}
+```
+
+### 5.4 `server/review-publish.ts` — Markdown stripper + publish to FOS
+
+```ts
+// server/review-publish.ts
+import { storage } from "./storage";
+import type { Project } from "@shared/schema";
+
+// ── Agent naming convention (same as H persona) ──
+function generateAgentLastName(project: Project): string {
+  const modelMap: Record<string, string> = {
+    "claude-sonnet-4-5": "CS45",
+    "claude-opus-4-5-20251101": "CO45",
+    "anthropic/claude-sonnet-4.5": "CS45",
+    "anthropic/claude-opus-4.5": "CO45",
+    "gpt-5-2025-08-07": "G5",
+    "gpt-5-mini-2025-08-07": "G5m",
+    "openai/gpt-5": "G5",
+    "openai/gpt-5-mini": "G5m",
+    "moonshotai/kimi-k2-0905": "KK2",
+    "qwen/qwen3-235b-a22b": "QW3",
+    "deepseek/deepseek-v3.2": "DS32",
+    "anthropic/claude-sonnet-3.5": "CS35",
+    "meta-llama/llama-3.3-70b-instruct": "LL33",
+    "google/gemini-2.5-flash": "GF25",
+  };
+  const modelCode = modelMap[project.llmModel] || project.llmModel.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6);
+  const role = project.agentRole || "bR";
+  const memory = project.agentMemory || "N";
+  const number = project.agentNumber || "1";
+  return `${modelCode}${role}-${memory}${number}`;
+}
+
+// FOS renders its own H1 title — strip leading metadata before submission
+function stripBodyMetadata(md: string): string {
+  const firstSection = md.search(/^## /m);
+  if (firstSection <= 0) return md.trim();
+  return md.slice(firstSection).trim();
+}
+
+export async function publishReviewIfCompleted(projectId: number): Promise<void> {
+  try {
+    const completed = await storage.getProject(projectId);
+    if (!completed || completed.status !== "completed" || !completed.results) return;
+
+    const results = completed.results as any;
+    const reviewText = results.reviewText;
+    const reviewedPubId = results.reviewedPublicationId;
+    const reviewedDocId = results.reviewedDocumentId;
+    if (!reviewText) return;
+
+    const apiKey = process.env.FUTURE_OF_SCIENCE_API_KEY;
+    if (!apiKey) {
+      await storage.createProjectLog({ projectId, message: "Skipping review publish: API key not configured.", level: "warning" });
+      return;
+    }
+
+    const API_BASE = "https://future-science.org";
+    const INITIATIVE_DOC_ID = "ixli00u1vnheboi9z80ml9o6";   // Machine Psychology initiative on FOS
+    const agentLastName = generateAgentLastName(completed);
+    const truncate255 = (s: string) => s.length > 255 ? s.slice(0, 252) + "..." : s;
+
+    // ── Resolve documentId of the reviewed paper ──
+    // linkOriginalContribution is REQUIRED for the FOS API to accept a Peer-review.
+    let resolvedDocId = reviewedDocId;
+    if (!resolvedDocId && reviewedPubId) {
+      const targetPub = (await storage.getPublications()).find(p => p.id === reviewedPubId);
+      if (targetPub?.documentId) {
+        resolvedDocId = targetPub.documentId;
+      } else if (targetPub) {
+        // Fallback: search FOS by title
+        try {
+          const r = await fetch(
+            `${API_BASE}/api/v1/public/contributions?search=${encodeURIComponent(targetPub.title)}&limit=5`,
+            { signal: AbortSignal.timeout(15000) },
+          );
+          if (r.ok) {
+            const j = await r.json();
+            const match = (j.data || []).find((c: any) => c.title?.toLowerCase() === targetPub.title.toLowerCase());
+            if (match?.documentId) {
+              resolvedDocId = match.documentId;
+              await storage.updatePublicationDocumentId(targetPub.id, match.documentId);
+            }
+          }
+        } catch {}
+      }
+    }
+
+    if (!resolvedDocId) {
+      await storage.createProjectLog({ projectId, message: "Cannot publish review: unable to resolve documentId for reviewed paper.", level: "error" });
+      return;
+    }
+
+    const linkOriginal = `${API_BASE}/autonomous-journal-of-machine-psychology/${resolvedDocId}`;
+
+    const dataPayload = {
+      title: truncate255(completed.name),                  // e.g. "Peer Review: <paper title>"
+      subtitle: "",
+      type: "Peer-review",                                  // ← important: this is what makes it a review on FOS
+      linkOriginalContribution: linkOriginal,               // ← REQUIRED for type=Peer-review
+      abstract: results.summary || `Peer review of publication #${reviewedPubId}`,
+      language: "English",
+      langId: "",
+      keywords: [
+        { text: "Machine Psychology" },
+        { text: "Peer Review" },
+      ],
+      // ── Agent identification (NEW FOS schema) ──
+      agentName: `MachinePsyWn ${agentLastName}`,
+      agentDescription: "Autonomous peer review agent that evaluates manuscripts for scientific rigour, methodological quality, and novelty of contribution.",
+      researchOrchestrator: "Sacha Raoult",
+      // ───────────────────────────────────────────
+      comments: "",
+      coauthorsNotified: true,
+      isFormatCompliant: true,
+      sourceLinkCorrect: true,
+      contributorEmail: "sacharaoult@gmail.com",
+      initiative: INITIATIVE_DOC_ID,
+      isMarkdown: true,
+      selfArchive: { doi: null, copyright: null, license: "CC-BY-4.0", fullReference: null },
+      isOriginal: true,
+    };
+
+    await storage.createProjectLog({ projectId, message: "Publishing peer review to future-science.org...", level: "info" });
+
+    const form = new FormData();
+    form.append("data", JSON.stringify({ data: dataPayload }));
+    const safeTitle = completed.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50);
+    const mdBlob = new Blob([stripBodyMetadata(reviewText)], { type: "text/markdown" });
+    form.append("file", mdBlob as any, `${safeTitle}_review.md`);
+
+    const resp = await fetch(`${API_BASE}/api/v1/contributions/api-bots`, {
+      method: "POST",
+      headers: { "x-api-key": apiKey },     // ← x-api-key, NOT Bearer
+      body: form,
+    });
+
+    const rawText = await resp.text();
+    let responseData: any = null;
+    try { responseData = JSON.parse(rawText); } catch {}
+
+    if (resp.status < 200 || resp.status >= 300) {
+      await storage.createProjectLog({ projectId, message: `Review publish failed: API error ${resp.status}`, level: "error" });
+      return;
+    }
+
+    const publishedDocId = responseData?.data?.documentId || responseData?.documentId || null;
+
+    // Save local publication row (so the review itself can be discovered later)
+    await storage.createPublication({
+      projectId,
+      title: dataPayload.title,
+      subtitle: dataPayload.subtitle,
+      abstract: dataPayload.abstract,
+      authorName: `MachinePsyKw ${agentLastName}`,
+      journal: "future-science.org",
+      documentId: publishedDocId,
+      reviewStatus: "peer_reviewed",
+      isPeerReview: true,
+      publicationType: "peer-review",
+      keywords: dataPayload.keywords.map(k => k.text),
+      mainConclusions: null,
+      methodologicalAdvice: null,
+      researchGaps: null,
+      formattedCitation: null,
+      reviewedPublicationId: reviewedPubId || undefined,
+    });
+
+    // Bump review count on the original paper
+    if (reviewedPubId) {
+      await storage.incrementPublicationReviewCount(reviewedPubId);
+    }
+
+    await storage.createProjectLog({ projectId, message: "Peer review published successfully to future-science.org.", level: "success" });
+  } catch (error: any) {
+    await storage.createProjectLog({ projectId, message: `Review publish error: ${error.message}`, level: "error" });
+  }
+}
+```
+
+---
+
+## 6. Wiring it into Express routes
+
+```ts
+// server/routes.ts (excerpt)
+import { runReviewPipeline, isReviewRole } from "./review";
+import { publishReviewIfCompleted } from "./review-publish";
+import { storage } from "./storage";
+
+// POST /api/projects/:id/run
+app.post("/api/projects/:id/run", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const project = await storage.getProject(id);
+  if (!project) return res.status(404).json({ message: "Not found" });
+
+  await storage.updateProjectStatus(id, "running");
+
+  if (isReviewRole(project.agentRole || "")) {
+    // Increment review count on the target as soon as the run is accepted
+    const reviewTargetId = parseInt(project.researchQuestion || "");
+    if (!isNaN(reviewTargetId)) {
+      await storage.incrementPublicationReviewCount(reviewTargetId);
+    }
+
+    // Fire-and-forget; on success auto-publish
+    runReviewPipeline(id, project)
+      .then(() => publishReviewIfCompleted(id))
+      .catch(async (err: any) => {
+        await storage.updateProjectStatus(id, "failed");
+        await storage.createProjectLog({ projectId: id, message: `Review pipeline error: ${err.message}`, level: "error" });
+      });
+    return res.json({ message: "Peer review started" });
+  }
+
+  res.status(400).json({ message: "Project agentRole must be 'bR', 'aR', or 'iR' for the peer-review pipeline" });
+});
+
+// POST /api/projects/:id/publish — manual re-publish if auto-publish failed
+app.post("/api/projects/:id/publish", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const project = await storage.getProject(id);
+  if (!project) return res.status(404).json({ message: "Not found" });
+  if (project.status !== "completed") return res.status(400).json({ message: "Not completed" });
+
+  if (isReviewRole(project.agentRole || "")) {
+    await publishReviewIfCompleted(id);
+    return res.json({ message: "Published" });
+  }
+  res.status(400).json({ message: "Only bR/aR/iR projects supported" });
+});
+
+// GET /api/publications/unreviewed — feed for the "pick a paper to review" UI
+app.get("/api/publications/unreviewed", async (_req, res) => {
+  const all = await storage.getPublications();
+  const unreviewed = all.filter(p => !p.isPeerReview && p.reviewStatus !== "peer_reviewed");
+  res.json(unreviewed);
+});
+```
+
+---
+
+## 7. Minimum project record needed to trigger the pipeline
+
+Insert a `projects` row like this and call `POST /api/projects/:id/run`:
+
+```json
+{
+  "name": "Peer Review (will be auto-renamed)",
+  "researchQuestion": "42",
+  "agentRole": "bR",
+  "agentMemory": "N",
+  "agentNumber": "1",
+  "provider": "anthropic",
+  "llmModel": "claude-sonnet-4-5",
+  "status": "configuring"
+}
+```
+
+Notes on each field:
+- `researchQuestion: "42"` — **mandatory and unusual**: store the **`publications.id`** of the paper you want to review here as a string. The pipeline does `parseInt(project.researchQuestion)` to find the target. (This re-uses the existing schema column — name it however you like internally.)
+- `agentRole` — `"bR"` (default), `"aR"` (adversarial), or `"iR"` (innovation-focused).
+- `agentMemory`, `agentNumber` — used to build the agent identifier (e.g. `CS45bR-N1`).
+- `provider`/`llmModel` — controls which LLM runs the review. Recommended: `anthropic` + `claude-sonnet-4-5`. Cheaper alternative: `openrouter` + `deepseek/deepseek-v3.2`.
+- `name` — gets overwritten to `Peer Review: {paper title}` by the pipeline.
+
+**Pre-condition:** the target `publications` row must already exist in your local DB with at minimum `id`, `title`, and ideally `documentId` (the FOS Strapi documentId). Without `documentId` the pipeline falls back to a title-search on the FOS public API.
+
+---
+
+## 8. Step-by-step adaptation guide
+
+1. **Create the database tables** — drop the schema from Section 3 into `shared/schema.ts` and run `npm run db:push`. The reviews pipeline needs the `reviewStatus` enum and the four review-related columns on `publications` (`reviewStatus`, `reviewCount`, `isPeerReview`, `reviewedPublicationId`).
+
+2. **Install required packages** — `@anthropic-ai/sdk`, `openai`, plus `drizzle-orm` + `zod` if using Drizzle. Use the packager tool.
+
+3. **Set up the AI Integrations** — install whichever Replit blueprints match your chosen LLM family (`javascript_anthropic_ai_integrations` is the most-used).
+
+4. **Request the FOS API key** — ask the user to set `FUTURE_OF_SCIENCE_API_KEY`. Without it, the pipeline still runs but skips publishing.
+
+5. **Drop in the source files**:
+   - `server/llm.ts` (copy from `H_PERSONA_HANDOFF.md` § 5.1)
+   - `server/prompts/review.ts` (Section 5.2 above — all 9 prompts)
+   - `server/review.ts` (Section 5.3)
+   - `server/review-publish.ts` (Section 5.4)
+
+6. **Implement the storage interface** (Section 3) over your DB layer. The pipeline only calls these methods.
+
+7. **Seed at least one publication** to review. You can either:
+   - Manually `INSERT` a row into `publications` with the title and `documentId` of an existing FOS paper, **or**
+   - Build a small fetcher that pulls FOS contributions into your local `publications` table on demand.
+
+8. **Wire the routes** (Section 6) — `POST /api/projects/:id/run`, `POST /api/projects/:id/publish`, and (optionally) `GET /api/publications/unreviewed`.
+
+9. **Test by inserting a project** with `agentRole: "bR"` and `researchQuestion: "<your-publication-id>"` (Section 7), then call `/run`. Watch `project_logs` stream messages. Expect 5–10 minutes total for Claude Sonnet 4.5.
+
+10. **Verify publishing** — once status flips to `completed`, the auto-publish runs. Confirm a new `Peer-review` contribution appears at `https://future-science.org/autonomous-journal-of-machine-psychology/<reviewed-paper-doc-id>`. Locally, the `publications` table gets a new row with `publicationType = "peer-review"` and `isPeerReview = true`, and the **target** publication's `reviewCount` is incremented.
+
+---
+
+## 9. Frontend considerations (optional)
+
+Three views are sufficient:
+
+- **Manuscript picker** — fetch `GET /api/publications/unreviewed`, render a searchable list. On select, store the publication id and let the user pick role (`bR` / `aR` / `iR`) + provider + model. Submit creates the `projects` row with `researchQuestion = String(publication.id)`.
+- **Project detail** — stream `project_logs` ordered by `createdAt` with color-coded levels.
+- **Results tab** — when `status === "completed"`, render `results.reviewText` (Markdown). Add a **Publish** button if you want manual control (otherwise the pipeline auto-publishes).
+
+For the publications list, color-code by `reviewStatus`:
+- `unreviewed` → gray
+- `reviewed_once` → amber
+- `peer_reviewed` → green
+- `revised` → blue
+
+---
+
+## 10. Things to know / gotchas
+
+- **`researchQuestion` is overloaded.** For the bR pipeline it stores the **integer publication id as a string**. For the H pipeline it stores a free-text subtitle. If you want clean separation in your fork, add a dedicated `targetPublicationId integer` column to `projects` and update the parse line in `runReviewPipeline`.
+- **`linkOriginalContribution` is mandatory** for `type: "Peer-review"`. The FOS API will reject the submission if this URL is missing or malformed. The pipeline resolves the documentId from (a) the local publications row, then (b) a title-search fallback against the FOS API. If both fail, it logs an error and aborts publishing.
+- **The paper must have a readable full-text file (.md/.txt/.json)** in its `submittedFiles.file` or `additionalMaterialsFiles`. PDFs and other binary formats are intentionally rejected — `fetchContributionContent` throws "no readable full-text file" and the pipeline marks itself failed. If you need PDF support, add a PDF→text extractor before this step.
+- **Methodological advices come from your local DB.** A fresh install has zero advices, which is fine — the pipeline still runs but the methodological-critique sections will be weaker. Populate `methodological_advices` over time via the H pipeline (which writes recommendations there) or via a seed script.
+- **The publish payload uses the new FOS schema** — `agentName` + `agentDescription` + `researchOrchestrator`, no `author` array. If FOS returns `400 author is required`, the schema changed again — check the FOS docs.
+- **Multipart upload uses native `FormData` + `Blob`** from `node:buffer`. Do **not** use the `form-data` npm package; it produces a body that this endpoint rejects.
+- **`x-api-key` header**, not `Authorization: Bearer`.
+- **`langId` must be the empty string `""`** when sending files. Do not omit it and do not set it to `null`.
+- **The body markdown is stripped of its leading title** by `stripBodyMetadata` before submission, because FOS renders its own H1 from `data.title`.
+- **Already-peer-reviewed papers are refused.** If `targetPub.reviewStatus === "peer_reviewed"`, the pipeline aborts with "already peer reviewed". To allow second reviews (e.g. for `aR`/`iR` after a `bR`), relax that check or use a separate column for per-role tracking.
+- **The 5-keyword × 20-result prior-work fetch is hard-coded.** For papers with sparse keywords or in niche topics, you may want to widen this. Edit `fetchRelatedContributions` in `server/review.ts`.
+
+---
+
+## 11. Quick smoke test
+
+```ts
+// scripts/smoke-br.ts
+import { storage } from "../server/storage";
+import { runReviewPipeline } from "../server/review";
+import { publishReviewIfCompleted } from "../server/review-publish";
+
+async function main() {
+  // Pre-condition: a publications row with id=1 already exists (e.g. seeded
+  // with a real FOS documentId). Adjust as needed.
+  const TARGET_PUBLICATION_ID = 1;
+
+  const project = await storage.createProject({
+    name: "Smoke test — Peer Review",
+    researchQuestion: String(TARGET_PUBLICATION_ID),
+    agentRole: "bR",
+    agentMemory: "N",
+    agentNumber: "1",
+    provider: "anthropic",
+    llmModel: "claude-sonnet-4-5",
+    status: "running",
+  });
+
+  console.log(`Created project #${project.id}`);
+  await runReviewPipeline(project.id, project);
+
+  const finished = await storage.getProject(project.id);
+  console.log(`Status: ${finished?.status}`);
+
+  if (finished?.status === "completed") {
+    await publishReviewIfCompleted(project.id);
+    console.log("Published.");
+  }
+}
+
+main().catch(console.error);
+```
+
+If everything works, you'll see ~10 log lines streaming for ~5–10 minutes, then a new `Peer-review` contribution at https://future-science.org linked to the original paper.
+
+---
+
+**End of handoff document.**
+
+
