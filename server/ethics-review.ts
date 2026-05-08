@@ -358,15 +358,17 @@ export async function loadPaperContext(opts: {
   initiativeSlug: string;
   paperTitle?: string;
   emitEvent?: (phase: string, message: string) => Promise<void>;
+  eventPrefix?: string;
 }): Promise<PaperContext> {
   const { projectId, documentId, initiativeDocId, initiativeSlug, paperTitle, emitEvent } = opts;
+  const prefix = opts.eventPrefix ?? "ethics";
 
   let fsAbstracts: FutureScienceAbstract[] = [];
   try {
     const fsData = await fetchAbstractsAndKeywords([], initiativeDocId);
     fsAbstracts = fsData.abstracts;
   } catch (err) {
-    if (emitEvent) await emitEvent("paper-fetch-warning", `Future Science fetch failed: ${err instanceof Error ? err.message : String(err)}.`);
+    if (emitEvent) await emitEvent(`${prefix}-fetch-warning`, `Future Science fetch failed: ${err instanceof Error ? err.message : String(err)}.`);
   }
 
   const fsHit = fsAbstracts.find(a => a.documentId === documentId);
@@ -377,7 +379,7 @@ export async function loadPaperContext(opts: {
   const abstract = fsHit?.abstract || projHit?.description || "";
   const url = `https://future-science.org/${initiativeSlug}/${documentId}`;
 
-  if (emitEvent) await emitEvent("paper-fulltext", `Fetching full text for "${title}"...`);
+  if (emitEvent) await emitEvent(`${prefix}-fulltext`, `Fetching full text for "${title}"...`);
   const fullText = await fetchFsPaperContent(documentId, initiativeSlug);
   const hadFullText = !!(fullText && fullText.length > 200);
 

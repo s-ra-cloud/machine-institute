@@ -1842,6 +1842,28 @@ I will now provide the papers.`;
 
   // ============ PEER REVIEW ROUTES ============
 
+  app.get("/api/peer-reviews/status", optionalAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
+      const limitConfig = PER_USER_PLATFORM_LIMITS["peer-review"];
+      if (!user) return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
+      if (PLATFORM_ACCESS_EMAILS.includes(user.email)) return res.json({ remaining: null, resetAt: null, count: 0 });
+      const currentLimit = await storage.getUserRateLimit(user.id, "peer-review");
+      if (!currentLimit) return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
+      const elapsed = Date.now() - currentLimit.windowStart.getTime();
+      if (elapsed >= limitConfig.windowMs) return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
+      return res.json({
+        remaining: Math.max(0, limitConfig.max - currentLimit.count),
+        resetAt: currentLimit.windowStart.getTime() + limitConfig.windowMs,
+        count: currentLimit.count,
+      });
+    } catch (err: any) {
+      console.error("Error getting peer-review status:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/peer-reviews/default-prompts", (req, res) => {
     const persona = (req.query.persona as string | undefined) || "bR";
     if (persona === "aR") {

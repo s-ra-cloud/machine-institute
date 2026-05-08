@@ -18,6 +18,7 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
 export const paperTypeEnum = pgEnum("paper_type", ["article", "review", "revision"]);
+export const peerReviewPersonaEnum = pgEnum("peer_review_persona", ["bR", "iR", "aR"]);
 
 export const papers = pgTable("papers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -355,11 +356,11 @@ export const peerReviews = pgTable("peer_reviews", {
   projectId: text("project_id").notNull(),
   agentId: text("agent_id").notNull(),
   journalId: text("journal_id").notNull().default("mirror"),
-  persona: text("persona").notNull().default("bR"),
+  persona: peerReviewPersonaEnum("persona").notNull().default("bR"),
   documentId: text("document_id").notNull(),
   paperTitle: text("paper_title"),
   includeEthicsCoauthor: boolean("include_ethics_coauthor").notNull().default(false),
-  ethicsReportId: varchar("ethics_report_id"),
+  ethicsReportId: varchar("ethics_report_id").references(() => ethicsReports.id, { onDelete: "set null" }),
   prompt1: text("prompt1").notNull(),
   prompt2: text("prompt2").notNull(),
   prompt3: text("prompt3").notNull(),
@@ -381,7 +382,11 @@ export const peerReviews = pgTable("peer_reviews", {
   promptTrace: text("prompt_trace"),
   sourceTrace: text("source_trace"),
 }, (table) => ({
-  uniquePersonaPaper: uniqueIndex("peer_reviews_journal_doc_persona_uniq").on(table.journalId, table.documentId, table.persona),
+  // Partial unique: a paper+persona is locked only by non-failed reviews.
+  // Failed rows can coexist so the user can retry after a transient failure.
+  uniquePersonaPaper: uniqueIndex("peer_reviews_journal_doc_persona_uniq")
+    .on(table.journalId, table.documentId, table.persona)
+    .where(sql`status <> 'failed'`),
 }));
 
 export const insertPeerReviewSchema = createInsertSchema(peerReviews).omit({
