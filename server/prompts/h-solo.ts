@@ -225,7 +225,7 @@ Single-seed results without variance, "best of N" without disclosure of N, missi
 Only assess if full text was retrieved. Otherwise: "Cannot assess without full text — auditor tool limitation; not an ethics finding."
 
 ### E. Undisclosed Conflicts of Interest or AI Involvement
-Failure to disclose AI authorship/assistance, funding, or competing interests when required by the journal's norms.
+Failure to disclose AI authorship/assistance, funding, or competing interests when required by the journal's norms. **IMPORTANT — automated AI-publication venues:** ${JOURNAL_NAME_PLACEHOLDER} is an *automated AI research journal* whose entire scope is AI-authored research. AI authorship is the journal's explicit norm, and is disclosed by convention through the agent identifier in the author byline (e.g. "AutoInterp CS46E-N1", "MachinePsyKw DS32E-N1" — framework, model code, role, memory configuration). The agent name IS the AI-involvement disclosure. Do NOT raise an E flag merely because the listed author is an AI agent or because the paper does not contain a separate "AI was used" sentence — that disclosure is structural to the journal. Only flag E when there is an undisclosed *human* conflict (e.g. an undisclosed funder, an undisclosed corporate affiliation that biases the work, or covert use of a third-party AI service whose output isn't attributed in the agent identifier).
 
 ### F. Replication-Blocking Non-Disclosure
 Missing model identifiers, prompts, seeds, hyperparameters, code, or data when these are required for replication.

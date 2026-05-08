@@ -16,7 +16,7 @@ export interface ExtractedCitation {
 }
 
 export interface VerifiedCitation extends ExtractedCitation {
-  verifiedSource: "future-science" | "openalex" | "none";
+  verifiedSource: "future-science" | "openalex" | "arxiv" | "none";
   verifiedTitle?: string;
   verifiedUrl?: string;
   // True when the verified work's title meaningfully overlaps with the bibliography line
@@ -262,6 +262,36 @@ function verifyAgainstFs(c: ExtractedCitation, fsAbstracts: FutureScienceAbstrac
   return null;
 }
 
+// Fetch the canonical arXiv abstract page and parse the real paper title from the
+// citation_title meta tag. This is far more reliable than OpenAlex free-text
+// search by arXiv ID, which often returns an unrelated paper.
+async function verifyAgainstArxiv(arxivId: string): Promise<{ verified: boolean; title?: string; url?: string } | null> {
+  try {
+    const url = `https://arxiv.org/abs/${encodeURIComponent(arxivId)}`;
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 7000);
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "MachineInstitute-EthicsAuditor", "Accept": "text/html" },
+      signal: ctrl.signal,
+      redirect: "follow",
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) return { verified: false };
+    const html = await resp.text();
+    // Prefer the citation_title meta (clean, no "[ID]" prefix). Fallback to <title>.
+    const metaM = html.match(/<meta\s+name=["']citation_title["']\s+content=["']([^"']+)["']/i);
+    let title: string | undefined = metaM?.[1];
+    if (!title) {
+      const titleM = html.match(/<title>\s*(?:\[[^\]]+\]\s*)?([^<]+?)\s*<\/title>/i);
+      title = titleM?.[1];
+    }
+    if (!title || title.length < 4) return { verified: false };
+    return { verified: true, title: title.trim(), url };
+  } catch {
+    return null;
+  }
+}
+
 async function verifyAgainstOpenAlex(c: ExtractedCitation): Promise<{ verified: boolean; title?: string; url?: string } | null> {
   try {
     let url: string | null = null;
@@ -320,6 +350,16 @@ export async function verifyCitations(citations: ExtractedCitation[], fsAbstract
     if (fs?.verified) {
       const match = titleMatches(c.context, fs.title);
       return { ...c, verifiedSource: "future-science" as const, verifiedTitle: fs.title, verifiedUrl: fs.url, titleMatchesClaim: match.ok, matchNote: match.note };
+    }
+    // For arXiv citations, hit arxiv.org directly first — it's the authoritative
+    // source for the paper title at that ID. OpenAlex free-text search by arXiv
+    // ID is unreliable and frequently returns an unrelated work.
+    if (c.arxivId) {
+      const ax = await verifyAgainstArxiv(c.arxivId);
+      if (ax?.verified && ax.title) {
+        const match = titleMatches(c.context, ax.title);
+        return { ...c, verifiedSource: "arxiv" as const, verifiedTitle: ax.title, verifiedUrl: ax.url, titleMatchesClaim: match.ok, matchNote: match.note };
+      }
     }
     const oa = await verifyAgainstOpenAlex(c);
     if (oa?.verified) {
@@ -435,6 +475,7 @@ export function formatVerificationReport(v: PaperVerification): string {
     return `**Citation analysis:** Full text retrieved. Zero citations to external works detected. Section B must note this explicitly (the paper makes no verifiable references).`;
   }
   const verifiedFs = v.citations.filter(c => c.verifiedSource === "future-science").length;
+  const verifiedAx = v.citations.filter(c => c.verifiedSource === "arxiv").length;
   const verifiedOa = v.citations.filter(c => c.verifiedSource === "openalex").length;
   const unverified = v.citations.filter(c => c.verifiedSource === "none").length;
   const mismatched = v.citations.filter(c => c.verifiedSource !== "none" && c.titleMatchesClaim === false).length;
@@ -445,11 +486,12 @@ export function formatVerificationReport(v: PaperVerification): string {
       ? ` — *** TITLE MISMATCH: the URL/ID resolves to a DIFFERENT work than the bibliography line claims (likely mis-citation or fabricated reference) ***`
       : "";
     if (c.verifiedSource === "future-science") return `  ${i + 1}. ${id} — VERIFIED in Future Science: "${c.verifiedTitle ?? "(title unavailable)"}"${mismatchTag}${claim}`;
+    if (c.verifiedSource === "arxiv") return `  ${i + 1}. ${id} — VERIFIED on arXiv: "${c.verifiedTitle ?? "(title unavailable)"}"${c.verifiedUrl ? ` <${c.verifiedUrl}>` : ""}${mismatchTag}${claim}`;
     if (c.verifiedSource === "openalex") return `  ${i + 1}. ${id} — VERIFIED in OpenAlex: "${c.verifiedTitle ?? "(title unavailable)"}"${c.verifiedUrl ? ` <${c.verifiedUrl}>` : ""}${mismatchTag}${claim}`;
     return `  ${i + 1}. ${id} — UNVERIFIED (not found in Future Science or OpenAlex; treat as potentially hallucinated, mis-cited, or non-indexed)${claim}`;
   });
   const mismatchHeadline = mismatched > 0
     ? ` *** ${mismatched} citation(s) RESOLVE TO A DIFFERENT WORK than the bibliography claims — flag in Section A as mis-citation/possible fraud. ***`
     : "";
-  return `**Citation analysis:** Full text retrieved. ${v.citations.length} citation(s) detected. Verified ${verifiedFs} via Future Science, ${verifiedOa} via OpenAlex; ${unverified} unverified; ${mismatched} title-mismatched.${mismatchHeadline}\n${lines.join("\n")}`;
+  return `**Citation analysis:** Full text retrieved. ${v.citations.length} citation(s) detected. Verified ${verifiedFs} via Future Science, ${verifiedAx} via arXiv, ${verifiedOa} via OpenAlex; ${unverified} unverified; ${mismatched} title-mismatched.${mismatchHeadline}\n${lines.join("\n")}`;
 }
