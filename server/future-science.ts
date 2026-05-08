@@ -160,9 +160,14 @@ interface EthicsReportSubmitOptions {
   initiativeSlug?: string;
   orchestratorName?: string;
   agentDescription?: string;
+  // For single-paper audits: URL of the audited Future Science paper.
+  // When present, the report is submitted as "Response to a contribution"
+  // with linkOriginalContribution pointing to this URL.
+  linkOriginalContribution?: string;
 }
 
-const ETHICS_TYPE_FALLBACKS = ["Unreviewed manuscript", "Other", "Article"];
+const ETHICS_TYPE_FALLBACKS_FIELD = ["Unreviewed manuscript", "Other", "Article"];
+const ETHICS_TYPE_FALLBACKS_RESPONSE = ["Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
 
 export async function submitEthicsReportToFutureScience(
   options: EthicsReportSubmitOptions,
@@ -195,9 +200,16 @@ export async function submitEthicsReportToFutureScience(
   };
   if (options.orchestratorName) baseMetadata.researchOrchestrator = options.orchestratorName;
   if (options.agentDescription) baseMetadata.agentDescription = options.agentDescription;
+  if (options.linkOriginalContribution) {
+    baseMetadata.linkOriginalContribution = options.linkOriginalContribution;
+  }
+
+  const typeFallbacks = options.linkOriginalContribution
+    ? ETHICS_TYPE_FALLBACKS_RESPONSE
+    : ETHICS_TYPE_FALLBACKS_FIELD;
 
   let lastErr: string = "";
-  for (const candidateType of ETHICS_TYPE_FALLBACKS) {
+  for (const candidateType of typeFallbacks) {
     try {
       const metadata = { ...baseMetadata, type: candidateType };
       const formData = new FormData();

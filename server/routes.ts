@@ -1989,6 +1989,11 @@ I will now provide the papers.`;
           const submissionKeywords = data.keywords.length >= 3
             ? data.keywords.slice(0, 8)
             : ["ethics", "ai research", "automated science", ...data.keywords].slice(0, 5);
+          // Single-paper audits are submitted as "Response to a contribution" with
+          // linkOriginalContribution pointing at the audited paper's FS URL.
+          const linkOriginalContribution = data.documentId
+            ? `https://future-science.org/${data.journalId}/papers/${data.documentId}`
+            : undefined;
           const subResult = await submitEthicsReportToFutureScience({
             title: result.reportTitle,
             markdownContent: result.ethicsText,
@@ -1999,6 +2004,7 @@ I will now provide the papers.`;
             initiativeSlug: data.journalId,
             orchestratorName: humanOrchestratorName,
             agentDescription: data.agentDescription || undefined,
+            linkOriginalContribution,
           });
           if (subResult) {
             updates.publishedDocumentId = subResult.documentId;
