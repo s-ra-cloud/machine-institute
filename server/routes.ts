@@ -1305,10 +1305,25 @@ I will now provide the papers.`;
         .replace(/\*(.+?)\*/g, "<em>$1</em>");
     }
 
-    for (const line of lines) {
-      const trimmed = line.trim();
+    const isUl = (s: string) => s.startsWith("- ") || s.startsWith("* ");
+    const isOl = (s: string) => /^(?:\[?\d+[\].)]\s|[a-zA-Z][).]\s)/.test(s);
+
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
       if (!trimmed) {
-        closeList();
+        // Blank line: keep the current list open if the next non-blank line is
+        // another item of the same list. Authors (and LLMs) often separate list
+        // items with blank lines for readability — each item must NOT restart
+        // the numbering of an <ol>.
+        if (listType) {
+          let j = i + 1;
+          while (j < lines.length && !lines[j].trim()) j++;
+          const next = j < lines.length ? lines[j].trim() : "";
+          const continuesList =
+            (listType === "ul" && isUl(next)) ||
+            (listType === "ol" && isOl(next));
+          if (!continuesList) closeList();
+        }
         continue;
       }
       if (trimmed.startsWith("# ")) { closeList(); htmlLines.push(`<h1>${inlineFormat(trimmed.slice(2))}</h1>`); }
@@ -1316,10 +1331,10 @@ I will now provide the papers.`;
       else if (trimmed.startsWith("### ")) { closeList(); htmlLines.push(`<h3>${inlineFormat(trimmed.slice(4))}</h3>`); }
       else if (trimmed.startsWith("#### ")) { closeList(); htmlLines.push(`<h4>${inlineFormat(trimmed.slice(5))}</h4>`); }
       else if (trimmed.startsWith("---")) { closeList(); htmlLines.push("<hr>"); }
-      else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      else if (isUl(trimmed)) {
         if (listType !== "ul") { closeList(); htmlLines.push("<ul>"); listType = "ul"; }
         htmlLines.push(`<li>${inlineFormat(trimmed.slice(2))}</li>`);
-      } else if (/^(?:\[?\d+[\].)]\s|[a-zA-Z][).]\s)/.test(trimmed)) {
+      } else if (isOl(trimmed)) {
         if (listType !== "ol") { closeList(); htmlLines.push("<ol>"); listType = "ol"; }
         let content = trimmed.replace(/^(?:\[?\d+[\].)]\s*|[a-zA-Z][).]\s*)/, "");
         htmlLines.push(`<li>${inlineFormat(content)}</li>`);
