@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, type EthicsReport, type InsertEthicsReport, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys, ethicsReports } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, type EthicsReport, type InsertEthicsReport, type PeerReview, type InsertPeerReview, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys, ethicsReports, peerReviews } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lt, lte, inArray, and, notInArray, ne } from "drizzle-orm";
 
@@ -72,6 +72,15 @@ export interface IStorage {
   deleteLiteratureReview(id: string): Promise<void>;
   resetAuditLockForJournal(journalId: string): Promise<number>;
   getAuditedPaperIdsForJournal(journalId: string): Promise<string[]>;
+
+  createPeerReview(review: InsertPeerReview): Promise<PeerReview | null>;
+  getPeerReviewById(id: string): Promise<PeerReview | undefined>;
+  getPeerReviewsByProject(projectId: string): Promise<PeerReview[]>;
+  getAllPeerReviews(): Promise<PeerReview[]>;
+  updatePeerReview(id: string, updates: Partial<PeerReview>): Promise<PeerReview>;
+  deletePeerReview(id: string): Promise<void>;
+  deleteAllPeerReviews(): Promise<void>;
+  getReviewedPaperPersonasForJournal(journalId: string): Promise<Array<{ documentId: string; persona: string }>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -447,6 +456,51 @@ export class DatabaseStorage implements IStorage {
       .where(eq(ethicsReports.journalId, journalId))
       .returning({ id: ethicsReports.id });
     return updated.length;
+  }
+
+  async createPeerReview(review: InsertPeerReview): Promise<PeerReview | null> {
+    try {
+      const [created] = await db.insert(peerReviews).values(review).returning();
+      return created;
+    } catch (err: any) {
+      if (err?.code === "23505") {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async getPeerReviewById(id: string): Promise<PeerReview | undefined> {
+    const [row] = await db.select().from(peerReviews).where(eq(peerReviews.id, id));
+    return row;
+  }
+
+  async getPeerReviewsByProject(projectId: string): Promise<PeerReview[]> {
+    return db.select().from(peerReviews).where(eq(peerReviews.projectId, projectId)).orderBy(desc(peerReviews.createdAt));
+  }
+
+  async getAllPeerReviews(): Promise<PeerReview[]> {
+    return db.select().from(peerReviews).orderBy(desc(peerReviews.createdAt));
+  }
+
+  async updatePeerReview(id: string, updates: Partial<PeerReview>): Promise<PeerReview> {
+    const [updated] = await db.update(peerReviews).set(updates).where(eq(peerReviews.id, id)).returning();
+    return updated;
+  }
+
+  async deletePeerReview(id: string): Promise<void> {
+    await db.delete(peerReviews).where(eq(peerReviews.id, id));
+  }
+
+  async deleteAllPeerReviews(): Promise<void> {
+    await db.delete(peerReviews);
+  }
+
+  async getReviewedPaperPersonasForJournal(journalId: string): Promise<Array<{ documentId: string; persona: string }>> {
+    const rows = await db.select({ documentId: peerReviews.documentId, persona: peerReviews.persona })
+      .from(peerReviews)
+      .where(and(eq(peerReviews.journalId, journalId), ne(peerReviews.status, "failed")));
+    return rows;
   }
 
   async getAuditedPaperIdsForJournal(journalId: string): Promise<string[]> {

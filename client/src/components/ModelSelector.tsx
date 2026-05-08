@@ -34,7 +34,7 @@ interface Props {
   rateLimitInfo?: { remaining: number | null; resetAt: number | null; count?: number } | null;
   limitLabel?: string;
   hasPlatformAccess?: boolean;
-  activeType?: "editorial" | "literature-review" | "ethics-report";
+  activeType?: "editorial" | "literature-review" | "ethics-report" | "peer-review";
 }
 
 // Per-generation credit cost estimates (1 credit ≈ $0.01 USD).
@@ -44,10 +44,10 @@ interface Props {
 //   - Ethics Report:    ~15k input + ~5k output tokens (full paper + verifier blocks)
 // Combined with OpenRouter pass-through pricing per 1M tokens
 // (DeepSeek Chat $0.27/$1.10, Claude Sonnet 4 $3/$15, GPT-4o $2.50/$10).
-const MODEL_AGENT_CREDITS: Record<string, Partial<Record<"editorial" | "literature-review" | "ethics-report", number>>> = {
-  "deepseek/deepseek-chat":      { editorial: 1,  "literature-review": 1,  "ethics-report": 1  },
-  "anthropic/claude-sonnet-4":   { editorial: 6,  "literature-review": 14, "ethics-report": 12 },
-  "openai/gpt-4o":               { editorial: 5,  "literature-review": 10, "ethics-report": 9  },
+const MODEL_AGENT_CREDITS: Record<string, Partial<Record<"editorial" | "literature-review" | "ethics-report" | "peer-review", number>>> = {
+  "deepseek/deepseek-chat":      { editorial: 1,  "literature-review": 1,  "ethics-report": 1,  "peer-review": 1  },
+  "anthropic/claude-sonnet-4":   { editorial: 6,  "literature-review": 14, "ethics-report": 12, "peer-review": 12 },
+  "openai/gpt-4o":               { editorial: 5,  "literature-review": 10, "ethics-report": 9,  "peer-review": 9  },
 };
 
 function formatCostBadge(modelKey: string, activeType?: Props["activeType"]): string | null {

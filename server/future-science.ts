@@ -171,6 +171,128 @@ interface EthicsReportSubmitOptions {
 
 const ETHICS_TYPE_FALLBACKS_FIELD = ["Unreviewed manuscript", "Other", "Article"];
 const ETHICS_TYPE_FALLBACKS_RESPONSE = ["Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
+const PEER_REVIEW_TYPE_FALLBACKS = ["Peer-review", "Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
+
+export interface PeerReviewSubmitOptions {
+  title: string;
+  markdownContent: string;
+  abstract: string;
+  keywords: string[];
+  agentName: string;
+  initiativeDocId: string;
+  initiativeSlug?: string;
+  orchestratorName?: string;
+  agentDescription?: string;
+  linkOriginalContribution?: string;
+  // Optional second author (the ethics co-author when enabled).
+  ethicsCoauthorName?: string;
+}
+
+export async function submitPeerReviewToFutureScience(
+  options: PeerReviewSubmitOptions,
+): Promise<{ documentId: string; url: string } | null> {
+  const apiKey = process.env.FUTURE_SCIENCE_API_KEY;
+  if (!apiKey) {
+    console.warn("FUTURE_SCIENCE_API_KEY is not set — skipping Future Science peer review submission.");
+    return null;
+  }
+
+  const visibleAuthorName = splitAgentNameForFutureScience(options.agentName);
+  const authors: Array<Record<string, unknown>> = [{
+    firstName: visibleAuthorName.firstName,
+    lastName: visibleAuthorName.lastName,
+    institution: "Machine Institute",
+    email: "research@machine-institute.org",
+    links: [],
+  }];
+  if (options.ethicsCoauthorName) {
+    const coauthor = splitAgentNameForFutureScience(options.ethicsCoauthorName);
+    authors.push({
+      firstName: coauthor.firstName,
+      lastName: coauthor.lastName,
+      institution: "Machine Institute",
+      email: "research@machine-institute.org",
+      links: [],
+    });
+  }
+
+  const baseMetadata: Record<string, unknown> = {
+    title: options.title,
+    abstract: options.abstract,
+    language: "en",
+    agentName: options.agentName,
+    author: authors,
+    initiative: options.initiativeDocId,
+    keywords: options.keywords.map((k) => ({ text: k })),
+    coauthorsNotified: true,
+    isFormatCompliant: true,
+    sourceLinkCorrect: true,
+    isMarkdown: true,
+  };
+  if (options.orchestratorName) baseMetadata.researchOrchestrator = options.orchestratorName;
+  if (options.agentDescription) {
+    const MAX_AGENT_DESC = 500;
+    baseMetadata.agentDescription = options.agentDescription.length > MAX_AGENT_DESC
+      ? options.agentDescription.slice(0, MAX_AGENT_DESC - 1).trimEnd() + "…"
+      : options.agentDescription;
+  }
+  if (options.linkOriginalContribution) {
+    baseMetadata.linkOriginalContribution = options.linkOriginalContribution;
+  }
+
+  let lastErr: string = "";
+  for (const candidateType of PEER_REVIEW_TYPE_FALLBACKS) {
+    try {
+      const metadata: Record<string, unknown> = { ...baseMetadata, type: candidateType };
+      // linkOriginalContribution is only valid for response-style types
+      if (candidateType !== "Peer-review" && candidateType !== "Response to a contribution") {
+        delete metadata.linkOriginalContribution;
+      }
+      const formData = new FormData();
+      formData.append("data", JSON.stringify({ data: metadata }));
+      const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
+      formData.append("file", mdBlob, "peer-review.md");
+
+      console.log("Future Science peer-review api-bot attempt:", {
+        type: candidateType,
+        agentName: options.agentName,
+        coauthor: options.ethicsCoauthorName || null,
+        initiative: options.initiativeDocId,
+        hasLinkOriginal: Boolean(metadata.linkOriginalContribution),
+      });
+
+      const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
+        method: "POST",
+        headers: { "x-api-key": apiKey },
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        lastErr = await resp.text();
+        console.warn(`FS rejected peer-review type "${candidateType}" (${resp.status}): ${lastErr.slice(0, 200)} — trying next.`);
+        continue;
+      }
+
+      const result: FSPublishResult = await resp.json() as FSPublishResult;
+      const documentId = result?.data?.documentId || result?.documentId || result?.id;
+      const slug = result?.data?.slug || result?.slug;
+      const fsUrl = (result as any)?.data?.url || (result as any)?.url;
+      const initSlug = options.initiativeSlug || "mirror";
+      const url = fsUrl
+        || (slug
+          ? `https://future-science.org/${initSlug}/${slug}`
+          : documentId
+            ? `https://future-science.org/${initSlug}/${documentId}`
+            : "");
+      return { documentId: documentId || "unknown", url };
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+      console.error(`FS peer-review submission attempt ("${candidateType}") error:`, err);
+    }
+  }
+  console.error("All FS peer-review type fallbacks exhausted. Last error:", lastErr);
+  return null;
+}
 
 export async function submitEthicsReportToFutureScience(
   options: EthicsReportSubmitOptions,

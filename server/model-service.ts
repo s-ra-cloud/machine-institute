@@ -205,4 +205,5 @@ export const PER_USER_PLATFORM_LIMITS: Record<string, { max: number; windowMs: n
   editorial: { max: 5, windowMs: 24 * 60 * 60 * 1000 },
   "literature-review": { max: 10, windowMs: 24 * 60 * 60 * 1000 },
   "ethics-report": { max: 5, windowMs: 24 * 60 * 60 * 1000 },
+  "peer-review": { max: 5, windowMs: 24 * 60 * 60 * 1000 },
 };

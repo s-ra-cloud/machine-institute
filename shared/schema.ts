@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, pgEnum, boolean, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -349,3 +349,73 @@ export const insertEthicsReportSchema = createInsertSchema(ethicsReports).omit({
 
 export type InsertEthicsReport = z.infer<typeof insertEthicsReportSchema>;
 export type EthicsReport = typeof ethicsReports.$inferSelect;
+
+export const peerReviews = pgTable("peer_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: text("project_id").notNull(),
+  agentId: text("agent_id").notNull(),
+  journalId: text("journal_id").notNull().default("mirror"),
+  persona: text("persona").notNull().default("bR"),
+  documentId: text("document_id").notNull(),
+  paperTitle: text("paper_title"),
+  includeEthicsCoauthor: boolean("include_ethics_coauthor").notNull().default(false),
+  ethicsReportId: varchar("ethics_report_id"),
+  prompt1: text("prompt1").notNull(),
+  prompt2: text("prompt2").notNull(),
+  prompt3: text("prompt3").notNull(),
+  contentMarkdown: text("content_markdown"),
+  contentHtml: text("content_html"),
+  reviewTitle: text("review_title"),
+  reviewAbstract: text("review_abstract"),
+  recommendation: text("recommendation"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  userId: text("user_id"),
+  orchestratorName: text("orchestrator_name"),
+  agentDescription: text("agent_description"),
+  modelProvider: text("model_provider"),
+  modelName: text("model_name"),
+  providerMode: text("provider_mode"),
+  publishedDocumentId: text("published_document_id"),
+  promptTrace: text("prompt_trace"),
+  sourceTrace: text("source_trace"),
+}, (table) => ({
+  uniquePersonaPaper: uniqueIndex("peer_reviews_journal_doc_persona_uniq").on(table.journalId, table.documentId, table.persona),
+}));
+
+export const insertPeerReviewSchema = createInsertSchema(peerReviews).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+  contentMarkdown: true,
+  contentHtml: true,
+  reviewTitle: true,
+  reviewAbstract: true,
+  recommendation: true,
+  status: true,
+}).extend({
+  projectId: z.string().min(1),
+  agentId: z.string().min(1),
+  journalId: z.string().min(1),
+  persona: z.enum(["bR", "iR", "aR"]),
+  documentId: z.string().min(1),
+  paperTitle: z.string().nullable().optional(),
+  includeEthicsCoauthor: z.boolean().default(false),
+  ethicsReportId: z.string().nullable().optional(),
+  prompt1: z.string().min(1),
+  prompt2: z.string().min(1),
+  prompt3: z.string().min(1),
+  userId: z.string().nullable().optional(),
+  orchestratorName: z.string().nullable().optional(),
+  agentDescription: z.string().nullable().optional(),
+  modelProvider: z.string().nullable().optional(),
+  modelName: z.string().nullable().optional(),
+  providerMode: z.string().nullable().optional(),
+  publishedDocumentId: z.string().nullable().optional(),
+  promptTrace: z.string().nullable().optional(),
+  sourceTrace: z.string().nullable().optional(),
+});
+
+export type InsertPeerReview = z.infer<typeof insertPeerReviewSchema>;
+export type PeerReview = typeof peerReviews.$inferSelect;

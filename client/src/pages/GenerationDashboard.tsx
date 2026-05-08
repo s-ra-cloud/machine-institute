@@ -23,7 +23,32 @@ import {
   FlaskConical,
 } from "lucide-react";
 
-type GenerationType = "editorial" | "literature-review" | "ethics-report";
+type GenerationType = "editorial" | "literature-review" | "ethics-report" | "peer-review";
+
+interface PeerReviewRecord {
+  id: string;
+  projectId: string;
+  agentId: string;
+  journalId: string;
+  persona: string;
+  documentId: string;
+  paperTitle: string | null;
+  includeEthicsCoauthor: boolean;
+  reviewTitle: string | null;
+  reviewAbstract: string | null;
+  recommendation: string | null;
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+  orchestratorName: string | null;
+  modelProvider: string | null;
+  modelName: string | null;
+  providerMode: string | null;
+  publishedDocumentId: string | null;
+  promptTrace: string | null;
+  sourceTrace: string | null;
+  topic?: string | null;
+}
 
 interface RateLimitStatus {
   remaining: number | null;
@@ -129,10 +154,10 @@ const labWorkflowCards = [
   {
     id: "peer-review",
     title: "Peer review a publication",
-    description: "Run structured peer review on an existing Machine Institute publication.",
+    description: "Run structured peer review on an existing Machine Institute publication. Optionally co-author with the H ethics agent.",
     icon: BookOpen,
-    status: "Coming soon",
-    locked: true,
+    status: "Available",
+    locked: false,
   },
   {
     id: "revise-publication",
@@ -212,6 +237,15 @@ export default function GenerationDashboard() {
   const [selectedPaperDocId, setSelectedPaperDocId] = useState<string>("");
   const [selectedPaperTitle, setSelectedPaperTitle] = useState<string>("");
   const [paperPickerQuery, setPaperPickerQuery] = useState<string>("");
+  const [peerPersona, setPeerPersona] = useState<"bR" | "iR" | "aR">("bR");
+  const [peerIncludeEthics, setPeerIncludeEthics] = useState<boolean>(true);
+  const [peerSelectedDocId, setPeerSelectedDocId] = useState<string>("");
+  const [peerSelectedTitle, setPeerSelectedTitle] = useState<string>("");
+  const [peerPickerQuery, setPeerPickerQuery] = useState<string>("");
+  const [peerPrompt1, setPeerPrompt1] = useState<string>("");
+  const [peerPrompt2, setPeerPrompt2] = useState<string>("");
+  const [peerPrompt3, setPeerPrompt3] = useState<string>("");
+  const [peerPromptsExpanded, setPeerPromptsExpanded] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -252,6 +286,9 @@ export default function GenerationDashboard() {
     bLR: "Basic Literature Reviewer agent that produces structured literature reviews from project papers and Future Science abstracts.",
     aLR: "Adversarial Literature Reviewer agent that critically interrogates the literature and surfaces counter-evidence and weaknesses.",
     H: "Ethicist agent performing a single-paper deep ethics audit across eight categories, with full citation and URL verification.",
+    bR: "Basic Peer Reviewer agent producing a structured 9-section peer review of a single submitted paper.",
+    iR: "Innovation-focused Peer Reviewer agent emphasising originality, novelty, and positioning of a single submitted paper.",
+    aR: "Adversarial Peer Reviewer agent stress-testing every claim, assumption and methodology of a single submitted paper.",
   };
 
   const activeRoleCode =
@@ -261,7 +298,9 @@ export default function GenerationDashboard() {
         ? reviewAgentId
         : activeType === "ethics-report"
           ? "H"
-          : "O";
+          : activeType === "peer-review"
+            ? peerPersona
+            : "O";
 
   const agentDescription = AGENT_DESCRIPTIONS[activeRoleCode] ?? AGENT_DESCRIPTIONS.O;
 
@@ -333,6 +372,58 @@ export default function GenerationDashboard() {
     },
   });
 
+  const { data: defaultPeerPrompts } = useQuery<{ prompt1: string; prompt2: string; prompt3: string }>({
+    queryKey: ["/api/peer-reviews/default-prompts", peerPersona],
+    queryFn: async () => {
+      const res = await fetch(`/api/peer-reviews/default-prompts?persona=${encodeURIComponent(peerPersona)}`);
+      return res.json();
+    },
+    enabled: activeType === "peer-review",
+  });
+
+  interface PeerAvailablePaper { documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[] }
+  const { data: peerAvailableData } = useQuery<{ papers: PeerAvailablePaper[] }>({
+    queryKey: ["/api/peer-reviews/available-papers", selectedJournal],
+    queryFn: async () => {
+      const res = await fetch(`/api/peer-reviews/available-papers?journalId=${encodeURIComponent(selectedJournal)}`);
+      return res.json();
+    },
+    enabled: activeType === "peer-review",
+  });
+
+  const { data: peerStatus } = useQuery<RateLimitStatus>({
+    queryKey: ["/api/generation/rate-limit-status", "peer-review"],
+    queryFn: async () => {
+      const res = await fetch("/api/generation/rate-limit-status");
+      const data = await res.json();
+      return data["peer-review"] as RateLimitStatus;
+    },
+    enabled: authenticated,
+    refetchInterval: 10000,
+  });
+
+  const { data: recentPeerReviews } = useQuery<PeerReviewRecord[]>({
+    queryKey: ["/api/peer-reviews-all"],
+    queryFn: async () => {
+      const res = await fetch("/api/peer-reviews");
+      return res.json();
+    },
+    enabled: authenticated,
+    refetchInterval: 8000,
+  });
+
+  const deletePeerReviewMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/peer-reviews/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete review");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews/available-papers"] });
+    },
+  });
+
   const { data: ethicsStatus } = useQuery<RateLimitStatus>({
     queryKey: ["/api/generation/rate-limit-status", "ethics-report"],
     queryFn: async () => {
@@ -356,7 +447,12 @@ export default function GenerationDashboard() {
       if (!ethicsPrompt2Edited) setEthicsPrompt2(defaultEthicsPrompts.prompt2);
       if (!ethicsPrompt3Edited) setEthicsPrompt3(defaultEthicsPrompts.prompt3);
     }
-  }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, defaultEthicsPrompts, reviewMode]);
+    if (activeType === "peer-review" && defaultPeerPrompts) {
+      setPeerPrompt1(defaultPeerPrompts.prompt1);
+      setPeerPrompt2(defaultPeerPrompts.prompt2);
+      setPeerPrompt3(defaultPeerPrompts.prompt3);
+    }
+  }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, defaultEthicsPrompts, defaultPeerPrompts, reviewMode, peerPersona]);
 
   useEffect(() => {
     if (user?.displayName) {
@@ -489,6 +585,43 @@ export default function GenerationDashboard() {
     },
   });
 
+  const generatePeerReviewMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/peer-reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: selectedJournal,
+          journalId: selectedJournal,
+          persona: peerPersona,
+          documentId: peerSelectedDocId,
+          paperTitle: peerSelectedTitle,
+          includeEthicsCoauthor: peerIncludeEthics,
+          prompt1: peerPrompt1 || undefined,
+          prompt2: peerPrompt2 || undefined,
+          prompt3: peerPrompt3 || undefined,
+          orchestratorName: orchestratorName || undefined,
+          agentDescription: agentDescription || undefined,
+          providerMode: modelConfig.providerMode,
+          modelProvider: modelConfig.provider,
+          modelName: modelConfig.modelName,
+          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to generate peer review");
+      }
+      return res.json();
+    },
+    onSuccess: (data: { id?: string }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews/available-papers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
+      if (data?.id) navigate(`/peer-reviews/${data.id}`);
+    },
+  });
+
   const clearHistoryMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/generation/history", { method: "DELETE" });
@@ -499,6 +632,7 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/editorials"] });
       queryClient.invalidateQueries({ queryKey: ["/api/literature-reviews-all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ethics-reports-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews-all"] });
     },
   });
 
@@ -530,9 +664,11 @@ export default function GenerationDashboard() {
   const editorialIsPending = generateEditorialMutation.isPending;
   const reviewIsPending = generateReviewMutation.isPending;
   const ethicsIsPending = generateEthicsMutation.isPending;
+  const peerIsPending = generatePeerReviewMutation.isPending;
   const hasGeneratingEditorial = recentEditorials?.some(e => e.status === "pending" || e.status === "generating");
   const hasGeneratingReview = recentReviews?.some(r => r.status === "pending" || r.status === "generating");
   const hasGeneratingEthics = recentEthics?.some(r => r.status === "pending" || r.status === "generating");
+  const hasGeneratingPeer = recentPeerReviews?.some(r => r.status === "pending" || r.status === "generating");
 
   const byocReady = modelConfig.providerMode === "byoc" ? !!modelConfig.keyValidated : true;
   const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && byocReady &&
@@ -542,6 +678,9 @@ export default function GenerationDashboard() {
   const canSubmitEthics = !ethicsIsPending && !hasGeneratingEthics && byocReady &&
     ethicsPrompt1.trim().length > 0 && selectedPaperDocId.length > 0 &&
     (modelConfig.providerMode === "byoc" || ethicsStatus?.remaining === null || (ethicsStatus?.remaining ?? 1) > 0);
+  const canSubmitPeer = !peerIsPending && !hasGeneratingPeer && byocReady &&
+    peerSelectedDocId.length > 0 && peerPrompt1.trim().length > 0 &&
+    (modelConfig.providerMode === "byoc" || peerStatus?.remaining === null || (peerStatus?.remaining ?? 1) > 0);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -606,7 +745,9 @@ export default function GenerationDashboard() {
                                   ? ethicsStatus
                                   : workflow.id === "literature-review"
                                     ? reviewStatus
-                                    : null;
+                                    : workflow.id === "peer-review"
+                                      ? peerStatus
+                                      : null;
                               if (!cardStatus) return null;
                               return (
                                 <span className="text-[10px] font-mono text-muted-foreground/50" data-testid={`text-uses-remaining-${workflow.id}`}>
@@ -636,6 +777,11 @@ export default function GenerationDashboard() {
                                   setEthicsPrompt1Edited(false);
                                   setEthicsPrompt2Edited(false);
                                   setEthicsPrompt3Edited(false);
+                                } else if (workflow.id === "peer-review") {
+                                  setActiveType("peer-review");
+                                  setPeerSelectedDocId("");
+                                  setPeerSelectedTitle("");
+                                  setPeerPickerQuery("");
                                 } else {
                                   setActiveType("literature-review");
                                   setPromptManuallyEdited(false);
@@ -684,6 +830,8 @@ export default function GenerationDashboard() {
                       <><PenTool className="w-5 h-5 text-primary" /> Generate Editorial</>
                     ) : activeType === "ethics-report" ? (
                       <><Info className="w-5 h-5 text-primary" /> Generate Field Ethics Report</>
+                    ) : activeType === "peer-review" ? (
+                      <><BookOpen className="w-5 h-5 text-primary" /> Generate Peer Review</>
                     ) : (
                       <><BookOpen className="w-5 h-5 text-primary" /> Generate Literature Review</>
                     )}
@@ -693,6 +841,8 @@ export default function GenerationDashboard() {
                       ? "Configure and generate an editorial synthesizing recent research."
                       : activeType === "ethics-report"
                       ? "Run a structured 3-part ethics audit (paper-by-paper → systemic → consolidated flags) of a journal's recent publications."
+                      : activeType === "peer-review"
+                      ? "Run a structured 3-part peer review of a single submitted paper. Each persona (basic / innovation / adversarial) can review a paper once. Optionally add the H ethics agent as a parallel co-author."
                       : "Configure and generate a literature review on a specific research question."}
                   </p>
                 </div>
@@ -760,10 +910,10 @@ export default function GenerationDashboard() {
                   <ModelSelector
                     value={modelConfig}
                     onChange={setModelConfig}
-                    rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : reviewStatus}
-                    limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "ethics report generations" : "review generations"}
+                    rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : activeType === "peer-review" ? peerStatus : reviewStatus}
+                    limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "ethics report generations" : activeType === "peer-review" ? "peer review generations" : "review generations"}
                     hasPlatformAccess={hasPlatformAccess}
-                    activeType={activeType as "editorial" | "literature-review" | "ethics-report"}
+                    activeType={activeType as "editorial" | "literature-review" | "ethics-report" | "peer-review"}
                   />
                 </div>
 
@@ -886,7 +1036,171 @@ export default function GenerationDashboard() {
                   </div>
                 </div>
 
-                {activeType !== "ethics-report" && (
+                {activeType === "peer-review" && (() => {
+                  const papers = peerAvailableData?.papers || [];
+                  const filtered = peerPickerQuery.trim()
+                    ? papers.filter(p =>
+                        p.title.toLowerCase().includes(peerPickerQuery.toLowerCase()) ||
+                        p.authors.toLowerCase().includes(peerPickerQuery.toLowerCase())
+                      )
+                    : papers;
+                  return (
+                    <>
+                      <div>
+                        <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
+                          2. Reviewer Persona
+                        </label>
+                        <div className="grid grid-cols-3 gap-3 mb-3">
+                          {([
+                            { code: "bR" as const, label: "Basic", desc: "Balanced 9-section review" },
+                            { code: "iR" as const, label: "Innovation", desc: "Novelty & positioning focus" },
+                            { code: "aR" as const, label: "Adversarial", desc: "Stress-tests every claim" },
+                          ]).map(p => (
+                            <button
+                              key={p.code}
+                              onClick={() => setPeerPersona(p.code)}
+                              className={`p-3 border text-left transition-all ${
+                                peerPersona === p.code
+                                  ? p.code === "aR"
+                                    ? "border-red-500 bg-red-500/10 text-red-300"
+                                    : "border-primary bg-primary/10"
+                                  : "border-border/50 bg-muted/5 hover:border-primary/40 hover:bg-muted/10"
+                              }`}
+                              data-testid={`button-peer-persona-${p.code}`}
+                            >
+                              <div className="text-xs font-mono uppercase tracking-widest">{p.label} <span className="text-muted-foreground/50">({p.code})</span></div>
+                              <div className="text-[10px] font-mono text-muted-foreground/60 mt-1">{p.desc}</div>
+                            </button>
+                          ))}
+                        </div>
+                        <label className="flex items-center gap-2 text-xs font-mono cursor-pointer mt-2" data-testid="label-include-ethics-coauthor">
+                          <input
+                            type="checkbox"
+                            checked={peerIncludeEthics}
+                            onChange={(e) => setPeerIncludeEthics(e.target.checked)}
+                            className="accent-primary"
+                            data-testid="checkbox-include-ethics-coauthor"
+                          />
+                          <span>Include H ethics agent as co-author (runs in parallel; adds ethics findings to final synthesis and lists H as second author on Future Science)</span>
+                        </label>
+                      </div>
+
+                      <div className="space-y-3">
+                        <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block">
+                          3. Pick a paper to review
+                        </label>
+                        <input
+                          type="text"
+                          value={peerPickerQuery}
+                          onChange={(e) => setPeerPickerQuery(e.target.value)}
+                          placeholder="Search papers by title or author..."
+                          className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
+                          data-testid="input-peer-paper-search"
+                        />
+                        <div className="border border-border/40 max-h-72 overflow-y-auto" data-testid="list-peer-available-papers">
+                          {filtered.length === 0 && (
+                            <p className="text-xs font-mono text-muted-foreground/50 p-4">
+                              {papers.length === 0 ? "Loading available papers…" : "No papers match this search."}
+                            </p>
+                          )}
+                          {filtered.map((p) => {
+                            const isSelected = p.documentId === peerSelectedDocId;
+                            const isLockedForPersona = p.reviewedPersonas.includes(peerPersona);
+                            return (
+                              <button
+                                key={p.documentId}
+                                onClick={() => {
+                                  if (isLockedForPersona) return;
+                                  setPeerSelectedDocId(p.documentId);
+                                  setPeerSelectedTitle(p.title);
+                                }}
+                                disabled={isLockedForPersona}
+                                className={`w-full text-left px-4 py-3 border-b border-border/20 last:border-b-0 transition-colors ${
+                                  isSelected ? "bg-primary/15 border-l-2 border-l-primary" : isLockedForPersona ? "bg-muted/10 opacity-50 cursor-not-allowed" : "hover:bg-muted/10 cursor-pointer"
+                                }`}
+                                data-testid={`peer-paper-option-${p.documentId}`}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-sm text-foreground/90 truncate">{p.title}</p>
+                                    <p className="text-[10px] font-mono text-muted-foreground/60 mt-1 truncate">
+                                      {p.authors || "(unknown)"} · {p.date}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    {p.reviewedPersonas.length > 0 && (
+                                      <span className="text-[9px] font-mono text-muted-foreground/60 border border-border/30 px-2 py-0.5">
+                                        {p.reviewedPersonas.join(", ")}
+                                      </span>
+                                    )}
+                                    {isLockedForPersona && (
+                                      <span className="text-[9px] font-mono text-yellow-400/80 border border-yellow-400/30 px-2 py-0.5 flex items-center gap-1">
+                                        <Lock className="w-3 h-3" /> {peerPersona}
+                                      </span>
+                                    )}
+                                    {isSelected && !isLockedForPersona && (
+                                      <span className="text-[9px] font-mono text-primary border border-primary/40 px-2 py-0.5">Selected</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] font-mono text-muted-foreground/50">
+                          A given paper can be reviewed at most once by each persona ({peerPersona} is currently selected). Already-reviewed papers for this persona are locked.
+                        </p>
+                        {peerSelectedDocId && (
+                          <div className="border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-mono" data-testid="text-peer-selected-paper">
+                            <span className="text-muted-foreground/60">Selected: </span>
+                            <span className="text-foreground/90">{peerSelectedTitle || peerSelectedDocId}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <button
+                          onClick={() => setPeerPromptsExpanded(!peerPromptsExpanded)}
+                          className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest hover:text-muted-foreground transition-colors mb-2"
+                          data-testid="button-toggle-peer-prompts"
+                        >
+                          {peerPromptsExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          5. Peer Review Prompts (3 parts, editable)
+                        </button>
+                        {peerPromptsExpanded && (
+                          <div className="space-y-4">
+                            {[
+                              { idx: 1, label: "Part 1 (sections 1–4)", value: peerPrompt1, set: setPeerPrompt1, dflt: defaultPeerPrompts?.prompt1 },
+                              { idx: 2, label: "Part 2 (sections 5–6)", value: peerPrompt2, set: setPeerPrompt2, dflt: defaultPeerPrompts?.prompt2 },
+                              { idx: 3, label: "Part 3 (sections 7–9 + bibliography + recommendation)", value: peerPrompt3, set: setPeerPrompt3, dflt: defaultPeerPrompts?.prompt3 },
+                            ].map(p => (
+                              <div key={p.idx} className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-mono text-primary/80 uppercase tracking-widest">{p.label}</span>
+                                  <button
+                                    onClick={() => { if (p.dflt) p.set(p.dflt); }}
+                                    className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                                    data-testid={`button-reset-peer-prompt-${p.idx}`}
+                                  >
+                                    <RotateCcw className="w-3 h-3" /> Reset
+                                  </button>
+                                </div>
+                                <textarea
+                                  value={p.value}
+                                  onChange={(e) => p.set(e.target.value)}
+                                  className="w-full h-40 bg-background border border-border/50 px-4 py-3 text-xs text-foreground/70 resize-none focus:outline-none focus:border-primary/50 font-mono"
+                                  data-testid={`input-peer-prompt-${p.idx}`}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {activeType !== "ethics-report" && activeType !== "peer-review" && (
                   <div>
                     <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
                       4. Topic
@@ -997,7 +1311,7 @@ export default function GenerationDashboard() {
                   </>
                 )}
 
-                {activeType !== "ethics-report" && (
+                {activeType !== "ethics-report" && activeType !== "peer-review" && (
                 <div>
                   <button
                     onClick={() => setPromptExpanded(!promptExpanded)}
@@ -1036,13 +1350,19 @@ export default function GenerationDashboard() {
                     onClick={() => {
                       if (activeType === "editorial") generateEditorialMutation.mutate();
                       else if (activeType === "ethics-report") generateEthicsMutation.mutate();
+                      else if (activeType === "peer-review") generatePeerReviewMutation.mutate();
                       else generateReviewMutation.mutate();
                     }}
-                    disabled={activeType === "editorial" ? !canSubmitEditorial : activeType === "ethics-report" ? !canSubmitEthics : !canSubmitReview}
+                    disabled={
+                      activeType === "editorial" ? !canSubmitEditorial
+                      : activeType === "ethics-report" ? !canSubmitEthics
+                      : activeType === "peer-review" ? !canSubmitPeer
+                      : !canSubmitReview
+                    }
                     className="px-8 py-3 bg-primary text-white font-mono text-sm tracking-widest hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(124,58,237,0.2)] hover:shadow-[0_0_30px_rgba(124,58,237,0.4)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none flex items-center gap-2"
                     data-testid="button-generate"
                   >
-                    {(editorialIsPending || reviewIsPending || ethicsIsPending) ? (
+                    {(editorialIsPending || reviewIsPending || ethicsIsPending || peerIsPending) ? (
                       <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</>
                     ) : (
                       <>{activeType === "editorial" ? <PenTool className="w-4 h-4" /> : activeType === "ethics-report" ? <Info className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />} Generate</>
@@ -1064,9 +1384,14 @@ export default function GenerationDashboard() {
                       Ethics report submitted — 3-part audit in progress. This may take several minutes.
                     </p>
                   )}
-                  {(generateEditorialMutation.isError || generateReviewMutation.isError || generateEthicsMutation.isError) && (
+                  {generatePeerReviewMutation.isSuccess && (
+                    <p className="text-[10px] font-mono text-green-400 mt-3" data-testid="text-success-peer">
+                      Peer review submitted — 3-part review in progress{peerIncludeEthics ? " with parallel ethics co-author" : ""}.
+                    </p>
+                  )}
+                  {(generateEditorialMutation.isError || generateReviewMutation.isError || generateEthicsMutation.isError || generatePeerReviewMutation.isError) && (
                     <p className="text-[10px] font-mono text-red-400 mt-3" data-testid="text-error">
-                      {((generateEditorialMutation.error || generateReviewMutation.error || generateEthicsMutation.error) as Error)?.message}
+                      {((generateEditorialMutation.error || generateReviewMutation.error || generateEthicsMutation.error || generatePeerReviewMutation.error) as Error)?.message}
                     </p>
                   )}
                 </div>
@@ -1077,7 +1402,7 @@ export default function GenerationDashboard() {
           <FadeIn className="mt-16">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-heading font-semibold">Recent Generations</h2>
-              {isAdmin && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0) + (recentEthics?.length ?? 0)) > 0 && (
+              {isAdmin && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0) + (recentEthics?.length ?? 0) + (recentPeerReviews?.length ?? 0)) > 0 && (
                 <button
                   onClick={() => {
                     if (confirm("Clear all generation history? This cannot be undone.")) {
@@ -1294,7 +1619,87 @@ export default function GenerationDashboard() {
                 </div>
               ))}
 
-              {(!recentEditorials?.length && !recentReviews?.length && !recentEthics?.length) && (
+              {(recentPeerReviews || []).slice(0, 5).map((rev) => (
+                <div key={rev.id} className="border border-border/40 bg-muted/5 p-5" data-testid={`card-peer-${rev.id}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <BookOpen className="w-4 h-4 text-primary/60" />
+                      <span className="text-[10px] font-mono text-primary uppercase tracking-widest">
+                        Peer Review ({rev.persona})
+                      </span>
+                      <StatusBadge status={rev.status} />
+                      {rev.recommendation && (
+                        <span className={`text-[10px] font-mono px-2 py-0.5 border ${
+                          rev.recommendation === "Reject" ? "text-red-400 border-red-400/30" :
+                          rev.recommendation === "Accept" ? "text-green-400 border-green-400/30" :
+                          "text-yellow-400 border-yellow-400/30"
+                        }`}>
+                          {rev.recommendation}
+                        </span>
+                      )}
+                      {rev.includeEthicsCoauthor && (
+                        <span className="text-[10px] font-mono text-purple-300 border border-purple-500/30 px-2 py-0.5">+ H</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-mono text-muted-foreground/40">
+                      {new Date(rev.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <h3 className="font-heading font-semibold mb-1">
+                    {rev.status === "completed" ? (
+                      <Link href={`/peer-reviews/${rev.id}`} className="hover:text-primary transition-colors">
+                        {rev.reviewTitle || rev.paperTitle || rev.documentId}
+                      </Link>
+                    ) : (
+                      rev.reviewTitle || rev.paperTitle || rev.documentId
+                    )}
+                  </h3>
+
+                  {(rev.status === "pending" || rev.status === "generating") && (
+                    <div className="flex items-center gap-2 mt-3 text-xs font-mono text-primary/50">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Running 3-part review{rev.includeEthicsCoauthor ? " with parallel ethics audit" : ""}...</span>
+                    </div>
+                  )}
+
+                  {rev.status === "completed" && (
+                    <div className="mt-3 flex items-center gap-4">
+                      <Link
+                        href={`/peer-reviews/${rev.id}`}
+                        className="text-[10px] font-mono text-primary hover:underline flex items-center gap-1"
+                        data-testid={`link-view-peer-${rev.id}`}
+                      >
+                        View full review <ExternalLink className="w-3 h-3" />
+                      </Link>
+                      <button
+                        onClick={() => setShowMetadata(showMetadata === rev.id ? null : rev.id)}
+                        className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                        data-testid={`button-metadata-${rev.id}`}
+                      >
+                        <Info className="w-3 h-3" />
+                        {showMetadata === rev.id ? "Hide" : "Show"} metadata
+                      </button>
+                    </div>
+                  )}
+                  {showMetadata === rev.id && <MetadataPanel record={rev} />}
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        if (confirm("Delete this peer review? This cannot be undone.")) {
+                          deletePeerReviewMutation.mutate(rev.id);
+                        }
+                      }}
+                      disabled={deletePeerReviewMutation.isPending}
+                      className="mt-3 text-[10px] font-mono text-muted-foreground/30 hover:text-red-400 transition-colors disabled:opacity-40"
+                      data-testid={`button-delete-peer-${rev.id}`}
+                    >
+                      Delete review
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {(!recentEditorials?.length && !recentReviews?.length && !recentEthics?.length && !recentPeerReviews?.length) && (
                 <div className="text-center py-12 border border-border/30 bg-muted/5">
                   <p className="text-muted-foreground font-mono text-sm">No generations yet.</p>
                   <p className="text-[10px] font-mono text-muted-foreground/40 mt-2">

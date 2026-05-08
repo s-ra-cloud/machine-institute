@@ -340,6 +340,50 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   };
 }
 
+export interface PaperContext {
+  title: string;
+  authors: string;
+  date: string;
+  abstract: string;
+  url: string;
+  fullText: string | null;
+  hadFullText: boolean;
+  fsAbstracts: FutureScienceAbstract[];
+}
+
+export async function loadPaperContext(opts: {
+  projectId: string;
+  documentId: string;
+  initiativeDocId?: string;
+  initiativeSlug: string;
+  paperTitle?: string;
+  emitEvent?: (phase: string, message: string) => Promise<void>;
+}): Promise<PaperContext> {
+  const { projectId, documentId, initiativeDocId, initiativeSlug, paperTitle, emitEvent } = opts;
+
+  let fsAbstracts: FutureScienceAbstract[] = [];
+  try {
+    const fsData = await fetchAbstractsAndKeywords([], initiativeDocId);
+    fsAbstracts = fsData.abstracts;
+  } catch (err) {
+    if (emitEvent) await emitEvent("paper-fetch-warning", `Future Science fetch failed: ${err instanceof Error ? err.message : String(err)}.`);
+  }
+
+  const fsHit = fsAbstracts.find(a => a.documentId === documentId);
+  const projHit = (await storage.getProjectPapers(projectId)).find(p => p.sourceDocumentId === documentId);
+  const title = paperTitle || fsHit?.title || projHit?.title || `Paper ${documentId}`;
+  const authors = fsHit?.authors || projHit?.authors || "(unknown)";
+  const date = fsHit?.date || projHit?.date || "";
+  const abstract = fsHit?.abstract || projHit?.description || "";
+  const url = `https://future-science.org/${initiativeSlug}/${documentId}`;
+
+  if (emitEvent) await emitEvent("paper-fulltext", `Fetching full text for "${title}"...`);
+  const fullText = await fetchFsPaperContent(documentId, initiativeSlug);
+  const hadFullText = !!(fullText && fullText.length > 200);
+
+  return { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts };
+}
+
 async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsReviewOutput> {
   const startTime = Date.now();
   const { projectId, journalId, initiativeDocId, initiativeSlug, journalDisplayName, modelConfig, emitEvent, documentId, paperTitle } = opts;
@@ -351,28 +395,8 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
 
   await emitEvent("ethics-init", `Starting single-paper ethics audit on "${paperTitle || documentId}" in ${journalDisplayName}.`);
 
-  // Load FS abstracts (used as a citation-verification corpus AND to find this paper's metadata)
-  let fsAbstracts: FutureScienceAbstract[] = [];
-  try {
-    const fsData = await fetchAbstractsAndKeywords([], initiativeDocId);
-    fsAbstracts = fsData.abstracts;
-  } catch (err) {
-    await emitEvent("ethics-fetch-warning", `Future Science fetch failed: ${err instanceof Error ? err.message : String(err)}.`);
-  }
-
-  // Resolve paper metadata: prefer FS, fall back to project log, then to caller-supplied title.
-  const fsHit = fsAbstracts.find(a => a.documentId === documentId);
-  const projHit = (await storage.getProjectPapers(projectId)).find(p => p.sourceDocumentId === documentId);
-  const title = paperTitle || fsHit?.title || projHit?.title || `Paper ${documentId}`;
-  const authors = fsHit?.authors || projHit?.authors || "(unknown)";
-  const date = fsHit?.date || projHit?.date || "";
-  const abstract = fsHit?.abstract || projHit?.description || "";
-  const url = `https://future-science.org/${initiativeSlug}/${documentId}`;
-
-  // Fetch full text
-  await emitEvent("ethics-fulltext", `Fetching full text for "${title}"...`);
-  const fullText = await fetchFsPaperContent(documentId, initiativeSlug);
-  const hadFullText = !!(fullText && fullText.length > 200);
+  const ctx = await loadPaperContext({ projectId, documentId, initiativeDocId, initiativeSlug, paperTitle, emitEvent });
+  const { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts } = ctx;
 
   // Citation verification (FS + OpenAlex; OpenAlex covers arXiv via search)
   let verification: PaperVerification = { paperTitle: title, hadFullText, citations: [] };

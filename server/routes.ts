@@ -1,9 +1,11 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, insertPeerReviewSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport, type PeerReview } from "@shared/schema";
 import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPORT_CHUNK_3_PROMPT, H_SINGLE_PAPER_PROMPT, applyJournalName } from "./prompts/h-solo";
-import { runEthicsReport } from "./ethics-review";
+import { runEthicsReport, type EthicsReviewOutput } from "./ethics-review";
+import { runPeerReview } from "./peer-review";
+import { getPeerReviewChunkPrompts, REVIEW_CHUNK_1_PROMPT, REVIEW_CHUNK_2_PROMPT, REVIEW_CHUNK_3_PROMPT, AR_REVIEW_CHUNK_1_PROMPT, AR_REVIEW_CHUNK_2_PROMPT, AR_REVIEW_CHUNK_3_PROMPT, IR_REVIEW_CHUNK_1_PROMPT, IR_REVIEW_CHUNK_2_PROMPT, IR_REVIEW_CHUNK_3_PROMPT, type PeerReviewPersona } from "./prompts/peer-review";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -13,7 +15,7 @@ import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
 import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
-import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
+import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
 function buildConventionName(modelName: string, agentId: string): string {
@@ -964,6 +966,18 @@ I will now provide the papers.`;
         chunks: 3,
         severityOrder: ["CRITICAL", "MAJOR", "MINOR"],
       },
+      peerReview: {
+        defaultJournalId: "mirror",
+        availableJournals: Object.keys(INITIATIVE_DOC_IDS),
+        personas: [
+          { code: "bR", label: "Basic Reviewer" },
+          { code: "iR", label: "Innovation Reviewer" },
+          { code: "aR", label: "Adversarial Reviewer" },
+        ],
+        agentNamePattern: "MachInstit <ModelCode><Persona>-N1",
+        chunks: 3,
+        ethicsCoauthorDefault: true,
+      },
     });
   });
 
@@ -985,6 +999,7 @@ I will now provide the papers.`;
       await storage.deleteAllLiteratureReviews();
       await storage.deleteAllEditorials();
       await storage.deleteAllEthicsReports();
+      await storage.deleteAllPeerReviews();
       return res.json({ success: true });
     } catch (err: any) {
       console.error("Error clearing generation history:", err);
@@ -1003,15 +1018,18 @@ I will now provide the papers.`;
           editorial: { remaining: null, max: null, resetAt: null },
           "literature-review": { remaining: null, max: null, resetAt: null },
           "ethics-report": { remaining: null, max: null, resetAt: null },
+          "peer-review": { remaining: null, max: null, resetAt: null },
         });
       }
 
       const editorialLimit = await storage.getUserRateLimit(user.id, "editorial");
       const reviewLimit = await storage.getUserRateLimit(user.id, "literature-review");
       const ethicsLimit = await storage.getUserRateLimit(user.id, "ethics-report");
+      const peerLimit = await storage.getUserRateLimit(user.id, "peer-review");
       const editorialConfig = PER_USER_PLATFORM_LIMITS["editorial"];
       const reviewConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
       const ethicsConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
+      const peerConfig = PER_USER_PLATFORM_LIMITS["peer-review"];
 
       const now = Date.now();
       const editorialRemaining = editorialLimit
@@ -1029,11 +1047,17 @@ I will now provide the papers.`;
           ? ethicsConfig.max
           : Math.max(0, ethicsConfig.max - ethicsLimit.count))
         : ethicsConfig.max;
+      const peerRemaining = peerLimit
+        ? (now - peerLimit.windowStart.getTime() >= peerConfig.windowMs
+          ? peerConfig.max
+          : Math.max(0, peerConfig.max - peerLimit.count))
+        : peerConfig.max;
 
       return res.json({
         editorial: { remaining: editorialRemaining, max: editorialConfig.max, resetAt: editorialLimit ? editorialLimit.windowStart.getTime() + editorialConfig.windowMs : null },
         "literature-review": { remaining: reviewRemaining, max: reviewConfig.max, resetAt: reviewLimit ? reviewLimit.windowStart.getTime() + reviewConfig.windowMs : null },
         "ethics-report": { remaining: ethicsRemaining, max: ethicsConfig.max, resetAt: ethicsLimit ? ethicsLimit.windowStart.getTime() + ethicsConfig.windowMs : null },
+        "peer-review": { remaining: peerRemaining, max: peerConfig.max, resetAt: peerLimit ? peerLimit.windowStart.getTime() + peerConfig.windowMs : null },
       });
     } catch (err: any) {
       return res.status(500).json({ error: "Internal server error" });
@@ -1815,6 +1839,496 @@ I will now provide the papers.`;
       res.status(500).json({ error: err?.message || "Internal server error" });
     }
   });
+
+  // ============ PEER REVIEW ROUTES ============
+
+  app.get("/api/peer-reviews/default-prompts", (req, res) => {
+    const persona = (req.query.persona as string | undefined) || "bR";
+    if (persona === "aR") {
+      return res.json({ prompt1: AR_REVIEW_CHUNK_1_PROMPT, prompt2: AR_REVIEW_CHUNK_2_PROMPT, prompt3: AR_REVIEW_CHUNK_3_PROMPT });
+    }
+    if (persona === "iR") {
+      return res.json({ prompt1: IR_REVIEW_CHUNK_1_PROMPT, prompt2: IR_REVIEW_CHUNK_2_PROMPT, prompt3: IR_REVIEW_CHUNK_3_PROMPT });
+    }
+    return res.json({ prompt1: REVIEW_CHUNK_1_PROMPT, prompt2: REVIEW_CHUNK_2_PROMPT, prompt3: REVIEW_CHUNK_3_PROMPT });
+  });
+
+  app.get("/api/peer-reviews/available-papers", async (req, res) => {
+    try {
+      const journalId = (req.query.journalId as string | undefined) || "mirror";
+      const initiativeDocId = INITIATIVE_DOC_IDS[journalId];
+      if (!initiativeDocId) return res.status(400).json({ error: "Unknown journal." });
+      const initiativeSlug = INITIATIVE_SLUGS[journalId] || journalId;
+
+      const [fsData, reviewedRows, projectPapers] = await Promise.all([
+        fetchAbstractsAndKeywords([], initiativeDocId).catch(() => ({ abstracts: [] })),
+        storage.getReviewedPaperPersonasForJournal(journalId),
+        storage.getProjectPapers(journalId),
+      ]);
+      const reviewedMap = new Map<string, Set<string>>();
+      for (const r of reviewedRows) {
+        if (!reviewedMap.has(r.documentId)) reviewedMap.set(r.documentId, new Set());
+        reviewedMap.get(r.documentId)!.add(r.persona);
+      }
+
+      const isOwnPublication = (title: string, authors: string): boolean => {
+        const t = (title || "").toLowerCase().trim();
+        const a = (authors || "").toLowerCase();
+        if (t.startsWith("single-paper ethics audit")) return true;
+        if (t.startsWith("field ethics report")) return true;
+        if (t.startsWith("literature review:")) return true;
+        if (t.startsWith("editorial:")) return true;
+        if (t.startsWith("basic peer review:") || t.startsWith("adversarial peer review:") || t.startsWith("innovation peer review:")) return true;
+        if (/machinstit\s+\S+(h|ber|blr|alr|o|br|ar|ir)-n\d/.test(a)) return true;
+        return false;
+      };
+
+      const seen = new Set<string>();
+      const out: Array<{ documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[] }> = [];
+      for (const a of fsData.abstracts) {
+        const key = a.documentId;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        if (isOwnPublication(a.title, a.authors)) continue;
+        out.push({
+          documentId: a.documentId,
+          title: a.title,
+          authors: a.authors,
+          date: a.date,
+          url: `https://future-science.org/${initiativeSlug}/${a.documentId}`,
+          reviewedPersonas: Array.from(reviewedMap.get(a.documentId) || []),
+        });
+      }
+      for (const p of projectPapers) {
+        if (!p.sourceDocumentId || seen.has(p.sourceDocumentId)) continue;
+        seen.add(p.sourceDocumentId);
+        if (isOwnPublication(p.title, p.authors)) continue;
+        out.push({
+          documentId: p.sourceDocumentId,
+          title: p.title,
+          authors: p.authors,
+          date: p.date,
+          url: p.url || `https://future-science.org/${initiativeSlug}/${p.sourceDocumentId}`,
+          reviewedPersonas: Array.from(reviewedMap.get(p.sourceDocumentId) || []),
+        });
+      }
+      out.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      res.json({ papers: out });
+    } catch (err: any) {
+      console.error("Error listing peer-review available papers:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/peer-reviews", async (req, res) => {
+    try {
+      const projectId = req.query.projectId as string | undefined;
+      const reviews = projectId
+        ? await storage.getPeerReviewsByProject(projectId)
+        : await storage.getAllPeerReviews();
+      return res.json(reviews);
+    } catch (err: any) {
+      console.error("Error fetching peer reviews:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/peer-reviews/:id", async (req, res) => {
+    try {
+      const review = await storage.getPeerReviewById(req.params.id);
+      if (!review) return res.status(404).json({ error: "Peer review not found" });
+      return res.json(review);
+    } catch (err: any) {
+      console.error("Error fetching peer review:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/peer-reviews/:id", adminAuth, async (req, res) => {
+    try {
+      await storage.deletePeerReview(String(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error deleting peer review:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  const peerReviewRateLimit = new Map<string, number>();
+
+  app.post("/api/peer-reviews", requireAuth, async (req, res) => {
+    try {
+      const {
+        projectId, journalId, persona, documentId, paperTitle,
+        prompt1, prompt2, prompt3,
+        modelProvider, modelName, providerMode, byocApiKey,
+        orchestratorName, agentDescription,
+        includeEthicsCoauthor,
+      } = req.body;
+
+      const VALID_PROVIDER_MODES = ["platform", "byoc"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      const VALID_PERSONAS: PeerReviewPersona[] = ["bR", "iR", "aR"];
+      if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
+      if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
+      const effectivePersona: PeerReviewPersona = VALID_PERSONAS.includes(persona) ? persona : "bR";
+
+      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
+      const user = (req as any).user;
+      const isPlatform = providerMode !== "byoc";
+
+      if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
+      }
+      if (isPlatform) {
+        if (!process.env.OPENROUTER_API_KEY) return res.status(503).json({ error: "Peer review generation is not configured. OPENROUTER_API_KEY is missing." });
+        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+          const limitConfig = PER_USER_PLATFORM_LIMITS["peer-review"];
+          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "peer-review", limitConfig.max, limitConfig.windowMs);
+          if (!rateCheck.allowed) return res.status(429).json({ error: `Peer review generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
+        }
+      }
+      if (providerMode === "byoc") {
+        if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
+        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
+        if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
+        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
+      }
+      if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        const clientIp = req.ip || "unknown";
+        const last = peerReviewRateLimit.get(clientIp) || 0;
+        if (Date.now() - last < 30000) return res.status(429).json({ error: "Please wait at least 30 seconds between peer review requests." });
+        peerReviewRateLimit.set(clientIp, Date.now());
+      }
+
+      const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
+      if (!documentId || typeof documentId !== "string") return res.status(400).json({ error: "documentId is required." });
+
+      // Per-paper-per-persona lock
+      const reviewed = await storage.getReviewedPaperPersonasForJournal(effectiveJournalId);
+      if (reviewed.some(r => r.documentId === documentId && r.persona === effectivePersona)) {
+        return res.status(409).json({ error: `This paper has already been reviewed by the ${effectivePersona} persona.` });
+      }
+
+      const [defaultP1, defaultP2, defaultP3] = getPeerReviewChunkPrompts(effectivePersona);
+      const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", effectivePersona);
+      const includeEthics = !!includeEthicsCoauthor;
+
+      const modelConfig: ModelProviderConfig = {
+        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
+        provider: modelProvider || "openrouter",
+        modelName: modelName || "",
+        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
+      };
+
+      const parsed = insertPeerReviewSchema.safeParse({
+        projectId: projectId || effectiveJournalId,
+        agentId: effectivePersona,
+        journalId: effectiveJournalId,
+        persona: effectivePersona,
+        documentId,
+        paperTitle: paperTitle || null,
+        includeEthicsCoauthor: includeEthics,
+        prompt1: prompt1 || defaultP1,
+        prompt2: prompt2 || defaultP2,
+        prompt3: prompt3 || defaultP3,
+        userId: user?.id || null,
+        orchestratorName: effectiveOrchestratorName,
+        agentDescription: agentDescription || null,
+        modelProvider: modelConfig.provider,
+        modelName: resolveModelName(modelConfig),
+        providerMode: modelConfig.providerMode,
+      });
+      if (!parsed.success) return res.status(400).json({ error: fromZodError(parsed.error).message });
+
+      const review = await storage.createPeerReview(parsed.data);
+      if (!review) {
+        return res.status(409).json({ error: `This paper has already been reviewed by the ${effectivePersona} persona.` });
+      }
+      res.status(201).json(review);
+
+      generatePeerReviewBackground(review.id, parsed.data, modelConfig, includeEthics).catch(err => {
+        console.error("Background peer review generation failed:", err);
+      });
+    } catch (err: any) {
+      console.error("Error creating peer review:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  async function generatePeerReviewBackground(
+    reviewId: string,
+    data: { projectId: string; agentId: string; journalId: string; persona: string; documentId: string; paperTitle?: string | null; prompt1: string; prompt2: string; prompt3: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
+    modelConfig: ModelProviderConfig,
+    includeEthicsCoauthor: boolean,
+  ) {
+    const initiativeDocId = INITIATIVE_DOC_IDS[data.journalId] || INITIATIVE_DOC_IDS["mirror"];
+    if (modelConfig.providerMode === "byoc" && !modelConfig.apiKey && data.userId) {
+      const stored = getEphemeralKey(data.userId, modelConfig.provider);
+      if (stored) modelConfig.apiKey = stored;
+    }
+    const resolvedModel = resolveModelName(modelConfig);
+    const persona = data.persona as PeerReviewPersona;
+    const robotAgentName = buildConventionName(resolvedModel, persona);
+    const ethicsAgentName = buildConventionName(resolvedModel, "H");
+
+    async function emit(phase: string, message: string) {
+      try {
+        await storage.createResearchEvent({ source: robotAgentName, agentId: persona, phase, message });
+      } catch (e) {
+        console.error(`[PeerReview ${reviewId}] Failed to emit event:`, e);
+      }
+    }
+
+    try {
+      await storage.updatePeerReview(reviewId, { status: "generating" });
+      await emit("peer-review-init", `${persona} peer review started for paper ${data.documentId} in ${data.journalId}.`);
+
+      // Optionally launch ethics co-author pipeline in parallel (or reuse existing completed report).
+      let ethicsPromise: Promise<EthicsReviewOutput | null> = Promise.resolve(null);
+      let reusedEthicsReportId: string | null = null;
+      if (includeEthicsCoauthor) {
+        const existingReports = await storage.getEthicsReportsByProject(data.projectId);
+        const existing = existingReports.find(r => r.status === "completed" && r.documentId === data.documentId && r.contentMarkdown);
+        if (existing) {
+          reusedEthicsReportId = existing.id;
+          await emit("peer-review-ethics-reuse", `Reusing existing completed ethics audit ${existing.id} for ethics co-author block.`);
+          let flagsList: EthicsReviewOutput["flagsList"] = [];
+          let recommendations: string[] = [];
+          try { flagsList = JSON.parse(existing.flagsJson || "[]"); } catch {}
+          try { recommendations = JSON.parse(existing.recommendationsJson || "[]"); } catch {}
+          const reused: EthicsReviewOutput = {
+            ethicsText: existing.contentMarkdown!,
+            chunk1: "", chunk2: "", chunk3: "",
+            flagsList,
+            recommendations,
+            clearanceStatement: existing.clearanceStatement || "",
+            clearanceStatus: (existing.clearanceStatus as EthicsReviewOutput["clearanceStatus"]) || "CLEARED_WITH_CONDITIONS",
+            reportTitle: existing.reportTitle || "",
+            reportAbstract: existing.reportAbstract || "",
+            durationSeconds: 0,
+            papersUsed: [{ title: existing.paperTitle || "", authors: "", date: "", documentId: data.documentId }],
+            auditedPaperIds: existing.auditedPaperIds || [],
+          };
+          ethicsPromise = Promise.resolve(reused);
+        } else {
+          await emit("peer-review-ethics-launch", `Launching parallel ethics co-author audit (${ethicsAgentName}).`);
+          const ethicsReport = await storage.createEthicsReport({
+            projectId: data.projectId,
+            agentId: "H",
+            journalId: data.journalId,
+            keywords: [],
+            researchQuestion: `Single-paper ethics audit (peer-review co-author) of "${data.paperTitle || data.documentId}" in ${getJournalDisplayName(data.journalId)}`,
+            documentId: data.documentId,
+            paperTitle: data.paperTitle || null,
+            prompt1: H_SINGLE_PAPER_PROMPT,
+            prompt2: H_SOLO_REPORT_CHUNK_2_PROMPT,
+            prompt3: H_SOLO_REPORT_CHUNK_3_PROMPT,
+            userId: data.userId || null,
+            orchestratorName: data.orchestratorName || null,
+            agentDescription: "Ethicist agent (H) operating in peer-review co-author mode.",
+            modelProvider: modelConfig.provider,
+            modelName: resolvedModel,
+            providerMode: modelConfig.providerMode,
+            status: "generating",
+          } as any);
+          // Reserve ethics lock atomically
+          const reservedIds = [`doc:${data.documentId}`];
+          if (data.paperTitle) reservedIds.push(`title:${data.paperTitle.toLowerCase().trim()}`);
+          await storage.updateEthicsReport(ethicsReport.id, { auditedPaperIds: reservedIds });
+          reusedEthicsReportId = ethicsReport.id;
+
+          ethicsPromise = (async () => {
+            try {
+              const eResult = await runEthicsReport({
+                reportId: ethicsReport.id,
+                projectId: data.projectId,
+                agentId: "H",
+                agentName: ethicsAgentName,
+                journalId: data.journalId,
+                journalName: getJournalDisplayName(data.journalId),
+                initiativeDocId,
+                initiativeSlug: INITIATIVE_SLUGS[data.journalId] || data.journalId,
+                journalDisplayName: JOURNAL_DISPLAY_NAMES[data.journalId] || data.journalId,
+                keywords: [],
+                topic: null,
+                prompt1: H_SINGLE_PAPER_PROMPT,
+                prompt2: H_SOLO_REPORT_CHUNK_2_PROMPT,
+                prompt3: H_SOLO_REPORT_CHUNK_3_PROMPT,
+                documentId: data.documentId,
+                paperTitle: data.paperTitle || null,
+                singlePaperPrompt: H_SINGLE_PAPER_PROMPT,
+                modelConfig: { ...modelConfig, modelName: resolvedModel },
+                emitEvent: async (phase, msg) => {
+                  try { await storage.createResearchEvent({ source: ethicsAgentName, agentId: "H", phase, message: msg }); } catch {}
+                },
+              });
+              const rawHtml = markdownToHtml(eResult.ethicsText);
+              const safeHtml = sanitizeHtml(rawHtml);
+              await storage.updateEthicsReport(ethicsReport.id, {
+                contentMarkdown: eResult.ethicsText,
+                contentHtml: safeHtml,
+                reportTitle: eResult.reportTitle,
+                reportAbstract: eResult.reportAbstract,
+                clearanceStatus: eResult.clearanceStatus,
+                clearanceStatement: eResult.clearanceStatement,
+                flagsJson: JSON.stringify(eResult.flagsList),
+                recommendationsJson: JSON.stringify(eResult.recommendations),
+                auditedPaperIds: eResult.auditedPaperIds,
+                status: "completed",
+                completedAt: new Date(),
+              });
+              return eResult;
+            } catch (err) {
+              console.error(`[PeerReview ${reviewId}] Ethics co-author pipeline failed:`, err);
+              await storage.updateEthicsReport(ethicsReport.id, { status: "failed" });
+              return null;
+            }
+          })();
+        }
+      }
+
+      // Pass the ethics promise (NOT awaited) so peer-review chunks 1+2 run in parallel with the ethics audit.
+      // runPeerReview will await the promise only just before chunk 3 (final synthesis).
+      const result = await runPeerReview({
+        reviewId,
+        projectId: data.projectId,
+        persona,
+        agentName: robotAgentName,
+        journalId: data.journalId,
+        initiativeDocId,
+        initiativeSlug: INITIATIVE_SLUGS[data.journalId] || data.journalId,
+        journalDisplayName: JOURNAL_DISPLAY_NAMES[data.journalId] || data.journalId,
+        documentId: data.documentId,
+        paperTitle: data.paperTitle || null,
+        prompt1: data.prompt1,
+        prompt2: data.prompt2,
+        prompt3: data.prompt3,
+        modelConfig: { ...modelConfig, modelName: resolvedModel },
+        emitEvent: emit,
+        ethicsPromise: includeEthicsCoauthor ? ethicsPromise : Promise.resolve(null),
+      });
+
+      const rawHtml = markdownToHtml(result.reviewText);
+      const safeHtml = sanitizeHtml(rawHtml);
+
+      const promptTrace = JSON.stringify({
+        prompt1: data.prompt1, prompt2: data.prompt2, prompt3: data.prompt3,
+        model: resolvedModel, provider: modelConfig.provider, providerMode: modelConfig.providerMode,
+        timestamp: new Date().toISOString(),
+      });
+      const sourceTrace = JSON.stringify({
+        journalId: data.journalId,
+        documentId: data.documentId,
+        paperUsed: result.paperUsed,
+        ethicsReportId: reusedEthicsReportId,
+        ethicsSummary: result.ethicsSummary || null,
+      });
+
+      const updates: Partial<PeerReview> = {
+        contentMarkdown: result.reviewText,
+        contentHtml: safeHtml,
+        reviewTitle: result.reviewTitle,
+        reviewAbstract: result.reviewAbstract,
+        recommendation: result.recommendation,
+        promptTrace,
+        sourceTrace,
+        ethicsReportId: reusedEthicsReportId,
+        status: "completed",
+        completedAt: new Date(),
+      };
+
+      // Submit to Future Science
+      if (!process.env.FUTURE_SCIENCE_API_KEY) {
+        await emit("fs-submission-skipped", "Future Science submission skipped: FUTURE_SCIENCE_API_KEY is not configured.");
+      } else {
+        try {
+          const humanOrchestratorName = data.orchestratorName && data.orchestratorName !== robotAgentName
+            ? data.orchestratorName
+            : undefined;
+          const linkOriginalContribution = `https://future-science.org/${data.journalId}/${data.documentId}`;
+          const subResult = await submitPeerReviewToFutureScience({
+            title: result.reviewTitle,
+            markdownContent: result.reviewText,
+            abstract: result.reviewAbstract,
+            keywords: ["peer review", "ai research", persona],
+            agentName: robotAgentName,
+            initiativeDocId,
+            initiativeSlug: data.journalId,
+            orchestratorName: humanOrchestratorName,
+            agentDescription: data.agentDescription || undefined,
+            linkOriginalContribution,
+            ethicsCoauthorName: includeEthicsCoauthor && ethicsResult ? ethicsAgentName : undefined,
+          });
+          if (subResult) {
+            updates.publishedDocumentId = subResult.documentId;
+            await emit("fs-submission-success", `Peer review submitted to Future Science. Document ID: ${subResult.documentId}`);
+          } else {
+            await emit("fs-submission-failed", "Future Science submission failed (non-fatal).");
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          await emit("fs-submission-failed", `Future Science submission failed: ${msg}`);
+        }
+      }
+
+      await storage.updatePeerReview(reviewId, updates);
+      await emit("peer-review-completed", `${persona} peer review completed (recommendation: ${result.recommendation}).`);
+    } catch (err: any) {
+      console.error(`[PeerReview ${reviewId}] Generation failed:`, err);
+      const safeError = (err.message || "Unknown error").replace(/[<>&"']/g, "");
+      await emit("failure", `Peer review generation failed: ${safeError}`);
+      await storage.updatePeerReview(reviewId, {
+        status: "failed",
+        contentHtml: `<p>Generation failed: ${safeError}</p>`,
+      });
+    }
+  }
+
+  app.post("/api/peer-reviews/:id/republish", adminAuth, async (req, res) => {
+    try {
+      const reviewId = String(req.params.id);
+      const review = await storage.getPeerReviewById(reviewId);
+      if (!review) return res.status(404).json({ error: "Peer review not found." });
+      if (review.status !== "completed") return res.status(400).json({ error: `Review is not completed (status: ${review.status}).` });
+      if (!review.contentMarkdown || !review.reviewTitle || !review.reviewAbstract) {
+        return res.status(400).json({ error: "Review is missing content/title/abstract." });
+      }
+      if (!process.env.FUTURE_SCIENCE_API_KEY) return res.status(500).json({ error: "FUTURE_SCIENCE_API_KEY is not configured." });
+
+      const initiativeDocId = INITIATIVE_DOC_IDS[review.journalId] || INITIATIVE_DOC_IDS["mirror"];
+      const robotAgentName = buildConventionName(review.modelName || "", review.persona);
+      const humanOrchestratorName = review.orchestratorName && review.orchestratorName !== robotAgentName
+        ? review.orchestratorName
+        : undefined;
+      const ethicsAgentName = review.includeEthicsCoauthor
+        ? buildConventionName(review.modelName || "", "H")
+        : undefined;
+      const linkOriginalContribution = `https://future-science.org/${review.journalId}/${review.documentId}`;
+
+      const subResult = await submitPeerReviewToFutureScience({
+        title: review.reviewTitle,
+        markdownContent: review.contentMarkdown,
+        abstract: review.reviewAbstract,
+        keywords: ["peer review", "ai research", review.persona],
+        agentName: robotAgentName,
+        initiativeDocId,
+        initiativeSlug: review.journalId,
+        orchestratorName: humanOrchestratorName,
+        agentDescription: review.agentDescription || undefined,
+        linkOriginalContribution,
+        ethicsCoauthorName: ethicsAgentName,
+      });
+      if (!subResult) return res.status(502).json({ error: "Future Science rejected all fallback types." });
+      await storage.updatePeerReview(reviewId, { publishedDocumentId: subResult.documentId });
+      res.json({ success: true, documentId: subResult.documentId, url: subResult.url });
+    } catch (err: any) {
+      console.error("Error republishing peer review:", err);
+      res.status(500).json({ error: err?.message || "Internal server error" });
+    }
+  });
+
+  // ============ END PEER REVIEW ROUTES ============
 
   // Admin: delete a single literature review
   app.delete("/api/literature-reviews/:id", adminAuth, async (req, res) => {
