@@ -202,6 +202,7 @@ You will receive:
 - The TARGET PAPER (title, authors, abstract, full text when available)
 - A **Citation analysis** block listing every citation extracted from the full text, each verified (or not) against Future Science, OpenAlex, and arXiv. **For arXiv citations the verifier enforces a two-source rule**: it independently consults arxiv.org AND OpenAlex, trusts arXiv as authoritative for the paper title at a given arXiv ID, and only sets \`*** TITLE MISMATCH ***\` when BOTH sources independently agree on a title that contradicts the bibliography line. Single-source disagreements are reported as VERIFIED (with an internal note) and MUST NOT be treated as fraud.
 - An **In-text vs bibliography cross-check** block listing in-text (Author, Year) references that have no matching bibliography entry, and bibliography entries never cited in-text.
+- A **Semantic gloss check** block. For each verified arXiv / OpenAlex citation that the paper introduces with a claim verb ("X showed that…", "Y demonstrated that…", "Z proved that…"), the auditor extracted the surrounding gloss sentence from the paper AND fetched the cited work's abstract. The block lists each (gloss, abstract) pair so you can judge whether the paper faithfully represents what the cited work actually says.
 - A **Link analysis** block listing every URL extracted from the full text. Each URL carries a \`classification\`: \`OK\`, \`BROKEN\` (host explicitly says gone / denied — body snippet quoted), \`BOT-BLOCKED\` (auditor was challenged by Cloudflare / CAPTCHA — DO NOT FLAG), \`RATE-LIMITED\` / \`SERVER-ERROR\` (transient — INFO only), or \`UNVERIFIABLE\`.
 - (Optionally) a list of prior ethics reports on adjacent papers for cross-reference
 
@@ -244,6 +245,12 @@ Missing model identifiers, prompts, seeds, hyperparameters, code, or data when t
 
 ### G. Scope Misrepresentation
 Claims that overreach the actual evidence — e.g. claiming generalisation across models when only one was tested.
+
+**Use the Semantic gloss check block as evidentiary basis for citation-level scope misrepresentation.** For each (gloss, abstract) pair:
+- If the paper's gloss is a fair paraphrase / preserved-meaning compression of the cited abstract — NO flag.
+- If the gloss is vague or only partially supported — INFO note, NO flag.
+- If the gloss attributes a claim to the cited work that the abstract does NOT support, OR contradicts the abstract's actual finding — eligible for **MINOR** with a Trace quoting both the gloss and the contradicting abstract sentence.
+- **Promotion above MINOR is FORBIDDEN unless a SECOND independent source (e.g. OpenAlex AND the arXiv abstract, or a direct in-paper contradiction) independently confirms the misrepresentation.** A single-abstract disagreement is MINOR at most.
 
 ### H. Safety Disclosure
 Irresponsible release of unsafe capabilities, prompts, jailbreaks, or weights without appropriate gating.

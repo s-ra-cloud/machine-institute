@@ -18,6 +18,8 @@ import {
   formatUrlVerificationReport,
   analyzeInTextVsBibliography,
   formatBibliographyAnalysis,
+  buildSemanticGlossPairs,
+  formatSemanticGlossReport,
   type PaperVerification,
 } from "./citation-verifier";
 import type { EthicsReport, ProjectPaper } from "@shared/schema";
@@ -370,6 +372,7 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
   let verification: PaperVerification = { paperTitle: title, hadFullText, citations: [] };
   let urlReport = "**Link analysis:** Skipped (no full text available).";
   let bibReport = "**In-text vs bibliography cross-check:** Skipped (no full text available).";
+  let glossReport = "**Semantic gloss check:** Skipped (no full text available).";
   if (hadFullText) {
     await emitEvent("ethics-citations", `Extracting and verifying citations against Future Science, OpenAlex, and arXiv (two-source agreement enforced for arXiv IDs)...`);
     const citations = extractCitations(fullText!);
@@ -377,6 +380,11 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
     verification = { paperTitle: title, hadFullText: true, citations: verified };
     const verifiedCount = verified.filter(v => v.verifiedSource !== "none").length;
     await emitEvent("ethics-citations", `Citation verification complete: ${verifiedCount}/${verified.length} citations verified (two-source rule prevents single-lookup mismatch flags).`);
+
+    await emitEvent("ethics-gloss", `Pairing in-text claim-verb glosses with cited abstracts for semantic verification...`);
+    const glossPairs = await buildSemanticGlossPairs(verified);
+    glossReport = formatSemanticGlossReport(glossPairs);
+    await emitEvent("ethics-gloss", `Semantic gloss check complete: ${glossPairs.length} pair(s) built from verified arXiv/OpenAlex citations.`);
 
     await emitEvent("ethics-bib", `Cross-checking in-text (Author, Year) references against bibliography entries...`);
     const bibAnalysis = analyzeInTextVsBibliography(fullText!);
@@ -396,7 +404,7 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
   }
 
   const citationBlock = formatVerificationReport(verification);
-  const paperBlock = `# TARGET PAPER\n\n**Title:** ${title}\n**Authors:** ${authors}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${url}\n\n## Abstract\n${(abstract || "(no abstract available)").slice(0, 6000)}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — auditor could not retrieve)"}\n${hadFullText ? (fullText!.slice(0, 30000)) : "(The auditor's automated full-text fetcher returned no usable body content. This is a tool limitation, not evidence of misconduct.)"}\n\n---\n\n## VERIFICATION REPORTS\n\n${citationBlock}\n\n${bibReport}\n\n${urlReport}`;
+  const paperBlock = `# TARGET PAPER\n\n**Title:** ${title}\n**Authors:** ${authors}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${url}\n\n## Abstract\n${(abstract || "(no abstract available)").slice(0, 6000)}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — auditor could not retrieve)"}\n${hadFullText ? (fullText!.slice(0, 30000)) : "(The auditor's automated full-text fetcher returned no usable body content. This is a tool limitation, not evidence of misconduct.)"}\n\n---\n\n## VERIFICATION REPORTS\n\n${citationBlock}\n\n${bibReport}\n\n${glossReport}\n\n${urlReport}`;
 
   await emitEvent("ethics-llm", `Sending audit prompt to ${modelConfig.modelName || modelConfig.provider}...`);
   const result = await generateWithConfig(modelConfig, systemPrompt, paperBlock, { maxTokens: 8000, temperature: 0.3 });

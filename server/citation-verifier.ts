@@ -329,6 +329,186 @@ async function verifyAgainstOpenAlex(c: ExtractedCitation): Promise<{ verified: 
   }
 }
 
+// =====================================================================
+// Semantic gloss verification (Section G — Scope Misrepresentation)
+// =====================================================================
+// For each verified arXiv / OpenAlex citation, pair the surrounding "claim
+// verb" sentence in the paper ("X showed that...", "Y demonstrated that...")
+// with the abstract of the cited work, so the LLM has a structured input for
+// detecting scope misrepresentation rather than relying on its own intuition.
+
+export interface SemanticGlossPair {
+  citationLabel: string;
+  verifiedSource: VerifiedCitation["verifiedSource"];
+  verifiedTitle?: string;
+  verifiedUrl?: string;
+  paperGloss: string;
+  citedAbstract: string;
+  abstractSource: "arxiv" | "openalex";
+}
+
+// Claim verbs commonly used to introduce attributed claims about prior work.
+// Matched as whole words; the immediate-context gloss extractor uses this to
+// pick the sentence in which the paper restates what the cited work "showed".
+const CLAIM_VERB_RE = /\b(?:show(?:ed|s|n)?|demonstrat(?:e|ed|es)|prov(?:e|ed|es|en)?|argu(?:e|ed|es)|find(?:s|ings?)?|found|report(?:ed|s)?|establish(?:ed|es)?|conclud(?:e|ed|es)?|reveal(?:ed|s)?|claim(?:ed|s)?|observ(?:e|ed|es))\b/i;
+
+function extractClaimGloss(context: string): string | null {
+  if (!context) return null;
+  const sentences = context.split(/(?<=[.!?])\s+/);
+  // Prefer the longest sentence containing a claim verb (the gloss is usually the
+  // sentence where the citation appears, which tends to be the most informative).
+  let best: string | null = null;
+  for (const raw of sentences) {
+    const s = raw.trim();
+    if (s.length < 20) continue;
+    if (!CLAIM_VERB_RE.test(s)) continue;
+    if (!best || s.length > best.length) best = s;
+  }
+  return best ? best.slice(0, 500) : null;
+}
+
+async function fetchArxivAbstract(arxivId: string): Promise<string | null> {
+  try {
+    const url = `https://arxiv.org/abs/${encodeURIComponent(arxivId)}`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 7000);
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "MachineInstitute-EthicsAuditor", "Accept": "text/html" },
+      signal: ctrl.signal,
+      redirect: "follow",
+    });
+    clearTimeout(t);
+    if (!resp.ok) return null;
+    const html = await resp.text();
+    const metaM = html.match(/<meta\s+name=["']citation_abstract["']\s+content=["']([\s\S]*?)["']\s*\/?>/i);
+    if (metaM?.[1]) {
+      const cleaned = stripHtml(metaM[1]).trim();
+      if (cleaned.length >= 30) return cleaned.slice(0, 2500);
+    }
+    const blockM = html.match(/<blockquote\s+class=["']abstract[^"']*["'][^>]*>([\s\S]*?)<\/blockquote>/i);
+    if (blockM?.[1]) {
+      const cleaned = stripHtml(blockM[1]).replace(/^abstract:?\s*/i, "").trim();
+      if (cleaned.length >= 30) return cleaned.slice(0, 2500);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function reconstructFromInvertedIndex(inv: unknown): string | null {
+  if (!inv || typeof inv !== "object") return null;
+  const entries = Object.entries(inv as Record<string, unknown>);
+  if (entries.length === 0) return null;
+  let max = -1;
+  for (const [, positions] of entries) {
+    if (!Array.isArray(positions)) continue;
+    for (const p of positions) {
+      if (typeof p === "number" && p > max) max = p;
+    }
+  }
+  if (max < 0) return null;
+  const arr: string[] = new Array(max + 1).fill("");
+  for (const [word, positions] of entries) {
+    if (!Array.isArray(positions)) continue;
+    for (const p of positions) {
+      if (typeof p === "number" && p >= 0 && p <= max) arr[p] = word;
+    }
+  }
+  const abstract = arr.filter(Boolean).join(" ").trim();
+  return abstract.length >= 30 ? abstract.slice(0, 2500) : null;
+}
+
+async function fetchOpenAlexAbstract(workIdOrUrl: string): Promise<string | null> {
+  try {
+    let url: string;
+    if (workIdOrUrl.startsWith("http")) {
+      url = workIdOrUrl;
+    } else if (workIdOrUrl.startsWith("doi:")) {
+      url = `${OPENALEX_BASE}/works/${encodeURIComponent(workIdOrUrl)}`;
+    } else {
+      url = `${OPENALEX_BASE}/works/${encodeURIComponent(workIdOrUrl)}`;
+    }
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 7000);
+    const resp = await fetch(url, { headers: { "User-Agent": OPENALEX_UA }, signal: ctrl.signal });
+    clearTimeout(t);
+    if (!resp.ok) return null;
+    const json: unknown = await resp.json();
+    if (!json || typeof json !== "object") return null;
+    const obj = json as Record<string, unknown>;
+    return reconstructFromInvertedIndex(obj.abstract_inverted_index);
+  } catch {
+    return null;
+  }
+}
+
+export async function buildSemanticGlossPairs(verified: VerifiedCitation[]): Promise<SemanticGlossPair[]> {
+  const candidates = verified.filter(c =>
+    (c.verifiedSource === "arxiv" || c.verifiedSource === "openalex") &&
+    !!c.context &&
+    c.titleMatchesClaim !== false, // skip already-flagged title mismatches
+  );
+  // Cap at 20 to bound network cost; pair extraction is best-effort.
+  const capped = candidates.slice(0, 20);
+  const results = await pMapLimit(capped, 3, async (c): Promise<SemanticGlossPair | null> => {
+    const gloss = extractClaimGloss(c.context!);
+    if (!gloss) return null;
+    let citedAbstract: string | null = null;
+    let abstractSource: "arxiv" | "openalex" | undefined;
+    if (c.arxivId) {
+      citedAbstract = await fetchArxivAbstract(c.arxivId);
+      if (citedAbstract) abstractSource = "arxiv";
+    }
+    if (!citedAbstract && c.verifiedUrl && c.verifiedUrl.includes("openalex.org")) {
+      citedAbstract = await fetchOpenAlexAbstract(c.verifiedUrl);
+      if (citedAbstract) abstractSource = "openalex";
+    }
+    if (!citedAbstract && c.doi) {
+      citedAbstract = await fetchOpenAlexAbstract(`doi:${c.doi}`);
+      if (citedAbstract) abstractSource = "openalex";
+    }
+    if (!citedAbstract || !abstractSource) return null;
+    const label = c.doi ? `DOI ${c.doi}` :
+      c.arxivId ? `arXiv:${c.arxivId}` :
+      c.fsRef ? `FS:${c.fsRef}` :
+      c.authorYear ? `(${c.authorYear.author}, ${c.authorYear.year})` :
+      c.raw;
+    return {
+      citationLabel: label,
+      verifiedSource: c.verifiedSource,
+      verifiedTitle: c.verifiedTitle,
+      verifiedUrl: c.verifiedUrl,
+      paperGloss: gloss,
+      citedAbstract,
+      abstractSource,
+    };
+  });
+  return results.filter((r): r is SemanticGlossPair => r !== null);
+}
+
+export function formatSemanticGlossReport(pairs: SemanticGlossPair[]): string {
+  if (pairs.length === 0) {
+    return `**Semantic gloss check:** No claim-verb glosses (e.g. "X showed that…", "Y demonstrated that…") were detected in the immediate context of any verified arXiv/OpenAlex citation, OR none of those citations had a fetchable abstract. Cross-checking skipped — auditor tool limitation, not an ethics finding.`;
+  }
+  const lines = pairs.map((p, i) => {
+    const verifiedLine = p.verifiedTitle
+      ? `Cited work: "${p.verifiedTitle}"${p.verifiedUrl ? ` <${p.verifiedUrl}>` : ""}`
+      : `Cited work: (verified via ${p.verifiedSource}, title unavailable)`;
+    const abs = p.citedAbstract.slice(0, 700);
+    return `  ${i + 1}. ${p.citationLabel} — ${verifiedLine}\n     Paper's gloss: "${p.paperGloss}"\n     Cited abstract (${p.abstractSource}): "${abs}${p.citedAbstract.length > 700 ? "…" : ""}"`;
+  });
+  return `**Semantic gloss check:** ${pairs.length} verified citation(s) with a claim-verb gloss in the paper were paired with the cited work's abstract. For each pair, judge whether the paper's gloss faithfully represents what the cited abstract actually says.
+
+Severity rules (binding):
+- **Preserved-meaning compressions** (the gloss is a fair paraphrase / summary of the abstract) — NO flag.
+- **Ambiguous** (gloss is vague or only partially supported by the abstract) — INFO note only, NO flag.
+- **Substantive mismatch** (gloss attributes a claim to the cited work that the abstract does NOT support, or contradicts the abstract's actual finding) — eligible for **MINOR** under Section G (Scope Misrepresentation). Quote both the gloss and the contradicting abstract sentence in the Trace.
+- **Promotion above MINOR is FORBIDDEN unless a SECOND independent source confirms the misrepresentation** (per the H-agent severity ladder). A single-abstract disagreement is MINOR at most.
+
+${lines.join("\n")}`;
+}
+
 async function pMapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let i = 0;
