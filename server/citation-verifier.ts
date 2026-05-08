@@ -578,7 +578,7 @@ function isUrlSafeForVerification(rawUrl: string): { ok: true } | { ok: false; r
 // object-not-found, publisher takedown) from bot-blocks (Cloudflare challenge,
 // CAPTCHA, "automated request" interstitials). Returns "broken" only when the
 // body affirmatively says the resource is gone, denied, or never existed.
-function classifyBody(body: string): { kind: "broken" | "bot-blocked" | "unknown"; reason: string; snippet: string } {
+export function classifyBody(body: string): { kind: "broken" | "bot-blocked" | "unknown"; reason: string; snippet: string } {
   const snippet = body.slice(0, 600).replace(/\s+/g, " ").trim();
   const low = body.toLowerCase();
   if (/<code>\s*accessdenied\s*<\/code>/i.test(body) || /<code>\s*nosuchkey\s*<\/code>/i.test(body) || /<code>\s*nosuchbucket\s*<\/code>/i.test(body)) {
