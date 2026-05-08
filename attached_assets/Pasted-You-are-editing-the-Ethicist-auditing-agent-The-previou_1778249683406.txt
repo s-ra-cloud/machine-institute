@@ -1,0 +1,55 @@
+You are editing the Ethicist auditing agent. The previous patch round fixed the major issues (no more fabricated MAJOR flags, in-text vs. bibliography sets are now distinguished, link-body inspection works, internal contradictions resolved). Two mechanical bugs remain. Fix them without disturbing anything that's now working. ## Bug 1: Compound-author citation parser produces false-positive "missing bibliography" flags When the in-text citation parser encounters a compound form like "Crosbie and Shutova (2024)" or "Yin and Steinhardt (2025)" or "Heimersheim and Nanda (2024)", it currently splits the names and tries to match each surname individually against the bibliography. This produces false positives: the bibliography contains "Crosbie, J., & Shutova, E. (2024)" but the parser flags "Shutova (2024)" as missing because it's looking for a single-surname entry. The same issue occurs with "et al." forms and ampersand variants. Fix the in-text citation matching with this logic:  For each in-text citation matched in the body, abstract, or figure captions:
+1. Extract the full surname set from the citation:
+    * "Brown et al. (2020)" -> surnames = {"Brown"}, year = 2020, has_etal = True
+    * "Crosbie and Shutova (2024)" -> surnames = {"Crosbie", "Shutova"}, year = 2024
+    * "Yin & Steinhardt (2025)" -> surnames = {"Yin", "Steinhardt"}, year = 2025
+    * "Heimersheim and Nanda (2024)" -> surnames = {"Heimersheim", "Nanda"}, year = 2024
+    * "Olsson et al. (2022)" -> surnames = {"Olsson"}, year = 2022, has_etal = True
+2. For each bibliography entry, extract its surname set and year:
+    * "Crosbie, J., & Shutova, E. (2024)" -> bib_surnames = {"Crosbie", "Shutova"}, bib_year = 2024
+    * "Olsson, C., Elhage, N., Nanda, N., et al. (2022)" -> bib_surnames = {"Olsson", "Elhage", "Nanda"}, bib_year = 2022
+3. A citation MATCHES a bibliography entry if year matches AND any of: (a) The citation's surname set is a subset of the bibliography entry's surname set (handles "Crosbie and Shutova" matching the full multi-author entry). (b) has_etal is True AND the citation's first surname appears in the bibliography entry's surname set (handles "Olsson et al." matching the full author list). (c) For single-surname citations, the surname appears in the bibliography entry's surname set.
+4. Only flag MINOR "in-text citation missing from bibliography" if NO bibliography entry satisfies any of (a), (b), or (c).
+5. Normalize the surname comparison: case-insensitive, strip diacritics, strip "and"/"&"/"et al."/commas before extracting surnames.
+  After this fix, re-running on the test paper should produce only ONE in-text-only flag: "Brown et al. (2020)". The flags for "Shutova (2024)", "Steinhardt (2025)", and "Nanda (2024)" must disappear, because each is part of a compound citation that resolves correctly to an existing bibliography entry.
+
+## Bug 2: Self-consistency pass does not catch contradictions between Flags and Recommendations
+
+The previous audit emitted a Recommendation that said "Consider consolidating the 'Crosbie and Shutova (2024)' in-text reference with the existing 'Crosbie, J., & Shutova, E. (2024)' bibliography entry to eliminate the apparent mismatch." This recommendation tells the author to merge two strings that are already the same reference — meaning the agent's own recommendation acknowledges that the corresponding flag was wrong, but the flag still shipped.
+
+Add a final self-consistency pass that runs AFTER all flags and recommendations are generated but BEFORE the report is emitted. The pass must:
+
+  1. For each Recommendation, check whether its text implicitly or explicitly acknowledges that a corresponding Flag was incorrect or based on a misreading. Trigger phrases include: "the existing [...] entry", "already contains", "is already in the bibliography", "to eliminate the apparent mismatch", "consider consolidating", "consider merging".
+
+  2. If such a Recommendation is detected, locate the Flag(s) it refers to and either:
+       (a) retract the Flag (remove it from Section A or wherever it appears, decrement the flag count, update the Consolidated Flags section), AND
+       (b) remove the contradictory Recommendation, OR
+       (c) if the Recommendation contains substantive other content, rewrite it to remove the contradiction.
+
+  3. The pass must also check that the count in "N concern(s) were identified: X critical, Y major, Z minor" in the abstract matches the actual count of flags after retraction.
+
+  4. If retraction would reduce the total flag count to zero, update the clearance statement from "CLEARED WITH CONDITIONS" to "CLEARED" and remove the conditions language.
+
+## Constraints
+
+- Do not change the eight-category structure (A through H), the link-integrity section (I), the Consolidated Flags / Recommendations / Clearance / Bibliography tail (J–M), or the report format.
+- Do not change anything in citation external-source verification, link body inspection, semantic gloss checks, severity calibration, or the two-source rule. Those are working.
+- The parser fix (Bug 1) must be backward-compatible: a single-surname in-text citation like "Brown et al. (2020)" with no matching bibliography entry must still produce the MINOR flag.
+- Add test cases:
+  - "Crosbie and Shutova (2024)" with bib entry "Crosbie, J., & Shutova, E. (2024)" -> MATCH, no flag.
+  - "Yin and Steinhardt (2025)" with bib entry "Yin, Z., & Steinhardt, J. (2025)" -> MATCH, no flag.
+  - "Heimersheim and Nanda (2024)" with bib entry "Heimersheim, S., & Nanda, N. (2024)" -> MATCH, no flag.
+  - "Brown et al. (2020)" with no matching bib entry -> MINOR flag.
+  - "Olsson et al. (2022)" with bib entry "Olsson, C., Elhage, N., Nanda, N., et al. (2022)" -> MATCH, no flag.
+  - A Recommendation containing "the existing [...] entry" referring to Flag X -> Flag X is retracted, Recommendation is removed, abstract counts updated.
+
+## Deliverable
+
+A patched version that, when re-run on the same induction-heads test paper, produces:
+- Section A: "11 citations detected in bibliography (...); 1 additional in-text-only reference detected" — namely Brown et al. (2020).
+- Exactly two MINOR flags total: one for Brown et al. (2020) missing from bibliography, one for the broken transformer-circuits.pub link.
+- Abstract reads "2 ethics concern(s) were identified: 0 critical, 0 major, and 2 minor."
+- No Recommendation that contradicts a Flag.
+- Clearance: CLEARED WITH CONDITIONS (still appropriate because of the broken link and the genuine missing Brown reference).
+
+Show the diff against the current code and run the test cases against both the current and patched versions to demonstrate the behavior change.

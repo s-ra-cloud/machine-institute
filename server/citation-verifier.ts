@@ -603,43 +603,111 @@ export interface BibliographyAnalysis {
 
 const BIB_HEADING_RE = /\n\s*(?:#+\s*)?(?:references|bibliography|works\s+cited)\s*\n/i;
 
-function parseInTextAuthorYear(body: string): { author: string; year: string; quote: string }[] {
-  const out: { author: string; year: string; quote: string }[] = [];
-  // Matches (Author, 2024), (Author et al., 2024), (Author and Other, 2024), Author (2024), Author et al. (2024)
+function normalizeSurname(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z\-']/g, "")
+    .trim();
+}
+
+function normalizeYear(y: string): string {
+  return y.replace(/[a-z]$/i, "");
+}
+
+interface InTextRef {
+  surnames: string[];
+  hasEtal: boolean;
+  year: string;
+  raw: string;
+  quote: string;
+}
+
+function parseInTextAuthorYear(body: string): InTextRef[] {
+  const out: InTextRef[] = [];
+  // Capture the full author phrase (possibly multi-author with "and"/"&"/"et al.") plus year.
+  // Examples handled: (Brown et al., 2020) | Brown et al. (2020) | (Crosbie and Shutova, 2024) |
+  // Crosbie and Shutova (2024) | (Yin & Steinhardt, 2025) | Yin & Steinhardt (2025) |
+  // Heimersheim and Nanda (2024) | Olsson et al. (2022)
+  const surnameToken = `[A-Z][A-Za-zÀ-ÖØ-öø-ÿ\\-']+`;
+  const authorPhrase = `${surnameToken}(?:\\s+(?:et\\s+al\\.?|(?:and|&)\\s+${surnameToken}))?`;
   const patterns = [
-    /\(([A-Z][A-Za-z\-']+(?:\s+(?:et\s+al\.?|and\s+[A-Z][A-Za-z\-']+))?)\s*,?\s*(\d{4}[a-z]?)\)/g,
-    /\b([A-Z][A-Za-z\-']+(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?)\)/g,
+    new RegExp(`\\((${authorPhrase})\\s*,?\\s*(\\d{4}[a-z]?)\\)`, "g"),
+    new RegExp(`\\b(${authorPhrase})\\s*\\((\\d{4}[a-z]?)\\)`, "g"),
   ];
   const seen = new Set<string>();
   for (const re of patterns) {
     let m: RegExpExecArray | null;
     while ((m = re.exec(body))) {
-      const author = m[1].trim().replace(/\s+/g, " ");
+      const raw = m[1].trim().replace(/\s+/g, " ");
       const year = m[2];
-      const key = `${author.toLowerCase().split(/\s+et\s+al/i)[0].trim()}|${year.replace(/[a-z]$/i, "")}`;
+      const hasEtal = /\bet\s+al\.?/i.test(raw);
+      // Strip "et al.", split on "and"/"&"/commas, normalize each token.
+      const surnames = raw
+        .replace(/\bet\s+al\.?/gi, "")
+        .split(/\s*(?:,|&|\band\b)\s*/i)
+        .map(normalizeSurname)
+        .filter(s => s.length >= 2);
+      if (surnames.length === 0) continue;
+      const key = `${surnames.join(",")}|${normalizeYear(year)}|${hasEtal ? "etal" : ""}`;
       if (seen.has(key)) continue;
       seen.add(key);
       const quote = body.slice(Math.max(0, m.index - 60), Math.min(body.length, m.index + m[0].length + 60)).replace(/\s+/g, " ").trim();
-      out.push({ author, year, quote });
+      out.push({ surnames, hasEtal, year, raw: `${raw} (${year})`, quote });
     }
   }
   return out;
 }
 
-function parseBibliographyEntries(bib: string): { authorLast: string; year: string; raw: string }[] {
-  const out: { authorLast: string; year: string; raw: string }[] = [];
+interface BibEntry {
+  surnames: string[];
+  year: string;
+  raw: string;
+}
+
+function parseBibliographyEntries(bib: string): BibEntry[] {
+  const out: BibEntry[] = [];
   // Split on blank lines, numbered/bracketed entries, or hanging indents.
   const lines = bib.split(/\n(?=\s*(?:\[\d+\]|\d+\.\s|[A-Z][A-Za-z\-']+,))/);
   for (const raw of lines) {
     const cleaned = raw.replace(/\s+/g, " ").trim();
     if (cleaned.length < 12) continue;
-    // Author surname: first capitalised word (before comma) OR first word of a "Last, F." pattern.
-    const lastM = cleaned.match(/^(?:\[\d+\]\s*|\d+\.\s*)?([A-Z][A-Za-z\-']+)/);
-    const yearM = cleaned.match(/\b(19|20)\d{2}[a-z]?\b/);
-    if (!lastM || !yearM) continue;
-    out.push({ authorLast: lastM[1].toLowerCase(), year: yearM[0], raw: cleaned.slice(0, 240) });
+    const yearM = cleaned.match(/\b(?:19|20)\d{2}[a-z]?\b/);
+    if (!yearM) continue;
+    // Take everything before the year as the author block.
+    const authorBlock = cleaned.slice(0, yearM.index).replace(/^(?:\[\d+\]\s*|\d+\.\s*)/, "");
+    // Match all "Surname, X." patterns first; if none, fall back to leading capitalised tokens.
+    const surnames: string[] = [];
+    const lastInitRe = /([A-ZÀ-Ö][A-Za-zÀ-ÖØ-öø-ÿ\-']+)\s*,\s*(?:[A-Z]\.?\s*)+/g;
+    let lm: RegExpExecArray | null;
+    while ((lm = lastInitRe.exec(authorBlock))) {
+      const n = normalizeSurname(lm[1]);
+      if (n.length >= 2) surnames.push(n);
+    }
+    if (surnames.length === 0) {
+      const firstM = authorBlock.match(/^([A-ZÀ-Ö][A-Za-zÀ-ÖØ-öø-ÿ\-']+)/);
+      if (firstM) {
+        const n = normalizeSurname(firstM[1]);
+        if (n.length >= 2) surnames.push(n);
+      }
+    }
+    if (surnames.length === 0) continue;
+    out.push({ surnames, year: yearM[0], raw: cleaned.slice(0, 240) });
   }
   return out;
+}
+
+function inTextMatchesBibEntry(it: InTextRef, b: BibEntry): boolean {
+  if (normalizeYear(it.year) !== normalizeYear(b.year)) return false;
+  const bibSet = new Set(b.surnames);
+  // (a) Citation surname set is a subset of the bibliography surname set.
+  if (it.surnames.length >= 1 && it.surnames.every(s => bibSet.has(s))) return true;
+  // (b) "et al." — first surname appears in the bibliography surname set.
+  if (it.hasEtal && it.surnames.length >= 1 && bibSet.has(it.surnames[0])) return true;
+  // (c) Single-surname citation — surname appears anywhere in the bibliography surname set.
+  if (it.surnames.length === 1 && bibSet.has(it.surnames[0])) return true;
+  return false;
 }
 
 export function analyzeInTextVsBibliography(fullText: string): BibliographyAnalysis {
@@ -648,7 +716,6 @@ export function analyzeInTextVsBibliography(fullText: string): BibliographyAnaly
   }
   const headingM = fullText.search(BIB_HEADING_RE);
   if (headingM < 0) {
-    // No bibliography heading detected — can't do the cross-check reliably.
     const inText = parseInTextAuthorYear(fullText);
     return { bibliographyDetected: false, inTextCount: inText.length, bibliographyCount: 0, inTextOnly: [], bibliographyOnly: [] };
   }
@@ -657,19 +724,17 @@ export function analyzeInTextVsBibliography(fullText: string): BibliographyAnaly
   const inText = parseInTextAuthorYear(body);
   const bibEntries = parseBibliographyEntries(bib);
 
-  const bibKeys = new Set(bibEntries.map(b => `${b.authorLast}|${b.year.replace(/[a-z]$/i, "")}`));
-  const inTextKeys = new Set(inText.map(it => `${it.author.toLowerCase().split(/\s+et\s+al/i)[0].trim()}|${it.year.replace(/[a-z]$/i, "")}`));
-
   const inTextOnly = inText
-    .filter(it => {
-      const key = `${it.author.toLowerCase().split(/\s+et\s+al/i)[0].trim()}|${it.year.replace(/[a-z]$/i, "")}`;
-      return !bibKeys.has(key);
-    })
+    .filter(it => !bibEntries.some(b => inTextMatchesBibEntry(it, b)))
     .slice(0, 30)
-    .map(it => ({ authorYear: `${it.author} (${it.year})`, quote: it.quote }));
+    .map(it => ({ authorYear: it.raw, quote: it.quote }));
 
+  const citedBibIdx = new Set<number>();
+  for (let bi = 0; bi < bibEntries.length; bi++) {
+    if (inText.some(it => inTextMatchesBibEntry(it, bibEntries[bi]))) citedBibIdx.add(bi);
+  }
   const bibliographyOnly = bibEntries
-    .filter(b => !inTextKeys.has(`${b.authorLast}|${b.year.replace(/[a-z]$/i, "")}`))
+    .filter((_, bi) => !citedBibIdx.has(bi))
     .slice(0, 30)
     .map(b => b.raw);
 

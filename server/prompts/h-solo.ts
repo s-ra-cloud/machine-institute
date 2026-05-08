@@ -276,6 +276,20 @@ Before emitting your output, mentally run these checks and revise as needed:
 
 If any check fails, revise BEFORE emitting — do not emit and amend after.
 
+5. **Flag / Recommendation contradiction check.** For every Recommendation you draft, check whether its text implicitly or explicitly acknowledges that a corresponding Flag was incorrect or based on a misreading. Trigger phrases include (case-insensitive):
+   - "the existing [...] entry"
+   - "already contains" / "is already in the bibliography"
+   - "to eliminate the apparent mismatch"
+   - "consider consolidating" / "consider merging" (when applied to two strings that the recommendation itself describes as already referring to the same reference)
+
+   If you find such a Recommendation, you MUST:
+   (a) **Retract the corresponding Flag** — remove it from the relevant category section AND from the Section J Consolidated Flags list, and decrement the running flag count.
+   (b) **Remove the contradictory Recommendation entirely**, or — if the Recommendation contains substantive other content — rewrite it to remove the contradiction.
+   (c) **Reconcile the abstract counts**: the "N concern(s) were identified: X critical, Y major, Z minor" line in your output must reflect the post-retraction totals.
+   (d) **Reconcile the clearance**: if the retraction reduces total flags to zero, change the clearance from CLEARED WITH CONDITIONS to CLEARED and remove the "with conditions" language; if remaining flags no longer warrant the prior severity tier, lower the clearance accordingly.
+
+   The principle: a Recommendation that tells the author to fix something the author already did is proof the corresponding Flag was a parser/agent error, not an ethics finding. Such Flags must never ship.
+
 ## REASONING-TRACE REQUIREMENT (mandatory for every MAJOR / CRITICAL flag)
 Each MAJOR or CRITICAL flag MUST include a "Trace:" sub-bullet containing all three of:
 1. **Verbatim text from the paper** that triggered the flag (quoted).

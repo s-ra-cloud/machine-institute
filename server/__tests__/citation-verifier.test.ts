@@ -158,6 +158,67 @@ Smith, J. (2019). A study of methods for evaluating language models. Journal of 
     expect(brown!.authorYear).toMatch(/2020/);
     expect(a.inTextOnly.find((e) => /Smith/.test(e.authorYear))).toBeUndefined();
   });
+
+  it("compound-author citations match multi-author bibliography entries", () => {
+    const fullText = `
+Introduction
+
+Following Crosbie and Shutova (2024), we used jailbreak prompts. The work of
+Yin & Steinhardt (2025) extends this further, while Heimersheim and Nanda (2024)
+offers a complementary view. Olsson et al. (2022) introduced induction heads.
+Brown et al. (2020) is foundational but is not in our bibliography.
+
+References
+
+Crosbie, J., & Shutova, E. (2024). Jailbreak prompts in practice. Journal of AI Safety, 1(1), 1-20.
+Yin, Z., & Steinhardt, J. (2025). Extending alignment results. Proceedings of NeurIPS.
+Heimersheim, S., & Nanda, N. (2024). Complementary mechanistic views. arXiv:2401.00001.
+Olsson, C., Elhage, N., Nanda, N., et al. (2022). In-context learning and induction heads. Transformer Circuits.
+`;
+    const a = analyzeInTextVsBibliography(fullText);
+    expect(a.bibliographyDetected).toBe(true);
+    expect(a.bibliographyCount).toBeGreaterThanOrEqual(4);
+
+    expect(a.inTextOnly.find((e) => /Crosbie/.test(e.authorYear))).toBeUndefined();
+    expect(a.inTextOnly.find((e) => /Shutova/.test(e.authorYear))).toBeUndefined();
+    expect(a.inTextOnly.find((e) => /Yin/.test(e.authorYear))).toBeUndefined();
+    expect(a.inTextOnly.find((e) => /Steinhardt/.test(e.authorYear))).toBeUndefined();
+    expect(a.inTextOnly.find((e) => /Heimersheim/.test(e.authorYear))).toBeUndefined();
+    expect(a.inTextOnly.find((e) => /\bNanda\b/.test(e.authorYear))).toBeUndefined();
+    expect(a.inTextOnly.find((e) => /Olsson/.test(e.authorYear))).toBeUndefined();
+
+    const brown = a.inTextOnly.find((e) => /Brown/.test(e.authorYear));
+    expect(brown).toBeDefined();
+    expect(brown!.authorYear).toMatch(/2020/);
+  });
+
+  it("Olsson et al. (2022) matches a 4+-author bibliography entry via has_etal rule", () => {
+    const fullText = `
+Body text
+
+Olsson et al. (2022) showed induction heads emerge during training.
+
+References
+
+Olsson, C., Elhage, N., Nanda, N., et al. (2022). In-context learning and induction heads. Transformer Circuits.
+`;
+    const a = analyzeInTextVsBibliography(fullText);
+    expect(a.inTextOnly.length).toBe(0);
+  });
+
+  it("normalises diacritics and ampersands", () => {
+    const fullText = `
+Body text
+
+The result of Müller & Dupont (2023) confirms ours.
+
+References
+
+Müller, A., & Dupont, J. (2023). A French-German collaboration. Journal X, 5, 1-10.
+`;
+    const a = analyzeInTextVsBibliography(fullText);
+    expect(a.inTextOnly.length).toBe(0);
+  });
 });
 
 describe("classifyBody", () => {
