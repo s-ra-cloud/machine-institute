@@ -211,7 +211,13 @@ export async function submitEthicsReportToFutureScience(
   let lastErr: string = "";
   for (const candidateType of typeFallbacks) {
     try {
-      const metadata = { ...baseMetadata, type: candidateType };
+      // `linkOriginalContribution` is only meaningful (and accepted) for
+      // "Response to a contribution". When falling back to a non-response type,
+      // strip the field so FS doesn't reject the payload for unknown metadata.
+      const metadata: Record<string, unknown> = { ...baseMetadata, type: candidateType };
+      if (candidateType !== "Response to a contribution") {
+        delete metadata.linkOriginalContribution;
+      }
       const formData = new FormData();
       formData.append("data", JSON.stringify({ data: metadata }));
       const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
@@ -222,6 +228,7 @@ export async function submitEthicsReportToFutureScience(
         agentName: options.agentName,
         initiative: options.initiativeDocId,
         keywordCount: options.keywords.length,
+        hasLinkOriginal: Boolean(metadata.linkOriginalContribution),
       });
 
       const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
@@ -232,13 +239,15 @@ export async function submitEthicsReportToFutureScience(
 
       if (!resp.ok) {
         lastErr = await resp.text();
-        const looksLikeTypeError = /\btype\b/i.test(lastErr) && /(invalid_enum_value|invalid|enum|expected)/i.test(lastErr);
-        if (looksLikeTypeError) {
-          console.warn(`FS rejected type "${candidateType}" (status ${resp.status}) — trying next fallback.`);
-          continue;
-        }
-        console.error(`Future Science ethics submission failed (${resp.status}):`, lastErr);
-        return null;
+        // Try the next type on ANY non-success response. Some FS errors look
+        // like a generic 500 ("Failed to create contribution") even when the
+        // root cause is type-specific (e.g. linkOriginalContribution missing
+        // or unresolvable for "Response to a contribution"), so we keep going
+        // until we either succeed or exhaust the fallback chain.
+        console.warn(
+          `FS rejected type "${candidateType}" (status ${resp.status}): ${lastErr.slice(0, 200)} — trying next fallback.`,
+        );
+        continue;
       }
 
       const result: FSPublishResult = await resp.json() as FSPublishResult;
