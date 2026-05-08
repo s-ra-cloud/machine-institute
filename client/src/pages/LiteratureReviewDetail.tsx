@@ -1,16 +1,27 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useParams, Link } from "wouter";
-import { ArrowLeft, BookOpen, Loader2, Calendar, Bot, Clock, Info, ExternalLink } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useParams, Link, useLocation } from "wouter";
+import { ArrowLeft, BookOpen, Loader2, Calendar, Bot, Clock, Info, ExternalLink, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FadeIn } from "@/components/ui/motion";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
+import { useAuth } from "@/lib/auth";
 import type { LiteratureReview } from "@shared/schema";
 
 export default function LiteratureReviewDetail() {
   const { id } = useParams<{ id: string }>();
   const [showMeta, setShowMeta] = useState(false);
+  const { isAdmin } = useAuth();
+  const [, navigate] = useLocation();
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/literature-reviews/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete");
+      return res.json();
+    },
+    onSuccess: () => navigate("/generate"),
+  });
 
   const { data: review, isLoading } = useQuery<LiteratureReview>({
     queryKey: ["/api/literature-reviews", id],
@@ -65,11 +76,28 @@ export default function LiteratureReviewDetail() {
       <main className="pt-28 pb-24">
         <div className="container mx-auto px-6 max-w-4xl">
           <FadeIn>
-            <Link href={`/projects/${review.projectId}`}>
-              <Button variant="ghost" className="mb-8 font-mono text-xs text-muted-foreground hover:text-foreground" data-testid="button-back">
-                <ArrowLeft className="mr-2 h-4 w-4" /> Back to Project
-              </Button>
-            </Link>
+            <div className="flex items-center justify-between mb-8">
+              <Link href={`/projects/${review.projectId}`}>
+                <Button variant="ghost" className="font-mono text-xs text-muted-foreground hover:text-foreground" data-testid="button-back">
+                  <ArrowLeft className="mr-2 h-4 w-4" /> Back to Project
+                </Button>
+              </Link>
+              {isAdmin && (
+                <button
+                  onClick={() => {
+                    if (confirm("Delete this literature review? This cannot be undone.")) {
+                      deleteMutation.mutate();
+                    }
+                  }}
+                  disabled={deleteMutation.isPending}
+                  className="text-[10px] font-mono text-muted-foreground/40 hover:text-red-400 transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                  data-testid="button-admin-delete-review"
+                >
+                  {deleteMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                  Delete review (admin)
+                </button>
+              )}
+            </div>
           </FadeIn>
 
           <FadeIn delay={0.1}>

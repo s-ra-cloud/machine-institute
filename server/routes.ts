@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport } from "@shared/schema";
-import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPORT_CHUNK_3_PROMPT, applyJournalName } from "./prompts/h-solo";
+import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPORT_CHUNK_3_PROMPT, H_SINGLE_PAPER_PROMPT, applyJournalName } from "./prompts/h-solo";
 import { runEthicsReport } from "./ethics-review";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
@@ -1655,7 +1655,96 @@ I will now provide the papers.`;
       prompt1: applyJournalName(H_SOLO_REPORT_CHUNK_1_PROMPT, substitution),
       prompt2: applyJournalName(H_SOLO_REPORT_CHUNK_2_PROMPT, substitution),
       prompt3: applyJournalName(H_SOLO_REPORT_CHUNK_3_PROMPT, substitution),
+      singlePaperPrompt: applyJournalName(H_SINGLE_PAPER_PROMPT, substitution),
     });
+  });
+
+  // List Mirror papers available for a single-paper ethics audit, each with an `alreadyReviewed` flag.
+  app.get("/api/ethics-reports/available-papers", async (req, res) => {
+    try {
+      const journalId = (req.query.journalId as string | undefined) || "mirror";
+      const initiativeDocId = INITIATIVE_DOC_IDS[journalId];
+      if (!initiativeDocId) return res.status(400).json({ error: "Unknown journal." });
+      const initiativeSlug = INITIATIVE_SLUGS[journalId] || journalId;
+
+      const [fsData, lockedIds, projectPapers] = await Promise.all([
+        fetchAbstractsAndKeywords([], initiativeDocId).catch(() => ({ abstracts: [] })),
+        storage.getAuditedPaperIdsForJournal(journalId),
+        storage.getProjectPapers(journalId),
+      ]);
+      const lockedSet = new Set(lockedIds);
+
+      // Combine FS abstracts with project papers, dedup by documentId/title
+      const seen = new Set<string>();
+      const out: Array<{ documentId: string; title: string; authors: string; date: string; url: string; alreadyReviewed: boolean }> = [];
+      for (const a of fsData.abstracts) {
+        const key = a.documentId;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        const isReviewed = lockedSet.has(`doc:${a.documentId}`) || lockedSet.has(`title:${a.title.toLowerCase().trim()}`);
+        out.push({
+          documentId: a.documentId,
+          title: a.title,
+          authors: a.authors,
+          date: a.date,
+          url: `https://future-science.org/${initiativeSlug}/papers/${a.documentId}`,
+          alreadyReviewed: isReviewed,
+        });
+      }
+      for (const p of projectPapers) {
+        if (!p.sourceDocumentId || seen.has(p.sourceDocumentId)) continue;
+        seen.add(p.sourceDocumentId);
+        const isReviewed = lockedSet.has(`doc:${p.sourceDocumentId}`) || lockedSet.has(`title:${p.title.toLowerCase().trim()}`);
+        out.push({
+          documentId: p.sourceDocumentId,
+          title: p.title,
+          authors: p.authors,
+          date: p.date,
+          url: p.url || `https://future-science.org/${initiativeSlug}/papers/${p.sourceDocumentId}`,
+          alreadyReviewed: isReviewed,
+        });
+      }
+      out.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      res.json({ papers: out, lockedCount: lockedIds.length });
+    } catch (err: any) {
+      console.error("Error listing available papers:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin: delete a single ethics report
+  app.delete("/api/ethics-reports/:id", adminAuth, async (req, res) => {
+    try {
+      await storage.deleteEthicsReport(String(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error deleting ethics report:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin: delete a single literature review
+  app.delete("/api/literature-reviews/:id", adminAuth, async (req, res) => {
+    try {
+      await storage.deleteLiteratureReview(String(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error deleting literature review:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin: reset the global "already reviewed" lock for a journal
+  app.post("/api/admin/audit-lock/reset", adminAuth, async (req, res) => {
+    try {
+      const journalId = (req.body?.journalId as string | undefined) || "mirror";
+      if (!INITIATIVE_DOC_IDS[journalId]) return res.status(400).json({ error: "Unknown journal." });
+      const cleared = await storage.resetAuditLockForJournal(journalId);
+      res.json({ success: true, clearedReports: cleared });
+    } catch (err: any) {
+      console.error("Error resetting audit lock:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   app.get("/api/ethics-reports", async (req, res) => {
@@ -1688,6 +1777,7 @@ I will now provide the papers.`;
         projectId, agentId, journalId, keywords, topic, prompt1, prompt2, prompt3,
         modelProvider, modelName, providerMode, byocApiKey,
         orchestratorName, agentDescription,
+        documentId, paperTitle, singlePaperPrompt,
       } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
@@ -1745,7 +1835,20 @@ I will now provide the papers.`;
       const rawAgentId = agentId && agentId.includes("MachInstit") ? "H" : (agentId || "H");
       const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", rawAgentId);
       const effectiveTopic: string | null = typeof topic === "string" && topic.trim() ? topic.trim() : null;
-      const researchQuestion = `Field-level ethics audit of ${getJournalDisplayName(effectiveJournalId)}${effectiveTopic ? ` — topic: ${effectiveTopic}` : ""}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
+      const effectiveDocumentId: string | null = typeof documentId === "string" && documentId.trim() ? documentId.trim() : null;
+      const effectivePaperTitle: string | null = typeof paperTitle === "string" && paperTitle.trim() ? paperTitle.trim() : null;
+
+      // Enforce global "already audited" lock for single-paper mode
+      if (effectiveDocumentId) {
+        const lockedIds = await storage.getAuditedPaperIdsForJournal(effectiveJournalId);
+        if (lockedIds.includes(`doc:${effectiveDocumentId}`)) {
+          return res.status(409).json({ error: "This paper has already been ethics-reviewed. An admin can reset the lock to allow re-review." });
+        }
+      }
+
+      const researchQuestion = effectiveDocumentId
+        ? `Single-paper ethics audit of "${effectivePaperTitle || effectiveDocumentId}" in ${getJournalDisplayName(effectiveJournalId)}`
+        : `Field-level ethics audit of ${getJournalDisplayName(effectiveJournalId)}${effectiveTopic ? ` — topic: ${effectiveTopic}` : ""}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
 
       const modelConfig: ModelProviderConfig = {
         providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
@@ -1761,7 +1864,9 @@ I will now provide the papers.`;
         keywords: effectiveKeywords,
         researchQuestion,
         topic: effectiveTopic,
-        prompt1: prompt1 || H_SOLO_REPORT_CHUNK_1_PROMPT,
+        documentId: effectiveDocumentId,
+        paperTitle: effectivePaperTitle,
+        prompt1: (effectiveDocumentId ? (singlePaperPrompt || H_SINGLE_PAPER_PROMPT) : (prompt1 || H_SOLO_REPORT_CHUNK_1_PROMPT)),
         prompt2: prompt2 || H_SOLO_REPORT_CHUNK_2_PROMPT,
         prompt3: prompt3 || H_SOLO_REPORT_CHUNK_3_PROMPT,
         userId: user?.id || null,
@@ -1777,6 +1882,15 @@ I will now provide the papers.`;
       }
 
       const report = await storage.createEthicsReport(parsed.data);
+
+      // Atomically reserve the lock for single-paper mode by writing the auditedPaperIds immediately.
+      // Combined with getAuditedPaperIdsForJournal including all non-failed statuses, this prevents
+      // two concurrent requests from both passing the pre-check.
+      if (effectiveDocumentId) {
+        const reservedIds = [`doc:${effectiveDocumentId}`];
+        if (effectivePaperTitle) reservedIds.push(`title:${effectivePaperTitle.toLowerCase().trim()}`);
+        await storage.updateEthicsReport(report.id, { auditedPaperIds: reservedIds });
+      }
       res.status(201).json(report);
 
       generateEthicsReportBackground(report.id, parsed.data, modelConfig).catch(err => {
@@ -1790,7 +1904,7 @@ I will now provide the papers.`;
 
   async function generateEthicsReportBackground(
     reportId: string,
-    data: { projectId: string; agentId: string; journalId: string; keywords: string[]; topic?: string | null; prompt1: string; prompt2: string; prompt3: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
+    data: { projectId: string; agentId: string; journalId: string; keywords: string[]; topic?: string | null; prompt1: string; prompt2: string; prompt3: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null; documentId?: string | null; paperTitle?: string | null },
     modelConfig: ModelProviderConfig,
   ) {
     const initiativeDocId = INITIATIVE_DOC_IDS[data.journalId] || INITIATIVE_DOC_IDS["mirror"];
@@ -1828,6 +1942,9 @@ I will now provide the papers.`;
         prompt1: data.prompt1,
         prompt2: data.prompt2,
         prompt3: data.prompt3,
+        documentId: data.documentId || null,
+        paperTitle: data.paperTitle || null,
+        singlePaperPrompt: data.documentId ? data.prompt1 : undefined,
         modelConfig: { ...modelConfig, modelName: resolvedModel },
         emitEvent: emit,
       });

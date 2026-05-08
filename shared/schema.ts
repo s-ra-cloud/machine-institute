@@ -307,6 +307,8 @@ export const ethicsReports = pgTable("ethics_reports", {
   promptTrace: text("prompt_trace"),
   sourceTrace: text("source_trace"),
   auditedPaperIds: text("audited_paper_ids").array().notNull().default(sql`ARRAY[]::text[]`),
+  documentId: text("document_id"),
+  paperTitle: text("paper_title"),
 });
 
 export const insertEthicsReportSchema = createInsertSchema(ethicsReports).omit({
@@ -341,6 +343,8 @@ export const insertEthicsReportSchema = createInsertSchema(ethicsReports).omit({
   publishedDocumentId: z.string().nullable().optional(),
   promptTrace: z.string().nullable().optional(),
   sourceTrace: z.string().nullable().optional(),
+  documentId: z.string().nullable().optional(),
+  paperTitle: z.string().nullable().optional(),
 });
 
 export type InsertEthicsReport = z.infer<typeof insertEthicsReportSchema>;

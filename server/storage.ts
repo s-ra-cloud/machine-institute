@@ -1,6 +1,6 @@
 import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, type EthicsReport, type InsertEthicsReport, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys, ethicsReports } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, gte, lt, lte, inArray, and, notInArray } from "drizzle-orm";
+import { eq, desc, gte, lt, lte, inArray, and, notInArray, ne } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -68,6 +68,10 @@ export interface IStorage {
   getAllEthicsReports(): Promise<EthicsReport[]>;
   updateEthicsReport(id: string, updates: Partial<EthicsReport>): Promise<EthicsReport>;
   deleteAllEthicsReports(): Promise<void>;
+  deleteEthicsReport(id: string): Promise<void>;
+  deleteLiteratureReview(id: string): Promise<void>;
+  resetAuditLockForJournal(journalId: string): Promise<number>;
+  getAuditedPaperIdsForJournal(journalId: string): Promise<string[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -427,6 +431,33 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllEthicsReports(): Promise<void> {
     await db.delete(ethicsReports);
+  }
+
+  async deleteEthicsReport(id: string): Promise<void> {
+    await db.delete(ethicsReports).where(eq(ethicsReports.id, id));
+  }
+
+  async deleteLiteratureReview(id: string): Promise<void> {
+    await db.delete(literatureReviews).where(eq(literatureReviews.id, id));
+  }
+
+  async resetAuditLockForJournal(journalId: string): Promise<number> {
+    const updated = await db.update(ethicsReports)
+      .set({ auditedPaperIds: [] as string[] })
+      .where(eq(ethicsReports.journalId, journalId))
+      .returning({ id: ethicsReports.id });
+    return updated.length;
+  }
+
+  async getAuditedPaperIdsForJournal(journalId: string): Promise<string[]> {
+    // Include ALL non-failed reports (pending, generating, completed) so the lock is held atomically
+    // from the moment a report is created — preventing concurrent duplicate audits of the same paper.
+    const rows = await db.select({ ids: ethicsReports.auditedPaperIds })
+      .from(ethicsReports)
+      .where(and(eq(ethicsReports.journalId, journalId), ne(ethicsReports.status, "failed")));
+    const set = new Set<string>();
+    for (const r of rows) for (const id of (r.ids || [])) set.add(id);
+    return Array.from(set);
   }
 }
 

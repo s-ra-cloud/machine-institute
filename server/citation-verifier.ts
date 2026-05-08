@@ -145,7 +145,7 @@ export function extractCitations(text: string): ExtractedCitation[] {
     out.push({ raw: m[0], authorYear: { author, year } });
   }
 
-  return out.slice(0, 20);
+  return out.slice(0, 100);
 }
 
 function verifyAgainstFs(c: ExtractedCitation, fsAbstracts: FutureScienceAbstract[]): { verified: boolean; title?: string; url?: string } | null {
@@ -221,7 +221,7 @@ async function pMapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promi
 }
 
 export async function verifyCitations(citations: ExtractedCitation[], fsAbstracts: FutureScienceAbstract[]): Promise<VerifiedCitation[]> {
-  const capped = citations.slice(0, 15);
+  const capped = citations.slice(0, 100);
   return pMapLimit(capped, 4, async (c) => {
     const fs = verifyAgainstFs(c, fsAbstracts);
     if (fs?.verified) return { ...c, verifiedSource: "future-science" as const, verifiedTitle: fs.title, verifiedUrl: fs.url };
@@ -229,6 +229,103 @@ export async function verifyCitations(citations: ExtractedCitation[], fsAbstract
     if (oa?.verified) return { ...c, verifiedSource: "openalex" as const, verifiedTitle: oa.title, verifiedUrl: oa.url };
     return { ...c, verifiedSource: "none" as const };
   });
+}
+
+export interface VerifiedUrl {
+  url: string;
+  reachable: boolean | null;
+  status?: number;
+  note?: string;
+  arxivIdMatch?: boolean;
+}
+
+export function extractUrls(text: string): string[] {
+  if (!text) return [];
+  const out = new Set<string>();
+  const urlRe = /https?:\/\/[^\s)<>"'\]]+/g;
+  let m: RegExpExecArray | null;
+  while ((m = urlRe.exec(text))) {
+    const cleaned = m[0].replace(/[.,;:!?)\]]+$/, "");
+    if (cleaned.length < 8) continue;
+    out.add(cleaned);
+  }
+  return Array.from(out).slice(0, 150);
+}
+
+// SSRF guard: reject hostnames that resolve to private/loopback/link-local/internal address space,
+// non-http(s) schemes, and credential-bearing URLs. Paper text is externally sourced and may be
+// adversarial, so we never let it cause the server to probe its own network.
+function isUrlSafeForVerification(rawUrl: string): { ok: true } | { ok: false; reason: string } {
+  let u: URL;
+  try { u = new URL(rawUrl); } catch { return { ok: false, reason: "invalid URL" }; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return { ok: false, reason: "non-http scheme" };
+  if (u.username || u.password) return { ok: false, reason: "credentials in URL" };
+  const host = u.hostname.toLowerCase();
+  if (!host) return { ok: false, reason: "empty host" };
+  if (host === "localhost" || host.endsWith(".localhost") || host === "metadata.google.internal") {
+    return { ok: false, reason: "internal hostname" };
+  }
+  // Block bracketed IPv6 and bare IP literals — only allow DNS hostnames for verification.
+  if (host.startsWith("[") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) {
+    return { ok: false, reason: "IP literal blocked" };
+  }
+  return { ok: true };
+}
+
+async function checkUrlReachable(url: string, timeoutMs = 7000): Promise<{ reachable: boolean | null; status?: number; note?: string }> {
+  const guard = isUrlSafeForVerification(url);
+  if (!guard.ok) return { reachable: null, note: `skipped (${guard.reason})` };
+  for (const method of ["HEAD", "GET"] as const) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      const resp = await fetch(url, {
+        method,
+        headers: { "User-Agent": "MachineInstitute-EthicsAuditor", "Accept": "*/*" },
+        signal: ctrl.signal,
+        redirect: "follow",
+      });
+      clearTimeout(t);
+      if (resp.status === 405 && method === "HEAD") continue;
+      return { reachable: resp.ok, status: resp.status };
+    } catch {
+      // try next method or fall through
+    }
+  }
+  return { reachable: null };
+}
+
+export async function verifyUrls(urls: string[]): Promise<VerifiedUrl[]> {
+  const capped = urls.slice(0, 100);
+  return pMapLimit(capped, 5, async (url): Promise<VerifiedUrl> => {
+    const { reachable, status, note: checkNote } = await checkUrlReachable(url);
+    let arxivIdMatch: boolean | undefined;
+    let note: string | undefined = checkNote;
+    const arxivM = url.match(/arxiv\.org\/abs\/(\d{4}\.\d{4,5})/i);
+    if (arxivM && reachable === false) {
+      arxivIdMatch = false;
+      note = note || "arXiv ID does not resolve";
+    }
+    return { url, reachable, status, note, arxivIdMatch };
+  });
+}
+
+export function formatUrlVerificationReport(verified: VerifiedUrl[]): string {
+  if (verified.length === 0) {
+    return `**Link analysis:** No external URLs were detected in the paper's full text.`;
+  }
+  const ok = verified.filter(v => v.reachable === true).length;
+  const broken = verified.filter(v => v.reachable === false).length;
+  const unknown = verified.filter(v => v.reachable === null).length;
+  const lines = verified.map((v, i) => {
+    const tag = v.reachable === true
+      ? `OK (HTTP ${v.status})`
+      : v.reachable === false
+      ? `BROKEN (HTTP ${v.status ?? "?"})${v.note ? ` — ${v.note}` : ""}`
+      : `UNREACHABLE${v.note ? ` — ${v.note}` : " (network/timeout)"}`;
+    return `  ${i + 1}. ${v.url} — ${tag}`;
+  });
+  return `**Link analysis:** ${verified.length} URL(s) detected. ${ok} reachable, ${broken} broken, ${unknown} unverifiable. (URLs targeting internal/private networks are intentionally skipped for safety; treat skipped entries as auditor tool limitations, NOT ethics findings.)\n${lines.join("\n")}`;
 }
 
 export function formatVerificationReport(v: PaperVerification): string {

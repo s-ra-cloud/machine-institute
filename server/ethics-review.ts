@@ -4,6 +4,7 @@ import {
   H_SOLO_REPORT_CHUNK_1_PROMPT,
   H_SOLO_REPORT_CHUNK_2_PROMPT,
   H_SOLO_REPORT_CHUNK_3_PROMPT,
+  H_SINGLE_PAPER_PROMPT,
   applyJournalName,
 } from "./prompts/h-solo";
 import { fetchAbstractsAndKeywords, type FutureScienceAbstract } from "./future-science";
@@ -12,6 +13,9 @@ import {
   extractCitations,
   verifyCitations,
   formatVerificationReport,
+  extractUrls,
+  verifyUrls,
+  formatUrlVerificationReport,
   type PaperVerification,
 } from "./citation-verifier";
 import type { EthicsReport, ProjectPaper } from "@shared/schema";
@@ -132,6 +136,9 @@ interface RunOptions {
   prompt1: string;
   prompt2: string;
   prompt3: string;
+  documentId?: string | null;
+  paperTitle?: string | null;
+  singlePaperPrompt?: string;
   modelConfig: ModelProviderConfig;
   emitEvent: (phase: string, message: string) => Promise<void>;
 }
@@ -150,6 +157,9 @@ async function buildPrevReport(projectId: string, journalId: string): Promise<{ 
 }
 
 export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOutput> {
+  if (opts.documentId) {
+    return runSinglePaperEthicsReport(opts);
+  }
   const startTime = Date.now();
   const { projectId, journalId, initiativeDocId, initiativeSlug, journalDisplayName, keywords, topic, prompt1, prompt2, prompt3, modelConfig, emitEvent } = opts;
   const journalName = opts.journalName || journalDisplayName || journalId;
@@ -316,6 +326,102 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
     ethicsText, chunk1, chunk2, chunk3, flagsList, recommendations,
     clearanceStatement, clearanceStatus, reportTitle, reportAbstract, durationSeconds,
     papersUsed: sampled.map(p => ({ title: p.title, authors: p.authors, date: p.date, documentId: p.documentId })),
+    auditedPaperIds,
+  };
+}
+
+async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsReviewOutput> {
+  const startTime = Date.now();
+  const { projectId, journalId, initiativeDocId, initiativeSlug, journalDisplayName, modelConfig, emitEvent, documentId, paperTitle } = opts;
+  const journalName = opts.journalName || journalDisplayName || journalId;
+  const promptRaw = opts.singlePaperPrompt && opts.singlePaperPrompt.trim() ? opts.singlePaperPrompt : H_SINGLE_PAPER_PROMPT;
+  const systemPrompt = applyJournalName(promptRaw, journalName);
+
+  if (!documentId) throw new Error("documentId is required for single-paper audit");
+
+  await emitEvent("ethics-init", `Starting single-paper ethics audit on "${paperTitle || documentId}" in ${journalDisplayName}.`);
+
+  // Load FS abstracts (used as a citation-verification corpus AND to find this paper's metadata)
+  let fsAbstracts: FutureScienceAbstract[] = [];
+  try {
+    const fsData = await fetchAbstractsAndKeywords([], initiativeDocId);
+    fsAbstracts = fsData.abstracts;
+  } catch (err) {
+    await emitEvent("ethics-fetch-warning", `Future Science fetch failed: ${err instanceof Error ? err.message : String(err)}.`);
+  }
+
+  // Resolve paper metadata: prefer FS, fall back to project log, then to caller-supplied title.
+  const fsHit = fsAbstracts.find(a => a.documentId === documentId);
+  const projHit = (await storage.getProjectPapers(projectId)).find(p => p.sourceDocumentId === documentId);
+  const title = paperTitle || fsHit?.title || projHit?.title || `Paper ${documentId}`;
+  const authors = fsHit?.authors || projHit?.authors || "(unknown)";
+  const date = fsHit?.date || projHit?.date || "";
+  const abstract = fsHit?.abstract || projHit?.description || "";
+  const url = `https://future-science.org/${initiativeSlug}/papers/${documentId}`;
+
+  // Fetch full text
+  await emitEvent("ethics-fulltext", `Fetching full text for "${title}"...`);
+  const fullText = await fetchFsPaperContent(documentId, initiativeSlug);
+  const hadFullText = !!(fullText && fullText.length > 200);
+
+  // Citation verification (FS + OpenAlex; OpenAlex covers arXiv via search)
+  let verification: PaperVerification = { paperTitle: title, hadFullText, citations: [] };
+  let urlReport = "**Link analysis:** Skipped (no full text available).";
+  if (hadFullText) {
+    await emitEvent("ethics-citations", `Extracting and verifying citations against Future Science, OpenAlex, and arXiv...`);
+    const citations = extractCitations(fullText!);
+    const verified = await verifyCitations(citations, fsAbstracts);
+    verification = { paperTitle: title, hadFullText: true, citations: verified };
+    const verifiedCount = verified.filter(v => v.verifiedSource !== "none").length;
+    await emitEvent("ethics-citations", `Citation verification complete: ${verifiedCount}/${verified.length} citations verified.`);
+
+    await emitEvent("ethics-links", `Extracting and checking all URLs in the paper...`);
+    const urls = extractUrls(fullText!);
+    const urlsVerified = await verifyUrls(urls);
+    urlReport = formatUrlVerificationReport(urlsVerified);
+    const okUrls = urlsVerified.filter(u => u.reachable === true).length;
+    const brokenUrls = urlsVerified.filter(u => u.reachable === false).length;
+    await emitEvent("ethics-links", `Link check complete: ${okUrls} OK, ${brokenUrls} broken, ${urlsVerified.length - okUrls - brokenUrls} unverifiable.`);
+  } else {
+    await emitEvent("ethics-citations", `Full text could not be retrieved — proceeding with abstract-only audit (Sections A and D will be marked as auditor tool limitations).`);
+  }
+
+  const citationBlock = formatVerificationReport(verification);
+  const paperBlock = `# TARGET PAPER\n\n**Title:** ${title}\n**Authors:** ${authors}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${url}\n\n## Abstract\n${(abstract || "(no abstract available)").slice(0, 6000)}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — auditor could not retrieve)"}\n${hadFullText ? (fullText!.slice(0, 30000)) : "(The auditor's automated full-text fetcher returned no usable body content. This is a tool limitation, not evidence of misconduct.)"}\n\n---\n\n## VERIFICATION REPORTS\n\n${citationBlock}\n\n${urlReport}`;
+
+  await emitEvent("ethics-llm", `Sending audit prompt to ${modelConfig.modelName || modelConfig.provider}...`);
+  const result = await generateWithConfig(modelConfig, systemPrompt, paperBlock, { maxTokens: 8000, temperature: 0.3 });
+  const ethicsText = result.content;
+
+  const flagsList = extractFlags(ethicsText);
+  const recommendations = extractRecommendations(ethicsText);
+  const clearanceStatement = extractClearanceStatement(ethicsText);
+  const clearanceStatus = extractClearanceStatus(ethicsText);
+  const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+
+  const reportDateLabel = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const reportTitle = `Single-Paper Ethics Audit: "${title}" (${reportDateLabel})`;
+
+  const critCount = flagsList.filter(f => f.severity === "CRITICAL").length;
+  const majorCount = flagsList.filter(f => f.severity === "MAJOR").length;
+  const minorCount = flagsList.filter(f => f.severity === "MINOR").length;
+  const reportAbstract = `This report presents a focused research-ethics audit of the paper "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The audit covers eight ethics categories plus a dedicated link-integrity check, and is grounded in automated verification of every citation (against Future Science and OpenAlex) and every URL (reachability + arXiv-ID validity) extracted from the paper's full text. ${hadFullText ? "Full text was successfully retrieved for this audit." : "Full text could not be retrieved by the auditor; abstract-only assessment was performed for the categories that allow it."} ${flagsList.length} ethics concern(s) were identified: ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall paper clearance: ${clearanceStatus.replace(/_/g, " ")}.`;
+
+  const auditedPaperIds = [`doc:${documentId}`, `title:${title.toLowerCase().trim()}`];
+
+  return {
+    ethicsText,
+    chunk1: ethicsText,
+    chunk2: "",
+    chunk3: "",
+    flagsList,
+    recommendations,
+    clearanceStatement,
+    clearanceStatus,
+    reportTitle,
+    reportAbstract,
+    durationSeconds,
+    papersUsed: [{ title, authors, date, documentId }],
     auditedPaperIds,
   };
 }

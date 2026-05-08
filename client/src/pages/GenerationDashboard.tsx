@@ -209,6 +209,9 @@ export default function GenerationDashboard() {
   const [ethicsPrompt2Edited, setEthicsPrompt2Edited] = useState(false);
   const [ethicsPrompt3Edited, setEthicsPrompt3Edited] = useState(false);
   const [ethicsPromptsExpanded, setEthicsPromptsExpanded] = useState(false);
+  const [selectedPaperDocId, setSelectedPaperDocId] = useState<string>("");
+  const [selectedPaperTitle, setSelectedPaperTitle] = useState<string>("");
+  const [paperPickerQuery, setPaperPickerQuery] = useState<string>("");
 
   const queryClient = useQueryClient();
 
@@ -271,13 +274,63 @@ export default function GenerationDashboard() {
     enabled: activeType === "literature-review",
   });
 
-  const { data: defaultEthicsPrompts } = useQuery<{ prompt1: string; prompt2: string; prompt3: string }>({
+  const { data: defaultEthicsPrompts } = useQuery<{ prompt1: string; prompt2: string; prompt3: string; singlePaperPrompt: string }>({
     queryKey: ["/api/ethics-reports/default-prompts", selectedJournal],
     queryFn: async () => {
       const res = await fetch(`/api/ethics-reports/default-prompts?journalId=${encodeURIComponent(selectedJournal)}`);
       return res.json();
     },
     enabled: activeType === "ethics-report",
+  });
+
+  interface AvailablePaper { documentId: string; title: string; authors: string; date: string; url: string; alreadyReviewed: boolean }
+  const { data: availablePapersData, refetch: refetchAvailablePapers } = useQuery<{ papers: AvailablePaper[]; lockedCount: number }>({
+    queryKey: ["/api/ethics-reports/available-papers", selectedJournal],
+    queryFn: async () => {
+      const res = await fetch(`/api/ethics-reports/available-papers?journalId=${encodeURIComponent(selectedJournal)}`);
+      return res.json();
+    },
+    enabled: activeType === "ethics-report",
+  });
+
+  const resetAuditLockMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/audit-lock/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ journalId: selectedJournal }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to reset audit lock");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/ethics-reports/available-papers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ethics-reports-all"] });
+      refetchAvailablePapers();
+    },
+  });
+
+  const deleteEthicsReportMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/ethics-reports/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete report");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/ethics-reports-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ethics-reports/available-papers"] });
+    },
+  });
+
+  const deleteLiteratureReviewMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/literature-reviews/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete review");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/literature-reviews-all"] });
+    },
   });
 
   const { data: ethicsStatus } = useQuery<RateLimitStatus>({
@@ -299,7 +352,7 @@ export default function GenerationDashboard() {
       setPrompt(defaultReviewPrompt.prompt);
     }
     if (activeType === "ethics-report" && defaultEthicsPrompts) {
-      if (!ethicsPrompt1Edited) setEthicsPrompt1(defaultEthicsPrompts.prompt1);
+      if (!ethicsPrompt1Edited) setEthicsPrompt1(defaultEthicsPrompts.singlePaperPrompt || defaultEthicsPrompts.prompt1);
       if (!ethicsPrompt2Edited) setEthicsPrompt2(defaultEthicsPrompts.prompt2);
       if (!ethicsPrompt3Edited) setEthicsPrompt3(defaultEthicsPrompts.prompt3);
     }
@@ -405,7 +458,6 @@ export default function GenerationDashboard() {
 
   const generateEthicsMutation = useMutation({
     mutationFn: async () => {
-      const keywordsArr = ethicsKeywords.split(",").map(k => k.trim()).filter(Boolean);
       const res = await fetch("/api/ethics-reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -413,11 +465,9 @@ export default function GenerationDashboard() {
           projectId: ethicsProjectId,
           agentId: "H",
           journalId: selectedJournal,
-          keywords: keywordsArr,
-          topic: ethicsTopic.trim() || undefined,
-          prompt1: ethicsPrompt1Edited ? ethicsPrompt1 : undefined,
-          prompt2: ethicsPrompt2Edited ? ethicsPrompt2 : undefined,
-          prompt3: ethicsPrompt3Edited ? ethicsPrompt3 : undefined,
+          documentId: selectedPaperDocId,
+          paperTitle: selectedPaperTitle,
+          singlePaperPrompt: ethicsPrompt1Edited ? ethicsPrompt1 : undefined,
           orchestratorName: orchestratorName || undefined,
           agentDescription: agentDescription || undefined,
           providerMode: modelConfig.providerMode,
@@ -490,7 +540,7 @@ export default function GenerationDashboard() {
   const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && byocReady &&
     (modelConfig.providerMode === "byoc" || reviewStatus?.remaining === null || (reviewStatus?.remaining ?? 1) > 0);
   const canSubmitEthics = !ethicsIsPending && !hasGeneratingEthics && byocReady &&
-    ethicsPrompt1.trim().length > 0 && ethicsPrompt2.trim().length > 0 && ethicsPrompt3.trim().length > 0 &&
+    ethicsPrompt1.trim().length > 0 && selectedPaperDocId.length > 0 &&
     (modelConfig.providerMode === "byoc" || ethicsStatus?.remaining === null || (ethicsStatus?.remaining ?? 1) > 0);
 
   return (
@@ -716,42 +766,97 @@ export default function GenerationDashboard() {
                   />
                 </div>
 
-                {activeType === "ethics-report" && (
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
-                        Topic / Audit Focus (optional)
-                      </label>
+                {activeType === "ethics-report" && (() => {
+                  const papers = availablePapersData?.papers || [];
+                  const q = paperPickerQuery.trim().toLowerCase();
+                  const filtered = q
+                    ? papers.filter(p => p.title.toLowerCase().includes(q) || (p.authors || "").toLowerCase().includes(q))
+                    : papers;
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block">
+                          Select Paper to Audit
+                        </label>
+                        {isAdmin && (
+                          <button
+                            onClick={() => {
+                              if (confirm(`Reset the global "already reviewed" lock for ${selectedJournal}? Every paper will become re-auditable.`)) {
+                                resetAuditLockMutation.mutate();
+                              }
+                            }}
+                            disabled={resetAuditLockMutation.isPending}
+                            className="text-[10px] font-mono text-muted-foreground/40 hover:text-yellow-400 transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                            data-testid="button-reset-audit-lock"
+                          >
+                            {resetAuditLockMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                            Reset audit lock {availablePapersData?.lockedCount ? `(${availablePapersData.lockedCount})` : ""}
+                          </button>
+                        )}
+                      </div>
                       <input
                         type="text"
-                        value={ethicsTopic}
-                        onChange={(e) => setEthicsTopic(e.target.value)}
+                        value={paperPickerQuery}
+                        onChange={(e) => setPaperPickerQuery(e.target.value)}
+                        placeholder="Search papers by title or author..."
                         className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
-                        placeholder="e.g. citation integrity in interpretability research"
-                        data-testid="input-ethics-topic"
+                        data-testid="input-paper-search"
                       />
-                      <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
-                        Optional thematic focus passed to the audit prompts. Leave empty for an unscoped field-level audit.
+                      <div className="border border-border/40 max-h-72 overflow-y-auto" data-testid="list-available-papers">
+                        {filtered.length === 0 && (
+                          <p className="text-xs font-mono text-muted-foreground/50 p-4">
+                            {papers.length === 0 ? "Loading available papers…" : "No papers match this search."}
+                          </p>
+                        )}
+                        {filtered.map((p) => {
+                          const isSelected = p.documentId === selectedPaperDocId;
+                          const isLocked = p.alreadyReviewed;
+                          return (
+                            <button
+                              key={p.documentId}
+                              onClick={() => {
+                                if (isLocked) return;
+                                setSelectedPaperDocId(p.documentId);
+                                setSelectedPaperTitle(p.title);
+                              }}
+                              disabled={isLocked}
+                              className={`w-full text-left px-4 py-3 border-b border-border/20 last:border-b-0 transition-colors ${
+                                isSelected ? "bg-primary/15 border-l-2 border-l-primary" : isLocked ? "bg-muted/10 opacity-50 cursor-not-allowed" : "hover:bg-muted/10 cursor-pointer"
+                              }`}
+                              data-testid={`paper-option-${p.documentId}`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm text-foreground/90 truncate">{p.title}</p>
+                                  <p className="text-[10px] font-mono text-muted-foreground/60 mt-1 truncate">
+                                    {p.authors || "(unknown)"} · {p.date}
+                                  </p>
+                                </div>
+                                {isLocked && (
+                                  <span className="text-[9px] font-mono text-yellow-400/80 border border-yellow-400/30 px-2 py-0.5 flex items-center gap-1 flex-shrink-0">
+                                    <Lock className="w-3 h-3" /> Reviewed
+                                  </span>
+                                )}
+                                {isSelected && !isLocked && (
+                                  <span className="text-[9px] font-mono text-primary border border-primary/40 px-2 py-0.5 flex-shrink-0">Selected</span>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] font-mono text-muted-foreground/50">
+                        Single-paper deep audit: pick ONE paper. Each paper can be ethics-reviewed only once globally — already-reviewed papers are locked. The audit verifies every citation against Future Science / OpenAlex / arXiv and checks every URL for reachability.
                       </p>
+                      {selectedPaperDocId && (
+                        <div className="border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-mono" data-testid="text-selected-paper">
+                          <span className="text-muted-foreground/60">Selected: </span>
+                          <span className="text-foreground/90">{selectedPaperTitle || selectedPaperDocId}</span>
+                        </div>
+                      )}
                     </div>
-                    <div>
-                    <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
-                      Keyword Filters (optional, comma-separated)
-                    </label>
-                    <input
-                      type="text"
-                      value={ethicsKeywords}
-                      onChange={(e) => setEthicsKeywords(e.target.value)}
-                      className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
-                      placeholder="e.g. citation, bias, replication"
-                      data-testid="input-ethics-keywords"
-                    />
-                    <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
-                      Restrict the audit to papers whose title or abstract matches any of these keywords. Leave empty to audit all available papers.
-                    </p>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
@@ -806,14 +911,12 @@ export default function GenerationDashboard() {
                       data-testid="button-toggle-ethics-prompts"
                     >
                       {ethicsPromptsExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      5. Chain-of-Prompts (Part 1, 2, 3 — each editable)
+                      5. Single-Paper Audit Prompt (editable)
                     </button>
                     {ethicsPromptsExpanded && (
                       <div className="space-y-6">
                         {[
-                          { idx: 1, label: "Part 1 — Paper-by-paper audit", value: ethicsPrompt1, set: setEthicsPrompt1, edited: ethicsPrompt1Edited, setEdited: setEthicsPrompt1Edited, dflt: defaultEthicsPrompts?.prompt1 },
-                          { idx: 2, label: "Part 2 — Systemic patterns & trajectory", value: ethicsPrompt2, set: setEthicsPrompt2, edited: ethicsPrompt2Edited, setEdited: setEthicsPrompt2Edited, dflt: defaultEthicsPrompts?.prompt2 },
-                          { idx: 3, label: "Part 3 — Consolidated flags & clearance", value: ethicsPrompt3, set: setEthicsPrompt3, edited: ethicsPrompt3Edited, setEdited: setEthicsPrompt3Edited, dflt: defaultEthicsPrompts?.prompt3 },
+                          { idx: 1, label: "Single-Paper Ethics Audit Prompt", value: ethicsPrompt1, set: setEthicsPrompt1, edited: ethicsPrompt1Edited, setEdited: setEthicsPrompt1Edited, dflt: defaultEthicsPrompts?.singlePaperPrompt },
                         ].map(p => (
                           <div key={p.idx} className="space-y-2">
                             <div className="flex items-center justify-between">
@@ -1097,6 +1200,20 @@ export default function GenerationDashboard() {
                     </div>
                   )}
                   {showMetadata === rev.id && <MetadataPanel record={rev} />}
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        if (confirm("Delete this literature review? This cannot be undone.")) {
+                          deleteLiteratureReviewMutation.mutate(rev.id);
+                        }
+                      }}
+                      disabled={deleteLiteratureReviewMutation.isPending}
+                      className="mt-3 text-[10px] font-mono text-muted-foreground/30 hover:text-red-400 transition-colors disabled:opacity-40"
+                      data-testid={`button-delete-review-${rev.id}`}
+                    >
+                      Delete review
+                    </button>
+                  )}
                 </div>
               ))}
 
@@ -1159,6 +1276,20 @@ export default function GenerationDashboard() {
                     </div>
                   )}
                   {showMetadata === rep.id && <MetadataPanel record={rep} />}
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        if (confirm("Delete this ethics report? The associated paper will become re-auditable. This cannot be undone.")) {
+                          deleteEthicsReportMutation.mutate(rep.id);
+                        }
+                      }}
+                      disabled={deleteEthicsReportMutation.isPending}
+                      className="mt-3 text-[10px] font-mono text-muted-foreground/30 hover:text-red-400 transition-colors disabled:opacity-40"
+                      data-testid={`button-delete-ethics-${rep.id}`}
+                    >
+                      Delete report
+                    </button>
+                  )}
                 </div>
               ))}
 
