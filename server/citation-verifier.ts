@@ -10,12 +10,20 @@ export interface ExtractedCitation {
   arxivId?: string;
   fsRef?: string;
   authorYear?: { author: string; year: string };
+  // The bibliography line / surrounding text the citation appeared in. This is the
+  // text the paper claims the citation is for (title + authors as the paper presents them).
+  context?: string;
 }
 
 export interface VerifiedCitation extends ExtractedCitation {
   verifiedSource: "future-science" | "openalex" | "none";
   verifiedTitle?: string;
   verifiedUrl?: string;
+  // True when the verified work's title meaningfully overlaps with the bibliography line
+  // the paper presents. False = the URL/ID resolves to a DIFFERENT work than what the
+  // paper claims it points to (citation mismatch / mis-citation / possible fraud).
+  titleMatchesClaim?: boolean;
+  matchNote?: string;
 }
 
 export interface PaperVerification {
@@ -152,6 +160,13 @@ export async function fetchFsPaperContent(documentId: string, slug: string = "mi
   return null;
 }
 
+// Pull ~240 chars of surrounding text — typically captures the entire bibliography line.
+function contextAround(text: string, idx: number, len: number): string {
+  const start = Math.max(0, idx - 160);
+  const end = Math.min(text.length, idx + len + 160);
+  return text.slice(start, end).replace(/\s+/g, " ").trim();
+}
+
 export function extractCitations(text: string): ExtractedCitation[] {
   const out: ExtractedCitation[] = [];
   const seen = new Set<string>();
@@ -164,7 +179,7 @@ export function extractCitations(text: string): ExtractedCitation[] {
     const k = `doi:${doi.toLowerCase()}`;
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push({ raw: m[0], doi });
+    out.push({ raw: m[0], doi, context: contextAround(text, m.index, m[0].length) });
   }
 
   const arxivRe = /arxiv\.org\/abs\/(\d{4}\.\d{4,5})|arXiv:\s*(\d{4}\.\d{4,5})/gi;
@@ -173,7 +188,7 @@ export function extractCitations(text: string): ExtractedCitation[] {
     const k = `arxiv:${id}`;
     if (!id || seen.has(k)) continue;
     seen.add(k);
-    out.push({ raw: m[0], arxivId: id });
+    out.push({ raw: m[0], arxivId: id, context: contextAround(text, m.index, m[0].length) });
   }
 
   const fsRe = /https?:\/\/(?:www\.)?future-science\.org\/[\w\-]+\/papers\/([\w\-]+)/g;
@@ -181,7 +196,7 @@ export function extractCitations(text: string): ExtractedCitation[] {
     const k = `fs:${m[1]}`;
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push({ raw: m[0], fsRef: m[1] });
+    out.push({ raw: m[0], fsRef: m[1], context: contextAround(text, m.index, m[0].length) });
   }
 
   const ayRe = /\(([A-Z][A-Za-z\-']+(?:\s+et\s+al\.?)?)\s*,?\s*(\d{4}[a-z]?)\)/g;
@@ -191,10 +206,39 @@ export function extractCitations(text: string): ExtractedCitation[] {
     const k = `ay:${author.toLowerCase()}-${year}`;
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push({ raw: m[0], authorYear: { author, year } });
+    out.push({ raw: m[0], authorYear: { author, year }, context: contextAround(text, m.index, m[0].length) });
   }
 
   return out.slice(0, 100);
+}
+
+// Token-based comparison between the verified work's title and the bibliography line
+// the paper presents. Returns { ok: true } when they share enough significant tokens.
+const TITLE_STOPWORDS = new Set([
+  "the","a","an","of","in","on","for","and","to","with","by","is","at","as","or","are",
+  "be","via","from","using","based","towards","toward","into","over","under","study",
+  "studies","paper","papers","preprint","arxiv","abs","https","http","www","org","com",
+  "et","al","vol","no","pp","pages","abstract","note","notes","conference","proceedings",
+  "research","review","reviews","analysis","approach","approaches","method","methods",
+]);
+function titleTokens(s: string): Set<string> {
+  const tokens = s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  const out = new Set<string>();
+  for (const t of tokens) if (t.length >= 4 && !TITLE_STOPWORDS.has(t) && !/^\d+$/.test(t)) out.add(t);
+  return out;
+}
+function titleMatches(claim: string | undefined, verifiedTitle: string | undefined): { ok: boolean; note?: string } {
+  if (!verifiedTitle) return { ok: false, note: "verified work has no title to compare" };
+  if (!claim) return { ok: false, note: "no claim text captured" };
+  const a = titleTokens(claim);
+  const b = titleTokens(verifiedTitle);
+  if (a.size === 0 || b.size === 0) return { ok: false, note: "insufficient title tokens" };
+  let shared = 0;
+  Array.from(b).forEach(t => { if (a.has(t)) shared++; });
+  const jaccard = shared / (a.size + b.size - shared || 1);
+  // Pass when at least 2 significant tokens overlap OR jaccard above 0.18.
+  if (shared >= 2 || jaccard >= 0.18) return { ok: true };
+  return { ok: false, note: `verified title "${verifiedTitle}" does not overlap with claimed bibliography line` };
 }
 
 function verifyAgainstFs(c: ExtractedCitation, fsAbstracts: FutureScienceAbstract[]): { verified: boolean; title?: string; url?: string } | null {
@@ -273,9 +317,15 @@ export async function verifyCitations(citations: ExtractedCitation[], fsAbstract
   const capped = citations.slice(0, 100);
   return pMapLimit(capped, 4, async (c) => {
     const fs = verifyAgainstFs(c, fsAbstracts);
-    if (fs?.verified) return { ...c, verifiedSource: "future-science" as const, verifiedTitle: fs.title, verifiedUrl: fs.url };
+    if (fs?.verified) {
+      const match = titleMatches(c.context, fs.title);
+      return { ...c, verifiedSource: "future-science" as const, verifiedTitle: fs.title, verifiedUrl: fs.url, titleMatchesClaim: match.ok, matchNote: match.note };
+    }
     const oa = await verifyAgainstOpenAlex(c);
-    if (oa?.verified) return { ...c, verifiedSource: "openalex" as const, verifiedTitle: oa.title, verifiedUrl: oa.url };
+    if (oa?.verified) {
+      const match = titleMatches(c.context, oa.title);
+      return { ...c, verifiedSource: "openalex" as const, verifiedTitle: oa.title, verifiedUrl: oa.url, titleMatchesClaim: match.ok, matchNote: match.note };
+    }
     return { ...c, verifiedSource: "none" as const };
   });
 }
@@ -387,11 +437,19 @@ export function formatVerificationReport(v: PaperVerification): string {
   const verifiedFs = v.citations.filter(c => c.verifiedSource === "future-science").length;
   const verifiedOa = v.citations.filter(c => c.verifiedSource === "openalex").length;
   const unverified = v.citations.filter(c => c.verifiedSource === "none").length;
+  const mismatched = v.citations.filter(c => c.verifiedSource !== "none" && c.titleMatchesClaim === false).length;
   const lines = v.citations.map((c, i) => {
     const id = c.doi ? `DOI ${c.doi}` : c.arxivId ? `arXiv:${c.arxivId}` : c.fsRef ? `Future Science slug "${c.fsRef}"` : c.authorYear ? `(${c.authorYear.author}, ${c.authorYear.year})` : c.raw;
-    if (c.verifiedSource === "future-science") return `  ${i + 1}. ${id} — VERIFIED in Future Science: "${c.verifiedTitle ?? "(title unavailable)"}"`;
-    if (c.verifiedSource === "openalex") return `  ${i + 1}. ${id} — VERIFIED in OpenAlex: "${c.verifiedTitle ?? "(title unavailable)"}"${c.verifiedUrl ? ` <${c.verifiedUrl}>` : ""}`;
-    return `  ${i + 1}. ${id} — UNVERIFIED (not found in Future Science or OpenAlex; treat as potentially hallucinated, mis-cited, or non-indexed)`;
+    const claim = c.context ? ` | Claimed: "${c.context.slice(0, 220)}${c.context.length > 220 ? "…" : ""}"` : "";
+    const mismatchTag = c.verifiedSource !== "none" && c.titleMatchesClaim === false
+      ? ` — *** TITLE MISMATCH: the URL/ID resolves to a DIFFERENT work than the bibliography line claims (likely mis-citation or fabricated reference) ***`
+      : "";
+    if (c.verifiedSource === "future-science") return `  ${i + 1}. ${id} — VERIFIED in Future Science: "${c.verifiedTitle ?? "(title unavailable)"}"${mismatchTag}${claim}`;
+    if (c.verifiedSource === "openalex") return `  ${i + 1}. ${id} — VERIFIED in OpenAlex: "${c.verifiedTitle ?? "(title unavailable)"}"${c.verifiedUrl ? ` <${c.verifiedUrl}>` : ""}${mismatchTag}${claim}`;
+    return `  ${i + 1}. ${id} — UNVERIFIED (not found in Future Science or OpenAlex; treat as potentially hallucinated, mis-cited, or non-indexed)${claim}`;
   });
-  return `**Citation analysis:** Full text retrieved. ${v.citations.length} citation(s) detected (showing up to 15). Verified ${verifiedFs} via Future Science, ${verifiedOa} via OpenAlex; ${unverified} unverified.\n${lines.join("\n")}`;
+  const mismatchHeadline = mismatched > 0
+    ? ` *** ${mismatched} citation(s) RESOLVE TO A DIFFERENT WORK than the bibliography claims — flag in Section A as mis-citation/possible fraud. ***`
+    : "";
+  return `**Citation analysis:** Full text retrieved. ${v.citations.length} citation(s) detected. Verified ${verifiedFs} via Future Science, ${verifiedOa} via OpenAlex; ${unverified} unverified; ${mismatched} title-mismatched.${mismatchHeadline}\n${lines.join("\n")}`;
 }

@@ -207,7 +207,13 @@ You will receive:
 Produce a single, well-structured ethics report covering the 8 categories below. Use the SAME flag conventions throughout: \`FLAG [CRITICAL]\`, \`FLAG [MAJOR]\`, \`FLAG [MINOR]\`, or "No concern identified".
 
 ### A. Citation Fraud
-Use ONLY the **Citation analysis** block as evidentiary basis. State the citation status: "No citations detected", "No automated citation analysis available — auditor tool limitation; not an ethics finding" (when the verifier could not retrieve full text), or "N citations detected (X verified, Y unverified)". List every UNVERIFIED citation by identifier and flag clusters of unverified or hallucinated citations as MAJOR/CRITICAL. **TOOL LIMITATIONS ARE NEVER ETHICS FLAGS.**
+Use ONLY the **Citation analysis** block as evidentiary basis. State the citation status: "No citations detected", "No automated citation analysis available — auditor tool limitation; not an ethics finding" (when the verifier could not retrieve full text), or "N citations detected (X verified, Y unverified, Z title-mismatched)".
+
+You MUST inspect TWO distinct failure modes:
+1. **Unverified citations** — references the verifier could not find in Future Science or OpenAlex. List each by identifier; clusters of unverified or hallucinated citations are MAJOR/CRITICAL.
+2. **Title mismatches** — entries marked \`*** TITLE MISMATCH ***\` in the Citation analysis block. These are references whose URL/DOI/arXiv-ID resolves to a *different* work than the bibliography line claims. This is a strong indicator of mis-citation, fabricated reference linkage, or citation laundering. **Every title-mismatch must be reported individually, quote both the claimed bibliography line and the actual resolved title, and flag at MINIMUM as MAJOR; clusters of 3+ mismatches are CRITICAL.**
+
+**TOOL LIMITATIONS ARE NEVER ETHICS FLAGS.**
 
 ### B. Data Fabrication or Falsification
 Concrete numeric inconsistencies, impossibly clean results, missing underlying counts. Strong results alone are NOT fraud.
