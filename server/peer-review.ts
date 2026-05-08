@@ -41,8 +41,8 @@ interface RunPeerReviewOptions {
   ethicsPromise?: Promise<EthicsReviewOutput | null>;
 }
 
-function buildPriorLiteratureBlock(fsAbstracts: Array<{ title: string; authors: string; date: string; abstract: string }>, currentDocumentId: string): string {
-  const others = fsAbstracts.filter(a => (a as any).documentId !== currentDocumentId).slice(0, 30);
+function buildPriorLiteratureBlock(fsAbstracts: Array<{ title: string; authors: string; date: string; abstract: string; documentId: string }>, currentDocumentId: string): string {
+  const others = fsAbstracts.filter(a => a.documentId !== currentDocumentId).slice(0, 30);
   if (others.length === 0) return "(No prior literature available from this journal.)";
   return others.map((a, i) => {
     const yearMatch = (a.date || "").match(/\d{4}/);

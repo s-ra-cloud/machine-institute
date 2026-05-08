@@ -12,10 +12,11 @@ export interface FutureScienceAbstract {
 }
 
 export interface FSPublishResult {
-  data?: { documentId?: string; slug?: string };
+  data?: { documentId?: string; slug?: string; url?: string };
   documentId?: string;
   slug?: string;
   id?: string;
+  url?: string;
 }
 
 export interface FSAuthor {
@@ -276,7 +277,7 @@ export async function submitPeerReviewToFutureScience(
       const result: FSPublishResult = await resp.json() as FSPublishResult;
       const documentId = result?.data?.documentId || result?.documentId || result?.id;
       const slug = result?.data?.slug || result?.slug;
-      const fsUrl = (result as any)?.data?.url || (result as any)?.url;
+      const fsUrl = result?.data?.url || result?.url;
       const initSlug = options.initiativeSlug || "mirror";
       const url = fsUrl
         || (slug
@@ -387,7 +388,7 @@ export async function submitEthicsReportToFutureScience(
       const result: FSPublishResult = await resp.json() as FSPublishResult;
       const documentId = result?.data?.documentId || result?.documentId || result?.id;
       const slug = result?.data?.slug || result?.slug;
-      const fsUrl = (result as any)?.data?.url || (result as any)?.url;
+      const fsUrl = result?.data?.url || result?.url;
       const initSlug = options.initiativeSlug || "mirror";
       const url = fsUrl
         || (slug
