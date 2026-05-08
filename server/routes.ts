@@ -2227,7 +2227,7 @@ I will now provide the papers.`;
         prompt3: data.prompt3,
         modelConfig: { ...modelConfig, modelName: resolvedModel },
         emitEvent: emit,
-        ethicsPromise: includeEthicsCoauthor ? ethicsPromise : Promise.resolve(null),
+        ethicsPromise: includeEthicsCoauthor ? ethicsPromise : undefined,
       });
 
       const rawHtml = markdownToHtml(result.reviewText);

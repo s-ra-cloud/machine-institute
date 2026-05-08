@@ -1639,12 +1639,32 @@ export default function GenerationDashboard() {
                         </span>
                       )}
                       {rev.includeEthicsCoauthor && (
-                        <span className="text-[10px] font-mono text-purple-300 border border-purple-500/30 px-2 py-0.5">+ H</span>
+                        <span
+                          className={`text-[10px] font-mono px-2 py-0.5 border ${
+                            rev.ethicsReportId
+                              ? "text-purple-300 border-purple-500/30"
+                              : "text-muted-foreground/50 border-border/40 line-through"
+                          }`}
+                          title={rev.ethicsReportId ? "Co-authored with H ethics agent" : "Ethics co-author requested but unavailable"}
+                          data-testid={`badge-ethics-${rev.id}`}
+                        >
+                          + H
+                        </span>
                       )}
                     </div>
-                    <span className="text-[10px] font-mono text-muted-foreground/40">
-                      {new Date(rev.createdAt).toLocaleDateString()}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      {rev.modelName && (
+                        <span
+                          className="text-[10px] font-mono text-muted-foreground/60 border border-border/30 px-2 py-0.5"
+                          data-testid={`text-model-${rev.id}`}
+                        >
+                          {rev.modelName}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono text-muted-foreground/40">
+                        {new Date(rev.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
                   <h3 className="font-heading font-semibold mb-1">
                     {rev.status === "completed" ? (
