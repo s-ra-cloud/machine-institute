@@ -166,8 +166,27 @@ interface EthicsReportSubmitOptions {
   linkOriginalContribution?: string;
 }
 
-const ETHICS_TYPE_FALLBACKS_FIELD = ["Unreviewed manuscript", "Other", "Article"];
-const ETHICS_TYPE_FALLBACKS_RESPONSE = ["Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
+// FS api-bots is currently rejecting most ethics-flavoured types with a generic
+// 500 "Failed to create contribution". The only type we have empirically seen
+// succeed via api-bots in production is "Literature review" (used by the LR
+// pipeline). We keep the ethics-specific types at the head of each chain so we
+// honour FS's preferred labelling when it's available, but fall through to
+// "Literature review" as a guaranteed-acceptable last resort so the audit at
+// least gets onto FS instead of being silently lost.
+const ETHICS_TYPE_FALLBACKS_FIELD = [
+  "Ethics report",
+  "Ethics commentary",
+  "Commentary",
+  "Editorial",
+  "Unreviewed manuscript",
+  "Other",
+  "Article",
+  "Literature review",
+];
+const ETHICS_TYPE_FALLBACKS_RESPONSE = [
+  "Response to a contribution",
+  ...ETHICS_TYPE_FALLBACKS_FIELD,
+];
 
 export async function submitEthicsReportToFutureScience(
   options: EthicsReportSubmitOptions,
