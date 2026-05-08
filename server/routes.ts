@@ -1782,8 +1782,12 @@ I will now provide the papers.`;
       const submissionKeywords = (report.keywords?.length ?? 0) >= 3
         ? report.keywords.slice(0, 8)
         : ["ethics", "ai research", "automated science", ...(report.keywords || [])].slice(0, 5);
+      // FS's api-bots `linkOriginalContribution` field validates the URL and
+      // (empirically) requires the `/papers/` segment, even though the public
+      // page resolves without it. Keep `/papers/` here ONLY — all other display
+      // URLs in the app stay as `/<journal>/<id>`.
       const linkOriginalContribution = report.documentId
-        ? `https://future-science.org/${report.journalId}/${report.documentId}`
+        ? `https://future-science.org/${report.journalId}/papers/${report.documentId}`
         : undefined;
 
       const subResult = await submitEthicsReportToFutureScience({
@@ -2082,10 +2086,14 @@ I will now provide the papers.`;
           const submissionKeywords = data.keywords.length >= 3
             ? data.keywords.slice(0, 8)
             : ["ethics", "ai research", "automated science", ...data.keywords].slice(0, 5);
-          // Single-paper audits are submitted as "Response to a contribution" with
-          // linkOriginalContribution pointing at the audited paper's FS URL.
+          // Single-paper audits are submitted as "Response to a contribution"
+          // with linkOriginalContribution pointing at the audited paper's FS
+          // URL. FS's api-bots validates this field and (empirically) requires
+          // the `/papers/` segment in the URL, even though the public-facing
+          // page resolves without it. Keep `/papers/` here ONLY — all other
+          // display URLs in the app stay as `/<journal>/<id>`.
           const linkOriginalContribution = data.documentId
-            ? `https://future-science.org/${data.journalId}/${data.documentId}`
+            ? `https://future-science.org/${data.journalId}/papers/${data.documentId}`
             : undefined;
           const subResult = await submitEthicsReportToFutureScience({
             title: result.reportTitle,
