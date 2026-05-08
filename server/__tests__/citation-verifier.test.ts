@@ -1,19 +1,24 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   verifyCitations,
+  verifyUrls,
   analyzeInTextVsBibliography,
   classifyBody,
   type ExtractedCitation,
 } from "../citation-verifier";
 
-type FetchHandler = (url: string) => { ok: boolean; status?: number; text?: string; json?: unknown } | null;
+type FetchHandler = (
+  url: string,
+  method: string,
+) => { ok: boolean; status?: number; text?: string; json?: unknown } | null;
 
 function installFetchMock(handler: FetchHandler) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
-    const r = handler(url);
+    const method = (init?.method ?? "GET").toString().toUpperCase();
+    const r = handler(url, method);
     if (!r) {
-      throw new Error(`Unmocked fetch: ${url}`);
+      throw new Error(`Unmocked fetch: ${method} ${url}`);
     }
     return {
       ok: r.ok,
@@ -180,5 +185,160 @@ describe("classifyBody", () => {
 
   it("uninformative body => unknown", () => {
     expect(classifyBody("<html><body>Hello</body></html>").kind).toBe("unknown");
+  });
+});
+
+describe("verifyUrls — reachability classification", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("200 OK => ok", async () => {
+    installFetchMock(() => ({ ok: true, status: 200 }));
+    const [r] = await verifyUrls(["https://example.com/paper"]);
+    expect(r.classification).toBe("ok");
+    expect(r.reachable).toBe(true);
+    expect(r.status).toBe(200);
+  });
+
+  it("404 => broken (resource not found)", async () => {
+    installFetchMock(() => ({ ok: false, status: 404 }));
+    const [r] = await verifyUrls(["https://example.com/missing"]);
+    expect(r.classification).toBe("broken");
+    expect(r.reachable).toBe(false);
+    expect(r.status).toBe(404);
+    expect(r.note).toMatch(/404.*not found/i);
+  });
+
+  it("410 => broken (resource gone)", async () => {
+    installFetchMock(() => ({ ok: false, status: 410 }));
+    const [r] = await verifyUrls(["https://example.com/gone"]);
+    expect(r.classification).toBe("broken");
+    expect(r.reachable).toBe(false);
+    expect(r.status).toBe(410);
+    expect(r.note).toMatch(/410.*not found/i);
+  });
+
+  it("429 => rate-limited (do NOT flag)", async () => {
+    installFetchMock(() => ({ ok: false, status: 429 }));
+    const [r] = await verifyUrls(["https://example.com/throttled"]);
+    expect(r.classification).toBe("rate-limited");
+    expect(r.reachable).toBeNull();
+    expect(r.status).toBe(429);
+    expect(r.note).toMatch(/429|rate-limited/i);
+  });
+
+  it("500 => server-error (do NOT flag)", async () => {
+    installFetchMock(() => ({ ok: false, status: 500 }));
+    const [r] = await verifyUrls(["https://example.com/broken-backend"]);
+    expect(r.classification).toBe("server-error");
+    expect(r.reachable).toBeNull();
+    expect(r.status).toBe(500);
+    expect(r.note).toMatch(/500|server error/i);
+  });
+
+  it("403 with S3 AccessDenied body => broken", async () => {
+    const s3Body =
+      '<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>';
+    installFetchMock((_url, method) => {
+      if (method === "HEAD") return { ok: false, status: 403 };
+      return { ok: false, status: 403, text: s3Body };
+    });
+    const [r] = await verifyUrls(["https://bucket.s3.amazonaws.com/dead-object"]);
+    expect(r.classification).toBe("broken");
+    expect(r.reachable).toBe(false);
+    expect(r.status).toBe(403);
+    expect(r.note).toMatch(/access-denied|no-such-key/i);
+    expect(r.bodySnippet).toMatch(/AccessDenied/);
+  });
+
+  it("403 with Cloudflare interstitial => bot-blocked (do NOT flag)", async () => {
+    const cfBody = `<!DOCTYPE html><html><head><title>Just a moment...</title></head>
+<body><h1>Checking your browser before accessing the site.</h1>
+<p>Please enable JavaScript and cookies. cf-ray: 1234abcd</p></body></html>`;
+    installFetchMock((_url, method) => {
+      if (method === "HEAD") return { ok: false, status: 403 };
+      return { ok: false, status: 403, text: cfBody };
+    });
+    const [r] = await verifyUrls(["https://protected.example.com/paper"]);
+    expect(r.classification).toBe("bot-blocked");
+    expect(r.reachable).toBeNull();
+    expect(r.status).toBe(403);
+    expect(r.note).toMatch(/bot|interstitial|do not flag/i);
+    expect(r.bodySnippet).toMatch(/Just a moment|Checking your browser/);
+  });
+
+  it("403 with uninformative body + Wayback hit => bot-blocked (do NOT flag)", async () => {
+    installFetchMock((url, method) => {
+      if (url.includes("archive.org/wayback/available")) {
+        return {
+          ok: true,
+          json: {
+            archived_snapshots: {
+              closest: { available: true, status: "200", url: "https://web.archive.org/web/20240101/https://example.com/paper" },
+            },
+          },
+        };
+      }
+      if (method === "HEAD") return { ok: false, status: 403 };
+      return { ok: false, status: 403, text: "<html><body>Forbidden</body></html>" };
+    });
+    const [r] = await verifyUrls(["https://example.com/paper"]);
+    expect(r.classification).toBe("bot-blocked");
+    expect(r.reachable).toBeNull();
+    expect(r.status).toBe(403);
+    expect(r.waybackTried).toBe(true);
+    expect(r.waybackOk).toBe(true);
+    expect(r.note).toMatch(/wayback.*200|likely bot-blocked/i);
+  });
+
+  it("403 with uninformative body + no Wayback snapshot => broken", async () => {
+    installFetchMock((url, method) => {
+      if (url.includes("archive.org/wayback/available")) {
+        return { ok: true, json: { archived_snapshots: {} } };
+      }
+      if (method === "HEAD") return { ok: false, status: 403 };
+      return { ok: false, status: 403, text: "<html><body>Forbidden</body></html>" };
+    });
+    const [r] = await verifyUrls(["https://example.com/paper"]);
+    expect(r.classification).toBe("broken");
+    expect(r.reachable).toBe(false);
+    expect(r.status).toBe(403);
+    expect(r.waybackTried).toBe(true);
+    expect(r.waybackOk).toBe(false);
+    expect(r.note).toMatch(/no wayback snapshot.*broken/i);
+  });
+
+  describe("SSRF guard", () => {
+    it("localhost => skipped (no fetch issued)", async () => {
+      const fetchMock = installFetchMock(() => ({ ok: true }));
+      const [r] = await verifyUrls(["http://localhost:8080/secret"]);
+      expect(r.reachable).toBeNull();
+      expect(r.classification).toBe("unknown");
+      expect(r.note).toMatch(/skipped.*internal hostname/i);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("IP literal => skipped (no fetch issued)", async () => {
+      const fetchMock = installFetchMock(() => ({ ok: true }));
+      const [r] = await verifyUrls(["http://127.0.0.1/admin"]);
+      expect(r.reachable).toBeNull();
+      expect(r.classification).toBe("unknown");
+      expect(r.note).toMatch(/skipped.*ip literal/i);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("non-http scheme => skipped (no fetch issued)", async () => {
+      const fetchMock = installFetchMock(() => ({ ok: true }));
+      const [r] = await verifyUrls(["file:///etc/passwd"]);
+      expect(r.reachable).toBeNull();
+      expect(r.classification).toBe("unknown");
+      expect(r.note).toMatch(/skipped.*non-http scheme/i);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 });
