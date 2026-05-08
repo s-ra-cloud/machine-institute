@@ -34,9 +34,32 @@ interface Props {
   rateLimitInfo?: { remaining: number | null; resetAt: number | null; count?: number } | null;
   limitLabel?: string;
   hasPlatformAccess?: boolean;
+  activeType?: "editorial" | "literature-review" | "ethics-report";
 }
 
-export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasPlatformAccess = true }: Props) {
+// Per-generation credit cost estimates (1 credit ≈ $0.01 USD).
+// Derived from observed token usage on this stack:
+//   - Editorial:        ~6k input + ~3k output tokens (1 LLM call, op-ed length)
+//   - Literature Rev.:  ~15k input + ~6k output tokens (corpus + synthesis)
+//   - Ethics Report:    ~15k input + ~5k output tokens (full paper + verifier blocks)
+// Combined with OpenRouter pass-through pricing per 1M tokens
+// (DeepSeek Chat $0.27/$1.10, Claude Sonnet 4 $3/$15, GPT-4o $2.50/$10).
+const MODEL_AGENT_CREDITS: Record<string, Partial<Record<"editorial" | "literature-review" | "ethics-report", number>>> = {
+  "deepseek/deepseek-chat":      { editorial: 1,  "literature-review": 1,  "ethics-report": 1  },
+  "anthropic/claude-sonnet-4":   { editorial: 6,  "literature-review": 14, "ethics-report": 12 },
+  "openai/gpt-4o":               { editorial: 5,  "literature-review": 10, "ethics-report": 9  },
+};
+
+function formatCostBadge(modelKey: string, activeType?: Props["activeType"]): string | null {
+  if (!activeType) return null;
+  const map = MODEL_AGENT_CREDITS[modelKey];
+  if (!map) return null;
+  const cost = map[activeType];
+  if (!cost) return null;
+  return `~${cost} credit${cost === 1 ? "" : "s"} / run`;
+}
+
+export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasPlatformAccess = true, activeType }: Props) {
   const [tab, setTab] = useState<"platform" | "byoc">(
     hasPlatformAccess ? value.providerMode : "byoc"
   );
@@ -181,6 +204,14 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasP
                 >
                   <div>
                     <span className="text-sm font-mono">{m.label}</span>
+                    {(() => {
+                      const badge = formatCostBadge(m.model, activeType);
+                      return badge ? (
+                        <span className="ml-2 text-[10px] font-mono text-muted-foreground/60" data-testid={`cost-${m.model}`}>
+                          {badge}
+                        </span>
+                      ) : null;
+                    })()}
                     {m.default && <span className="ml-2 text-[10px] font-mono text-primary/60">(default)</span>}
                   </div>
                   {value.modelName === m.model && <Check className="w-4 h-4 text-primary" />}

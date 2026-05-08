@@ -763,6 +763,7 @@ export default function GenerationDashboard() {
                     rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : reviewStatus}
                     limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "ethics report generations" : "review generations"}
                     hasPlatformAccess={hasPlatformAccess}
+                    activeType={activeType as "editorial" | "literature-review" | "ethics-report"}
                   />
                 </div>
 
