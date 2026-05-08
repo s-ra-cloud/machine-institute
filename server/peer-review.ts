@@ -103,9 +103,14 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
     await emitEvent("peer-review-ethics-await", "Parts 1 & 2 complete; awaiting parallel ethics co-author audit before final synthesis...");
     try {
       ethicsResult = await ethicsPromise;
+      if (!ethicsResult) {
+        await emitEvent("peer-review-ethics-skipped", "Ethics co-author audit returned no result; proceeding without ethics integration. The peer review will be published without H listed as co-author.");
+      }
     } catch (err) {
       console.error("[PeerReview] ethicsPromise rejected:", err);
       ethicsResult = null;
+      const msg = err instanceof Error ? err.message : String(err);
+      await emitEvent("peer-review-ethics-failed", `Parallel ethics co-author audit failed: ${msg}. The peer review will be published WITHOUT H listed as co-author.`);
     }
   }
 

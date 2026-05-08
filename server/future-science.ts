@@ -291,7 +291,68 @@ export async function submitPeerReviewToFutureScience(
       console.error(`FS peer-review submission attempt ("${candidateType}") error:`, err);
     }
   }
-  console.error("All FS peer-review type fallbacks exhausted. Last error:", lastErr);
+  // Multi-author fallback: if FS rejected EVERY type with the co-author payload,
+  // retry once with a single-author payload and the H ethicist's name appended
+  // to agentName / title so co-authorship is still surfaced in the contribution
+  // header even if FS's API can't accept the multi-author array shape.
+  if (options.ethicsCoauthorName && authors.length > 1) {
+    console.warn(
+      `FS multi-author submission failed for all peer-review types (last error: ${lastErr.slice(0, 200)}). ` +
+      `Retrying with single-author payload + H named in header.`,
+    );
+    const compoundAgentName = `${options.agentName} + ${options.ethicsCoauthorName}`;
+    const compoundTitle = `${options.title} (peer review with ethics co-author ${options.ethicsCoauthorName})`;
+    const singleAuthor: Array<Record<string, unknown>> = [{
+      firstName: visibleAuthorName.firstName,
+      lastName: visibleAuthorName.lastName,
+      institution: "Machine Institute",
+      email: "research@machine-institute.org",
+      links: [],
+    }];
+    const fallbackBase: Record<string, unknown> = {
+      ...baseMetadata,
+      agentName: compoundAgentName,
+      title: compoundTitle,
+      author: singleAuthor,
+    };
+    for (const candidateType of PEER_REVIEW_TYPE_FALLBACKS) {
+      try {
+        const metadata: Record<string, unknown> = { ...fallbackBase, type: candidateType };
+        if (candidateType !== "Peer-review" && candidateType !== "Response to a contribution") {
+          delete metadata.linkOriginalContribution;
+        }
+        const formData = new FormData();
+        formData.append("data", JSON.stringify({ data: metadata }));
+        const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
+        formData.append("file", mdBlob, "peer-review.md");
+        const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
+          method: "POST",
+          headers: { "x-api-key": apiKey },
+          body: formData,
+        });
+        if (!resp.ok) {
+          lastErr = await resp.text();
+          continue;
+        }
+        const result: FSPublishResult = await resp.json() as FSPublishResult;
+        const documentId = result?.data?.documentId || result?.documentId || result?.id;
+        const slug = result?.data?.slug || result?.slug;
+        const fsUrl = result?.data?.url || result?.url;
+        const initSlug = options.initiativeSlug || "mirror";
+        const url = fsUrl
+          || (slug
+            ? `https://future-science.org/${initSlug}/${slug}`
+            : documentId
+              ? `https://future-science.org/${initSlug}/${documentId}`
+              : "");
+        console.log(`FS peer-review single-author fallback succeeded with type "${candidateType}".`);
+        return { documentId: documentId || "unknown", url };
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : String(err);
+      }
+    }
+  }
+  console.error("All FS peer-review submission attempts exhausted. Last error:", lastErr);
   return null;
 }
 
