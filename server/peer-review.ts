@@ -19,6 +19,7 @@ export interface PeerReviewOutput {
   durationSeconds: number;
   paperUsed: { title: string; authors: string; date: string; documentId: string };
   ethicsSummary?: string;
+  ethicsUsed: boolean;
 }
 
 interface RunPeerReviewOptions {
@@ -148,5 +149,6 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
     durationSeconds,
     paperUsed: { title, authors, date, documentId },
     ethicsSummary,
+    ethicsUsed: !!ethicsResult,
   };
 }

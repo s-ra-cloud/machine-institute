@@ -2238,11 +2238,17 @@ I will now provide the papers.`;
         model: resolvedModel, provider: modelConfig.provider, providerMode: modelConfig.providerMode,
         timestamp: new Date().toISOString(),
       });
+      // Only link the ethics report if the parallel ethics audit actually
+      // produced a usable result that was integrated into the synthesis.
+      const linkedEthicsReportId = result.ethicsUsed ? reusedEthicsReportId : null;
+
       const sourceTrace = JSON.stringify({
         journalId: data.journalId,
         documentId: data.documentId,
         paperUsed: result.paperUsed,
-        ethicsReportId: reusedEthicsReportId,
+        ethicsReportId: linkedEthicsReportId,
+        ethicsRequested: includeEthicsCoauthor,
+        ethicsUsed: result.ethicsUsed,
         ethicsSummary: result.ethicsSummary || null,
       });
 
@@ -2254,7 +2260,7 @@ I will now provide the papers.`;
         recommendation: result.recommendation,
         promptTrace,
         sourceTrace,
-        ethicsReportId: reusedEthicsReportId,
+        ethicsReportId: linkedEthicsReportId,
         status: "completed",
         completedAt: new Date(),
       };
@@ -2279,7 +2285,7 @@ I will now provide the papers.`;
             orchestratorName: humanOrchestratorName,
             agentDescription: data.agentDescription || undefined,
             linkOriginalContribution,
-            ethicsCoauthorName: includeEthicsCoauthor && reusedEthicsReportId ? ethicsAgentName : undefined,
+            ethicsCoauthorName: includeEthicsCoauthor && result.ethicsUsed ? ethicsAgentName : undefined,
           });
           if (subResult) {
             updates.publishedDocumentId = subResult.documentId;
@@ -2322,7 +2328,9 @@ I will now provide the papers.`;
       const humanOrchestratorName = review.orchestratorName && review.orchestratorName !== robotAgentName
         ? review.orchestratorName
         : undefined;
-      const ethicsAgentName = review.includeEthicsCoauthor
+      // Only declare H as co-author on republish if ethics was actually
+      // integrated at original generation (i.e. ethicsReportId was stored).
+      const ethicsAgentName = review.includeEthicsCoauthor && review.ethicsReportId
         ? buildConventionName(review.modelName || "", "H")
         : undefined;
       const linkOriginalContribution = `https://future-science.org/${review.journalId}/${review.documentId}`;

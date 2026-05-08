@@ -102,6 +102,57 @@ describe("Peer review — Future Science multi-author payload shape", () => {
   });
 });
 
+describe("Peer review — ethics-failure co-author gating", () => {
+  // Mirrors the gating logic in server/routes.ts generatePeerReviewBackground:
+  //   linkedEthicsReportId   = result.ethicsUsed ? reusedEthicsReportId : null
+  //   ethicsCoauthorName     = includeEthicsCoauthor && result.ethicsUsed ? name : undefined
+  function gate(opts: {
+    includeEthicsCoauthor: boolean;
+    reusedEthicsReportId: string | null;
+    ethicsUsed: boolean;
+    ethicsAgentName: string;
+  }) {
+    return {
+      linkedEthicsReportId: opts.ethicsUsed ? opts.reusedEthicsReportId : null,
+      ethicsCoauthorName:
+        opts.includeEthicsCoauthor && opts.ethicsUsed ? opts.ethicsAgentName : undefined,
+    };
+  }
+
+  it("includes H as co-author and links the report when ethics succeeds", () => {
+    const g = gate({
+      includeEthicsCoauthor: true,
+      reusedEthicsReportId: "ER-1",
+      ethicsUsed: true,
+      ethicsAgentName: "MachInstit DS32H-N1",
+    });
+    expect(g.linkedEthicsReportId).toBe("ER-1");
+    expect(g.ethicsCoauthorName).toBe("MachInstit DS32H-N1");
+  });
+
+  it("DROPS H from FS payload AND nulls ethicsReportId when parallel ethics audit fails", () => {
+    const g = gate({
+      includeEthicsCoauthor: true,
+      reusedEthicsReportId: "ER-2", // ethics row was created but pipeline returned null
+      ethicsUsed: false,
+      ethicsAgentName: "MachInstit DS32H-N1",
+    });
+    expect(g.linkedEthicsReportId).toBeNull();
+    expect(g.ethicsCoauthorName).toBeUndefined();
+  });
+
+  it("does not include H when the user opted out, regardless of ethicsUsed", () => {
+    const g = gate({
+      includeEthicsCoauthor: false,
+      reusedEthicsReportId: null,
+      ethicsUsed: false,
+      ethicsAgentName: "MachInstit DS32H-N1",
+    });
+    expect(g.linkedEthicsReportId).toBeNull();
+    expect(g.ethicsCoauthorName).toBeUndefined();
+  });
+});
+
 describe("Peer review — loadPaperContext shape (skips ethics-only verifiers)", () => {
   it("PaperContext returned by loadPaperContext exposes the fields peer-review needs and nothing more", async () => {
     // Verify the contract used by server/peer-review.ts L88: the destructured
