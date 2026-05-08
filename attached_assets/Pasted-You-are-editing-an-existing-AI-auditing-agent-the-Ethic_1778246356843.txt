@@ -1,0 +1,117 @@
+You are editing an existing AI auditing agent (the "Ethicist agent" that produces single-paper ethics audits across eight categories with citation and URL verification). The agent has shipped real audits; we have a documented failure case and need to patch the code without rewriting from scratch.
+
+## Context: the failure case
+
+The agent audited a mechanistic interpretability paper and produced a MAJOR "title mismatch / citation fraud" flag claiming that arXiv:2410.04468 (cited as Cho et al. 2024) resolves to an unrelated RAG paper called "Adaptive-RAG."
+
+This was wrong. arXiv:2410.04468 is "Revisiting In-context Learning Inference Circuit in Large Language Models" by Hakaze Cho et al., which is exactly what the audited paper cites it for. The agent appears to have trusted a single OpenAlex lookup that returned a wrong title, and never cross-checked against arXiv directly before promoting the discrepancy to MAJOR.
+
+The agent also:
+- Reported "11 citations detected" matching only the bibliography, missing an in-text citation (Brown et al. 2020) that has no bibliography entry.
+- Claimed in the abstract that "full text was successfully retrieved" while later skipping the plagiarism check with "cannot assess without full text" — internal contradiction.
+- Did not perform any semantic check of whether cited works actually support the claims attributed to them; it only checked that arXiv IDs resolve.
+- Correctly flagged a 403 on a transformer-circuits.pub link as broken (this one was right; that link returns S3 AccessDenied to everyone, not just bots).
+
+## What to change
+
+Make the following modifications to the agent's code and prompts. Preserve the existing eight-category structure, the report format, and the clearance-statement output. Change the verification logic and severity thresholds underneath.
+
+### 1. Citation verification: enforce two-source agreement
+
+Find the function/module that resolves citations. Currently it appears to query OpenAlex (and possibly arXiv) and accept the first result. Modify so that:
+
+- For any citation with an arXiv ID, fetch the arXiv abstract page directly (https://arxiv.org/abs/<id>) AND the OpenAlex record. Compare titles.
+- If arXiv and OpenAlex agree → verified.
+- If arXiv and OpenAlex disagree → trust arXiv; mark the citation verified; log the OpenAlex discrepancy internally but do not flag the paper.
+- If only one source resolves → status is UNVERIFIED, not fraud.
+- A citation may only be flagged as "title mismatch" if (a) two independent sources agree on a wrong title AND (b) the resolved abstract is topically inconsistent with the paper's in-text use of the citation.
+
+Add a hard guard: the function that emits a MAJOR or CRITICAL citation flag must accept and log the arXiv URL+title, the secondary-source URL+title, and the verbatim in-text usage. If any of these is missing, downgrade to MINOR or UNVERIFIED automatically.
+
+### 2. Add in-text vs. bibliography cross-check
+
+Add a new step in Section A (Citation Fraud) before any external lookups:
+
+- Parse all (Author, Year) patterns and named citations from the body, abstract, and figure captions → in-text set.
+- Parse all bibliography entries → bibliography set.
+- Emit MINOR flags for in-text citations missing from bibliography (quote the offending string).
+- Emit INFO notes for bibliography entries never cited in-text.
+- Emit MINOR flags for year or venue mismatches between in-text and bibliography for the same work.
+
+The "N citations detected" line in the output must match bibliography size, and in-text-only citations must be reported as a separate count.
+
+### 3. Add semantic gloss verification
+
+Add a new check (can live inside Section A or as a new sub-section): for every citation introduced with claim verbs ("showed that," "established that," "proved that," "found that," "demonstrated," "tested on," etc.), fetch the cited work's abstract and compare against the paper's gloss.
+
+- Substantive mismatch (e.g., paper says "proved X" when source says "showed Y under conditions Z") → MINOR ("scope misrepresentation of cited claim").
+- Stylistic compression that preserves meaning → no flag.
+- Ambiguous → INFO ("verify gloss").
+
+Do not promote semantic-gloss findings above MINOR without two-source confirmation.
+
+### 4. Fix link integrity to inspect response bodies
+
+Find the URL reachability check. Currently it appears to flag any non-200 (or specifically 403) as broken. Replace with:
+
+- 200 → reachable.
+- 404 / 410 / DNS-fail / connection-refused → broken; severity by role (replication-blocking → MAJOR; peripheral → MINOR).
+- 403 / 401 → inspect body:
+  - Explicit host access-denial payload (S3 AccessDenied XML, CDN object-not-found, publisher takedown) → broken; flag with quoted body snippet.
+  - Cloudflare/Akamai challenge, CAPTCHA, automated-request page → bot-blocked; retry once with browser-like User-Agent; if still blocked, INFO only, no flag.
+  - Empty/uninformative body → try Wayback Machine snapshot; if Wayback shows normal content, treat as bot-blocked (INFO); if Wayback also denied or absent, treat as broken.
+- 429 → retry after delay, no flag on first failure.
+- 5xx → retry once, then INFO if persistent.
+
+Every link flag must include HTTP status, the body snippet (or "no body") that drove the verdict, and whether Wayback was attempted.
+
+### 5. Add a self-consistency pass before output
+
+Before emitting the final report, run a check:
+
+- If the abstract says "full text was successfully retrieved," no category may be skipped with "cannot assess without full text." Either retrieve and assess, or amend the abstract to acknowledge full text was not retrieved.
+- The citation count must match bibliography size, OR the report must explicitly disambiguate which set is being counted.
+- Every "no concern" verdict must include a one-sentence note describing what evidence was actually examined. Empty "no concern" passes are not allowed.
+
+If any check fails, the agent must revise the report before emission, not after.
+
+### 6. Recalibrate severity ladder
+
+Update the severity definitions used by the flagging code:
+
+- CRITICAL: intentional fabrication, substantial plagiarism, undisclosed safety risk. Requires a smoking gun.
+- MAJOR: a finding that, if confirmed, would require correction or retraction. Requires either two independent confirming sources or a directly observable contradiction within the paper itself. A MAJOR flag based on a single external lookup is not allowed; the code path that emits MAJOR must verify two-source confirmation and refuse to emit otherwise.
+- MINOR: defects worth correcting that don't undermine the paper's findings (peripheral broken link, missing bibliography entry, gloss mismatch, ambiguous wording).
+- INFO: observations not requiring action.
+
+When in doubt between two levels, choose the lower one.
+
+### 7. Reasoning trace requirement
+
+For any flag at MAJOR or CRITICAL, the report must include:
+
+1. Verbatim text from the paper that triggered the flag.
+2. Every URL fetched and relevant content returned (titles, abstracts, status codes, body snippets).
+3. The reason the alternative interpretation (paper is correct) was rejected.
+
+If the agent cannot produce all three, the flagging function must downgrade automatically to MINOR or UNVERIFIED.
+
+## Constraints
+
+- Do not change the eight-category structure (A through H), the link-integrity section (I), the consolidated flags / recommendations / clearance / bibliography tail (J–M), or the overall report format.
+- Do not change the AI-disclosure conventions or the "Cleared / Cleared with conditions / Not cleared" verdict labels.
+- Preserve backward compatibility with any external systems that consume the report format.
+- Where the existing code uses a single API call, replace with the two-source pattern, but keep the same function signatures where possible so calling code doesn't break.
+- All new behavior must be testable. For each of the seven changes above, add at least one test case based on the failure case described in Context (the Cho et al. citation, the Brown et al. uncited reference, the full-text contradiction, the 403 body inspection).
+
+## Deliverable
+
+A patched version of the agent that, when re-run on the same input paper that produced the flawed audit, would:
+
+- NOT flag Cho et al. (2024) as title mismatch (arXiv title agrees with in-text use).
+- DO flag Brown et al. (2020) as in-text-only citation missing from bibliography (MINOR).
+- DO flag the broken transformer-circuits.pub link as MINOR with the S3 AccessDenied body snippet quoted.
+- NOT contain the internal contradiction about full-text retrieval.
+- Produce CRITICAL/MAJOR flags only when the two-source rule and reasoning-trace requirement are satisfied.
+
+Show the diff against the existing code, and run the test cases against both the patched and unpatched versions to demonstrate the behavior change.
