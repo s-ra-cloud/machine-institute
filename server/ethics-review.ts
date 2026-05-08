@@ -399,8 +399,7 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
   const clearanceStatus = extractClearanceStatus(ethicsText);
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);
 
-  const reportDateLabel = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-  const reportTitle = `Single-Paper Ethics Audit: "${title}" (${reportDateLabel})`;
+  const reportTitle = `Single-Paper Ethics Audit: "${title}"`;
 
   const critCount = flagsList.filter(f => f.severity === "CRITICAL").length;
   const majorCount = flagsList.filter(f => f.severity === "MAJOR").length;
