@@ -914,6 +914,7 @@ export default function GenerationDashboard() {
                     limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "ethics report generations" : activeType === "peer-review" ? "peer review generations" : "review generations"}
                     hasPlatformAccess={hasPlatformAccess}
                     activeType={activeType as "editorial" | "literature-review" | "ethics-report" | "peer-review"}
+                    costMultiplier={activeType === "peer-review" && peerIncludeEthics ? 2 : 1}
                   />
                 </div>
 

@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, insertPeerReviewSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport, type PeerReview } from "@shared/schema";
+import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, insertPeerReviewSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport, type PeerReview, type InsertEthicsReport } from "@shared/schema";
 import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPORT_CHUNK_3_PROMPT, H_SINGLE_PAPER_PROMPT, applyJournalName } from "./prompts/h-solo";
 import { runEthicsReport, type EthicsReviewOutput } from "./ethics-review";
 import { runPeerReview } from "./peer-review";
@@ -1982,11 +1982,9 @@ I will now provide the papers.`;
       }
       if (isPlatform) {
         if (!process.env.OPENROUTER_API_KEY) return res.status(503).json({ error: "Peer review generation is not configured. OPENROUTER_API_KEY is missing." });
-        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-          const limitConfig = PER_USER_PLATFORM_LIMITS["peer-review"];
-          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "peer-review", limitConfig.max, limitConfig.windowMs);
-          if (!rateCheck.allowed) return res.status(429).json({ error: `Peer review generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
-        }
+        const limitConfig = PER_USER_PLATFORM_LIMITS["peer-review"];
+        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "peer-review", limitConfig.max, limitConfig.windowMs);
+        if (!rateCheck.allowed) return res.status(429).json({ error: `Peer review generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
       }
       if (providerMode === "byoc") {
         if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
@@ -1994,7 +1992,7 @@ I will now provide the papers.`;
         if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
-      if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+      {
         const clientIp = req.ip || "unknown";
         const last = peerReviewRateLimit.get(clientIp) || 0;
         if (Date.now() - last < 30000) return res.status(429).json({ error: "Please wait at least 30 seconds between peer review requests." });
@@ -2113,7 +2111,7 @@ I will now provide the papers.`;
           ethicsPromise = Promise.resolve(reused);
         } else {
           await emit("peer-review-ethics-launch", `Launching parallel ethics co-author audit (${ethicsAgentName}).`);
-          const ethicsReport = await storage.createEthicsReport({
+          const ethicsReportInput: InsertEthicsReport = {
             projectId: data.projectId,
             agentId: "H",
             journalId: data.journalId,
@@ -2130,8 +2128,9 @@ I will now provide the papers.`;
             modelProvider: modelConfig.provider,
             modelName: resolvedModel,
             providerMode: modelConfig.providerMode,
-            status: "generating",
-          } as any);
+          };
+          const ethicsReport = await storage.createEthicsReport(ethicsReportInput);
+          await storage.updateEthicsReport(ethicsReport.id, { status: "generating" });
           // Reserve ethics lock atomically
           const reservedIds = [`doc:${data.documentId}`];
           if (data.paperTitle) reservedIds.push(`title:${data.paperTitle.toLowerCase().trim()}`);
@@ -2258,7 +2257,7 @@ I will now provide the papers.`;
             orchestratorName: humanOrchestratorName,
             agentDescription: data.agentDescription || undefined,
             linkOriginalContribution,
-            ethicsCoauthorName: includeEthicsCoauthor && ethicsResult ? ethicsAgentName : undefined,
+            ethicsCoauthorName: includeEthicsCoauthor && reusedEthicsReportId ? ethicsAgentName : undefined,
           });
           if (subResult) {
             updates.publishedDocumentId = subResult.documentId;

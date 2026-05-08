@@ -153,9 +153,19 @@ export default function PeerReviewDetail() {
                   <span className="bg-red-500/10 text-red-400 px-2 py-0.5 text-xs font-mono">failed</span>
                 )}
                 {review.includeEthicsCoauthor && (
-                  <span className="bg-purple-500/10 text-purple-300 px-2 py-0.5 text-xs font-mono border border-purple-500/30">
-                    + H Ethics co-author
-                  </span>
+                  review.ethicsReportId ? (
+                    <Link
+                      href={`/ethics-reports/${review.ethicsReportId}`}
+                      className="bg-purple-500/10 text-purple-300 px-2 py-0.5 text-xs font-mono border border-purple-500/30 hover:bg-purple-500/20 transition-colors"
+                      data-testid="link-ethics-report"
+                    >
+                      + H Ethics co-author →
+                    </Link>
+                  ) : (
+                    <span className="bg-purple-500/10 text-purple-300 px-2 py-0.5 text-xs font-mono border border-purple-500/30">
+                      + H Ethics co-author
+                    </span>
+                  )
                 )}
               </div>
 

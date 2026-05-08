@@ -35,6 +35,7 @@ interface Props {
   limitLabel?: string;
   hasPlatformAccess?: boolean;
   activeType?: "editorial" | "literature-review" | "ethics-report" | "peer-review";
+  costMultiplier?: number;
 }
 
 // Per-generation credit cost estimates (1 credit ≈ $0.01 USD).
@@ -50,16 +51,17 @@ const MODEL_AGENT_CREDITS: Record<string, Partial<Record<"editorial" | "literatu
   "openai/gpt-4o":               { editorial: 5,  "literature-review": 10, "ethics-report": 9,  "peer-review": 9  },
 };
 
-function formatCostBadge(modelKey: string, activeType?: Props["activeType"]): string | null {
+function formatCostBadge(modelKey: string, activeType?: Props["activeType"], multiplier: number = 1): string | null {
   if (!activeType) return null;
   const map = MODEL_AGENT_CREDITS[modelKey];
   if (!map) return null;
-  const cost = map[activeType];
-  if (!cost) return null;
+  const base = map[activeType];
+  if (!base) return null;
+  const cost = Math.max(1, Math.round(base * multiplier));
   return `~${cost} credit${cost === 1 ? "" : "s"} / run`;
 }
 
-export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasPlatformAccess = true, activeType }: Props) {
+export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasPlatformAccess = true, activeType, costMultiplier = 1 }: Props) {
   const [tab, setTab] = useState<"platform" | "byoc">(
     hasPlatformAccess ? value.providerMode : "byoc"
   );
@@ -205,7 +207,7 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasP
                   <div>
                     <span className="text-sm font-mono">{m.label}</span>
                     {(() => {
-                      const badge = formatCostBadge(m.model, activeType);
+                      const badge = formatCostBadge(m.model, activeType, costMultiplier);
                       return badge ? (
                         <span className="ml-2 text-[10px] font-mono text-muted-foreground/60" data-testid={`cost-${m.model}`}>
                           {badge}
