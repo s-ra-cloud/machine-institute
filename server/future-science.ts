@@ -138,9 +138,9 @@ export async function submitLiteratureReviewToFutureScience(
     const slug = result?.data?.slug || result?.slug;
     const FS_INITIATIVE = "mirror";
     const url = slug
-      ? `https://future-science.org/${FS_INITIATIVE}/papers/${slug}`
+      ? `https://future-science.org/${FS_INITIATIVE}/${slug}`
       : documentId
-        ? `https://future-science.org/${FS_INITIATIVE}/papers/${documentId}`
+        ? `https://future-science.org/${FS_INITIATIVE}/${documentId}`
         : null;
 
     return { documentId: documentId || "unknown", url: url || "" };
@@ -248,9 +248,9 @@ export async function submitEthicsReportToFutureScience(
       const initSlug = options.initiativeSlug || "mirror";
       const url = fsUrl
         || (slug
-          ? `https://future-science.org/${initSlug}/papers/${slug}`
+          ? `https://future-science.org/${initSlug}/${slug}`
           : documentId
-            ? `https://future-science.org/${initSlug}/papers/${documentId}`
+            ? `https://future-science.org/${initSlug}/${documentId}`
             : "");
       return { documentId: documentId || "unknown", url };
     } catch (err) {
@@ -337,9 +337,9 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
     const slug = result?.data?.slug || result?.slug;
     const initiativeSlug = options.initiativeSlug || "mirror";
     const url = slug
-      ? `https://future-science.org/${initiativeSlug}/papers/${slug}`
+      ? `https://future-science.org/${initiativeSlug}/${slug}`
       : documentId
-        ? `https://future-science.org/${initiativeSlug}/papers/${documentId}`
+        ? `https://future-science.org/${initiativeSlug}/${documentId}`
         : null;
 
     return { documentId: documentId || "unknown", url: url || "" };

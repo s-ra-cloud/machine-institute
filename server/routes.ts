@@ -1687,7 +1687,7 @@ I will now provide the papers.`;
           title: a.title,
           authors: a.authors,
           date: a.date,
-          url: `https://future-science.org/${initiativeSlug}/papers/${a.documentId}`,
+          url: `https://future-science.org/${initiativeSlug}/${a.documentId}`,
           alreadyReviewed: isReviewed,
         });
       }
@@ -1700,7 +1700,7 @@ I will now provide the papers.`;
           title: p.title,
           authors: p.authors,
           date: p.date,
-          url: p.url || `https://future-science.org/${initiativeSlug}/papers/${p.sourceDocumentId}`,
+          url: p.url || `https://future-science.org/${initiativeSlug}/${p.sourceDocumentId}`,
           alreadyReviewed: isReviewed,
         });
       }
@@ -1992,7 +1992,7 @@ I will now provide the papers.`;
           // Single-paper audits are submitted as "Response to a contribution" with
           // linkOriginalContribution pointing at the audited paper's FS URL.
           const linkOriginalContribution = data.documentId
-            ? `https://future-science.org/${data.journalId}/papers/${data.documentId}`
+            ? `https://future-science.org/${data.journalId}/${data.documentId}`
             : undefined;
           const subResult = await submitEthicsReportToFutureScience({
             title: result.reportTitle,

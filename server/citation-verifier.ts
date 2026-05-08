@@ -149,7 +149,7 @@ export async function fetchFsPaperContent(documentId: string, slug: string = "mi
   }
   // 2) Last resort: fetch the public HTML page (SPA shell — bibliography may be absent).
   try {
-    const html = await fetchTextWithTimeout(`https://future-science.org/${slug}/papers/${encodeURIComponent(documentId)}`, 8000);
+    const html = await fetchTextWithTimeout(`https://future-science.org/${slug}/${encodeURIComponent(documentId)}`, 8000);
     if (html && html.length >= 200) {
       const stripped = stripHtml(html);
       if (stripped.length >= 800) return stripped;
@@ -245,10 +245,10 @@ function verifyAgainstFs(c: ExtractedCitation, fsAbstracts: FutureScienceAbstrac
   if (c.fsRef) {
     const ref = c.fsRef.toLowerCase();
     const hit = fsAbstracts.find(a => a.documentId.toLowerCase() === ref);
-    if (hit) return { verified: true, title: hit.title, url: `https://future-science.org/mirror/papers/${hit.documentId}` };
+    if (hit) return { verified: true, title: hit.title, url: `https://future-science.org/mirror/${hit.documentId}` };
     const slugWords = c.fsRef.replace(/-/g, " ").toLowerCase();
     const fuzzy = fsAbstracts.find(a => a.title.toLowerCase().includes(slugWords) || slugWords.includes(a.title.toLowerCase().slice(0, 30)));
-    if (fuzzy) return { verified: true, title: fuzzy.title, url: `https://future-science.org/mirror/papers/${fuzzy.documentId}` };
+    if (fuzzy) return { verified: true, title: fuzzy.title, url: `https://future-science.org/mirror/${fuzzy.documentId}` };
     return { verified: false };
   }
   if (c.authorYear) {
@@ -257,7 +257,7 @@ function verifyAgainstFs(c: ExtractedCitation, fsAbstracts: FutureScienceAbstrac
     const hit = fsAbstracts.find(a =>
       a.authors.toLowerCase().includes(lastName) && (a.date || "").startsWith(year)
     );
-    if (hit) return { verified: true, title: hit.title, url: `https://future-science.org/mirror/papers/${hit.documentId}` };
+    if (hit) return { verified: true, title: hit.title, url: `https://future-science.org/mirror/${hit.documentId}` };
   }
   return null;
 }

@@ -1355,7 +1355,7 @@ function MetadataPanel({ record }: { record: GenerationMetadataRecord }) {
   } catch {}
 
   const publishedUrl = record.publishedDocumentId
-    ? `https://future-science.org/mirror/papers/${record.publishedDocumentId}`
+    ? `https://future-science.org/mirror/${record.publishedDocumentId}`
     : null;
 
   return (

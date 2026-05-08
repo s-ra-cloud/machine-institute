@@ -331,7 +331,7 @@ export default function EthicsReportDetail() {
                     {report.publishedDocumentId && (
                       <div>
                         <a
-                          href={`https://future-science.org/mirror/papers/${report.publishedDocumentId}`}
+                          href={`https://future-science.org/mirror/${report.publishedDocumentId}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-xs font-mono text-primary hover:underline flex items-center gap-1"

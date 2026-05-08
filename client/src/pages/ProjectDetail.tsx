@@ -353,9 +353,9 @@ export default function ProjectDetail() {
                     : null;
                   const FS_INITIATIVE = "mirror";
                   const paperUrl = pub.slug
-                    ? `https://future-science.org/${FS_INITIATIVE}/papers/${pub.slug}`
+                    ? `https://future-science.org/${FS_INITIATIVE}/${pub.slug}`
                     : pub.documentId
-                    ? `https://future-science.org/${FS_INITIATIVE}/papers/${pub.documentId}`
+                    ? `https://future-science.org/${FS_INITIATIVE}/${pub.documentId}`
                     : null;
                   const key = pub.documentId || pub.slug || String(idx);
 

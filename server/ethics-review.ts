@@ -167,7 +167,7 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   const sub2 = applyJournalName(prompt2, journalName);
   const sub3 = applyJournalName(prompt3, journalName);
   const fsPaperUrl = (docId: string | undefined | null): string =>
-    docId ? `https://future-science.org/${initiativeSlug}/papers/${docId}` : "";
+    docId ? `https://future-science.org/${initiativeSlug}/${docId}` : "";
 
   await emitEvent("ethics-init", `Starting field ethics report on ${journalDisplayName}${topic ? ` — topic "${topic}"` : ""} (${keywords.length} keyword filter(s)).`);
 
@@ -357,7 +357,7 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
   const authors = fsHit?.authors || projHit?.authors || "(unknown)";
   const date = fsHit?.date || projHit?.date || "";
   const abstract = fsHit?.abstract || projHit?.description || "";
-  const url = `https://future-science.org/${initiativeSlug}/papers/${documentId}`;
+  const url = `https://future-science.org/${initiativeSlug}/${documentId}`;
 
   // Fetch full text
   await emitEvent("ethics-fulltext", `Fetching full text for "${title}"...`);
