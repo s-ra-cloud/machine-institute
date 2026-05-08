@@ -67,38 +67,87 @@ function deepFindLongString(node: unknown, minLen: number, depth = 0): string | 
   return null;
 }
 
+async function fetchTextWithTimeout(url: string, timeoutMs = 8000): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), timeoutMs);
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "MachineInstitute-EthicsAuditor", "Accept": "text/html,text/plain,text/markdown,application/json,*/*" },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) return null;
+    return await resp.text();
+  } catch {
+    return null;
+  }
+}
+
+// Find a submittedFiles.file.url-shaped Strapi upload path inside an arbitrary JSON tree.
+function deepFindFileUrl(node: unknown, depth = 0): string | null {
+  if (depth > 8 || node == null) return null;
+  if (Array.isArray(node)) {
+    for (const v of node) { const r = deepFindFileUrl(v, depth + 1); if (r) return r; }
+    return null;
+  }
+  if (typeof node === "object") {
+    const obj = node as Record<string, unknown>;
+    // Strapi shape: submittedFiles.file.url -> "/strapi/uploads/foo.md"
+    if (typeof obj.url === "string" && /\.(md|markdown|txt|html?)$/i.test(obj.url)) {
+      return obj.url;
+    }
+    for (const k of Object.keys(obj)) {
+      const r = deepFindFileUrl(obj[k], depth + 1);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
 export async function fetchFsPaperContent(documentId: string, slug: string = "mirror"): Promise<string | null> {
   if (!documentId) return null;
-  const candidates = [
-    `https://future-science.org/${slug}/papers/${encodeURIComponent(documentId)}`,
+  // 1) Try the JSON API first to discover the actual uploaded paper file. The /papers/<id>
+  // page only returns an SPA shell + the abstract, NOT the bibliography. The uploaded
+  // markdown/HTML in submittedFiles.file.url is the real paper body.
+  const jsonCandidates = [
     `${FS_API_BASE}/public/contributions/${encodeURIComponent(documentId)}`,
     `${FS_API_BASE}/contributions/${encodeURIComponent(documentId)}`,
   ];
-  for (const url of candidates) {
+  for (const url of jsonCandidates) {
     try {
       const ctrl = new AbortController();
       const timeout = setTimeout(() => ctrl.abort(), 8000);
       const resp = await fetch(url, {
-        headers: { "User-Agent": "MachineInstitute-EthicsAuditor", "Accept": "text/html,application/json" },
+        headers: { "User-Agent": "MachineInstitute-EthicsAuditor", "Accept": "application/json" },
         signal: ctrl.signal,
       });
       clearTimeout(timeout);
       if (!resp.ok) continue;
-      const ctype = (resp.headers.get("content-type") || "").toLowerCase();
-      if (ctype.includes("application/json")) {
-        const json: unknown = await resp.json();
-        const found = deepFindLongString(json, 200);
-        if (found) return found.includes("<") ? stripHtml(found) : found;
-        continue;
+      const json: unknown = await resp.json();
+      const filePath = deepFindFileUrl(json);
+      if (filePath) {
+        const fileUrl = filePath.startsWith("http") ? filePath : `https://future-science.org${filePath}`;
+        const body = await fetchTextWithTimeout(fileUrl, 10000);
+        if (body && body.length >= 200) {
+          return body.includes("<") && /\<(p|div|h\d|body)\b/i.test(body) ? stripHtml(body) : body;
+        }
       }
-      const html = await resp.text();
-      if (!html || html.length < 200) continue;
-      const stripped = stripHtml(html);
-      // The page shell alone is short; require enough content to look like a paper body.
-      if (stripped.length >= 800) return stripped;
+      // Fall back to abstract-or-similar long string from the JSON if no file is attached.
+      const found = deepFindLongString(json, 800);
+      if (found) return found.includes("<") ? stripHtml(found) : found;
     } catch {
       // try next
     }
+  }
+  // 2) Last resort: fetch the public HTML page (SPA shell — bibliography may be absent).
+  try {
+    const html = await fetchTextWithTimeout(`https://future-science.org/${slug}/papers/${encodeURIComponent(documentId)}`, 8000);
+    if (html && html.length >= 200) {
+      const stripped = stripHtml(html);
+      if (stripped.length >= 800) return stripped;
+    }
+  } catch {
+    // ignore
   }
   return null;
 }
