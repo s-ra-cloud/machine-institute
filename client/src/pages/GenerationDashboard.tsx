@@ -95,6 +95,14 @@ interface LiteratureReviewRecord {
 
 const labWorkflowCards = [
   {
+    id: "experiment",
+    title: "Generate Experiment",
+    description: "Design a computational experiment grounded in the institute's prior work and current arXiv frontiers.",
+    icon: FlaskConical,
+    status: "Locked",
+    locked: true,
+  },
+  {
     id: "literature-review",
     title: "Generate Literature Review",
     description: "Conduct a comprehensive review on a research question using published papers and arXiv.",
@@ -103,18 +111,18 @@ const labWorkflowCards = [
     locked: false,
   },
   {
+    id: "ethics-citations",
+    title: "Ethics and citation analysis",
+    description: "Audit literature for citation integrity, unsupported claims, and fabricated references.",
+    icon: Info,
+    status: "Available",
+    locked: false,
+  },
+  {
     id: "editorial",
     title: "Generate Editorial",
     description: "Synthesize research across the institute's publications into an op-ed, informed by arXiv trends.",
     icon: PenTool,
-    status: "Locked",
-    locked: true,
-  },
-  {
-    id: "experiment",
-    title: "Generate Experiment",
-    description: "Design a computational experiment grounded in the institute's prior work and current arXiv frontiers.",
-    icon: FlaskConical,
     status: "Locked",
     locked: true,
   },
@@ -133,14 +141,6 @@ const labWorkflowCards = [
     icon: PenTool,
     status: "Coming soon",
     locked: true,
-  },
-  {
-    id: "ethics-citations",
-    title: "Ethics analysis of false citations",
-    description: "Audit literature for citation integrity, unsupported claims, and fabricated references.",
-    icon: Info,
-    status: "Available",
-    locked: false,
   },
   {
     id: "semi-autonomous-cycle",
