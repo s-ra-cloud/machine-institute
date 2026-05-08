@@ -349,25 +349,181 @@ export async function verifyCitations(citations: ExtractedCitation[], fsAbstract
     const fs = verifyAgainstFs(c, fsAbstracts);
     if (fs?.verified) {
       const match = titleMatches(c.context, fs.title);
-      return { ...c, verifiedSource: "future-science" as const, verifiedTitle: fs.title, verifiedUrl: fs.url, titleMatchesClaim: match.ok, matchNote: match.note };
+      // FS is journal-internal authoritative — single source is fine here, but only
+      // emit titleMatchesClaim=false when we are confident the resolution is real.
+      return { ...c, verifiedSource: "future-science" as const, verifiedTitle: fs.title, verifiedUrl: fs.url, titleMatchesClaim: match.ok ? true : false, matchNote: match.note };
     }
-    // For arXiv citations, hit arxiv.org directly first — it's the authoritative
-    // source for the paper title at that ID. OpenAlex free-text search by arXiv
-    // ID is unreliable and frequently returns an unrelated work.
+    // Two-source verification for arXiv citations. arXiv is authoritative for the
+    // paper title at a given arXiv ID; OpenAlex is a noisy secondary corroborator.
+    // Title-mismatch may only be raised when BOTH sources independently agree on a
+    // title that contradicts the bibliography line the paper presents (per the
+    // 2026-05 patch addressing the false-positive Cho et al. (arXiv:2410.04468)
+    // case where a single bad OpenAlex hit drove a MAJOR fraud flag). When only
+    // arXiv resolves, or arXiv and OpenAlex disagree with each other, we trust
+    // arXiv and SUPPRESS the mismatch flag (titleMatchesClaim=true).
     if (c.arxivId) {
-      const ax = await verifyAgainstArxiv(c.arxivId);
-      if (ax?.verified && ax.title) {
-        const match = titleMatches(c.context, ax.title);
-        return { ...c, verifiedSource: "arxiv" as const, verifiedTitle: ax.title, verifiedUrl: ax.url, titleMatchesClaim: match.ok, matchNote: match.note };
+      const [ax, oa] = await Promise.all([
+        verifyAgainstArxiv(c.arxivId),
+        verifyAgainstOpenAlex(c),
+      ]);
+      const axOk = !!(ax?.verified && ax.title);
+      const oaOk = !!(oa?.verified && oa.title);
+      if (axOk) {
+        const matchAx = titleMatches(c.context, ax!.title);
+        let titleMatchesClaim: boolean = true;
+        let matchNote: string | undefined = matchAx.ok ? undefined : matchAx.note;
+        if (!matchAx.ok) {
+          if (oaOk) {
+            const matchOa = titleMatches(c.context, oa!.title);
+            const sourcesAgree = titleMatches(ax!.title, oa!.title).ok;
+            if (sourcesAgree && !matchOa.ok) {
+              // Two independent sources agree on a title that contradicts the
+              // bibliography line — this is the only path that emits a mismatch.
+              titleMatchesClaim = false;
+              matchNote = `Two-source agreement: arXiv "${ax!.title}" and OpenAlex "${oa!.title}" both disagree with the bibliography line — flag as mis-citation.`;
+            } else {
+              titleMatchesClaim = true;
+              matchNote = `arXiv resolved to "${ax!.title}". OpenAlex returned ${matchOa.ok ? `a different result that does match the bibliography line` : `the unrelated work "${oa!.title}"`}; sources do not agree, so per the two-source rule no mismatch is flagged. Treating arXiv as authoritative.`;
+            }
+          } else {
+            titleMatchesClaim = true;
+            matchNote = `arXiv resolved to "${ax!.title}" which differs from the bibliography line, but OpenAlex did not resolve. Single-source disagreement is insufficient evidence — not flagging.`;
+          }
+        }
+        return { ...c, verifiedSource: "arxiv" as const, verifiedTitle: ax!.title, verifiedUrl: ax!.url, titleMatchesClaim, matchNote };
+      }
+      if (oaOk) {
+        // OpenAlex-only resolution for an arXiv citation — UNVERIFIED per the brief
+        // (single-source, and OpenAlex is the unreliable one for arXiv lookups).
+        return { ...c, verifiedSource: "openalex" as const, verifiedTitle: oa!.title, verifiedUrl: oa!.url, titleMatchesClaim: true, matchNote: `OpenAlex-only resolution for arXiv ID ${c.arxivId}; arXiv abstract page did not resolve. Single-source — treat as UNVERIFIED, do NOT flag as mismatch.` };
       }
     }
     const oa = await verifyAgainstOpenAlex(c);
     if (oa?.verified) {
       const match = titleMatches(c.context, oa.title);
-      return { ...c, verifiedSource: "openalex" as const, verifiedTitle: oa.title, verifiedUrl: oa.url, titleMatchesClaim: match.ok, matchNote: match.note };
+      // Single-source OpenAlex resolution (no arXiv ID, no FS hit). Per the brief,
+      // single-source disagreement is UNVERIFIED, not fraud. Suppress mismatch flag.
+      return { ...c, verifiedSource: "openalex" as const, verifiedTitle: oa.title, verifiedUrl: oa.url, titleMatchesClaim: true, matchNote: match.ok ? undefined : `OpenAlex-only resolution: "${oa.title}" differs from bibliography line, but no second source available. Single-source — not flagging as mismatch.` };
     }
     return { ...c, verifiedSource: "none" as const };
   });
+}
+
+// In-text vs bibliography cross-check (Section A pre-flight). Splits the paper
+// at a bibliography heading, parses (Author, Year) patterns from the body, and
+// parses bibliography entries separately. Reports in-text citations missing
+// from the bibliography (Brown et al. 2020 case from the failure-case patch).
+export interface BibliographyAnalysis {
+  bibliographyDetected: boolean;
+  inTextCount: number;
+  bibliographyCount: number;
+  inTextOnly: { authorYear: string; quote: string }[];
+  bibliographyOnly: string[];
+}
+
+const BIB_HEADING_RE = /\n\s*(?:#+\s*)?(?:references|bibliography|works\s+cited)\s*\n/i;
+
+function parseInTextAuthorYear(body: string): { author: string; year: string; quote: string }[] {
+  const out: { author: string; year: string; quote: string }[] = [];
+  // Matches (Author, 2024), (Author et al., 2024), (Author and Other, 2024), Author (2024), Author et al. (2024)
+  const patterns = [
+    /\(([A-Z][A-Za-z\-']+(?:\s+(?:et\s+al\.?|and\s+[A-Z][A-Za-z\-']+))?)\s*,?\s*(\d{4}[a-z]?)\)/g,
+    /\b([A-Z][A-Za-z\-']+(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?)\)/g,
+  ];
+  const seen = new Set<string>();
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body))) {
+      const author = m[1].trim().replace(/\s+/g, " ");
+      const year = m[2];
+      const key = `${author.toLowerCase().split(/\s+et\s+al/i)[0].trim()}|${year.replace(/[a-z]$/i, "")}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const quote = body.slice(Math.max(0, m.index - 60), Math.min(body.length, m.index + m[0].length + 60)).replace(/\s+/g, " ").trim();
+      out.push({ author, year, quote });
+    }
+  }
+  return out;
+}
+
+function parseBibliographyEntries(bib: string): { authorLast: string; year: string; raw: string }[] {
+  const out: { authorLast: string; year: string; raw: string }[] = [];
+  // Split on blank lines, numbered/bracketed entries, or hanging indents.
+  const lines = bib.split(/\n(?=\s*(?:\[\d+\]|\d+\.\s|[A-Z][A-Za-z\-']+,))/);
+  for (const raw of lines) {
+    const cleaned = raw.replace(/\s+/g, " ").trim();
+    if (cleaned.length < 12) continue;
+    // Author surname: first capitalised word (before comma) OR first word of a "Last, F." pattern.
+    const lastM = cleaned.match(/^(?:\[\d+\]\s*|\d+\.\s*)?([A-Z][A-Za-z\-']+)/);
+    const yearM = cleaned.match(/\b(19|20)\d{2}[a-z]?\b/);
+    if (!lastM || !yearM) continue;
+    out.push({ authorLast: lastM[1].toLowerCase(), year: yearM[0], raw: cleaned.slice(0, 240) });
+  }
+  return out;
+}
+
+export function analyzeInTextVsBibliography(fullText: string): BibliographyAnalysis {
+  if (!fullText || fullText.length < 200) {
+    return { bibliographyDetected: false, inTextCount: 0, bibliographyCount: 0, inTextOnly: [], bibliographyOnly: [] };
+  }
+  const headingM = fullText.search(BIB_HEADING_RE);
+  if (headingM < 0) {
+    // No bibliography heading detected — can't do the cross-check reliably.
+    const inText = parseInTextAuthorYear(fullText);
+    return { bibliographyDetected: false, inTextCount: inText.length, bibliographyCount: 0, inTextOnly: [], bibliographyOnly: [] };
+  }
+  const body = fullText.slice(0, headingM);
+  const bib = fullText.slice(headingM);
+  const inText = parseInTextAuthorYear(body);
+  const bibEntries = parseBibliographyEntries(bib);
+
+  const bibKeys = new Set(bibEntries.map(b => `${b.authorLast}|${b.year.replace(/[a-z]$/i, "")}`));
+  const inTextKeys = new Set(inText.map(it => `${it.author.toLowerCase().split(/\s+et\s+al/i)[0].trim()}|${it.year.replace(/[a-z]$/i, "")}`));
+
+  const inTextOnly = inText
+    .filter(it => {
+      const key = `${it.author.toLowerCase().split(/\s+et\s+al/i)[0].trim()}|${it.year.replace(/[a-z]$/i, "")}`;
+      return !bibKeys.has(key);
+    })
+    .slice(0, 30)
+    .map(it => ({ authorYear: `${it.author} (${it.year})`, quote: it.quote }));
+
+  const bibliographyOnly = bibEntries
+    .filter(b => !inTextKeys.has(`${b.authorLast}|${b.year.replace(/[a-z]$/i, "")}`))
+    .slice(0, 30)
+    .map(b => b.raw);
+
+  return {
+    bibliographyDetected: true,
+    inTextCount: inText.length,
+    bibliographyCount: bibEntries.length,
+    inTextOnly,
+    bibliographyOnly,
+  };
+}
+
+export function formatBibliographyAnalysis(a: BibliographyAnalysis): string {
+  if (!a.bibliographyDetected) {
+    return `**In-text vs bibliography cross-check:** No bibliography section heading was detected in the full text — cross-check skipped (auditor tool limitation, not an ethics finding).`;
+  }
+  const parts: string[] = [];
+  parts.push(`**In-text vs bibliography cross-check:** ${a.inTextCount} unique in-text (Author, Year) reference(s) detected; ${a.bibliographyCount} bibliography entry/entries parsed.`);
+  if (a.inTextOnly.length > 0) {
+    parts.push(`*** ${a.inTextOnly.length} in-text citation(s) appear to have NO matching bibliography entry — flag each as MINOR under Section A (missing bibliography entry). Quote the offending in-text string. ***`);
+    for (let i = 0; i < a.inTextOnly.length; i++) {
+      const it = a.inTextOnly[i];
+      parts.push(`  ${i + 1}. ${it.authorYear} — context: "${it.quote.slice(0, 200)}${it.quote.length > 200 ? "…" : ""}"`);
+    }
+  } else {
+    parts.push(`No in-text citations missing from bibliography.`);
+  }
+  if (a.bibliographyOnly.length > 0) {
+    parts.push(`${a.bibliographyOnly.length} bibliography entry/entries appear never cited in-text (INFO note, not a flag):`);
+    for (let i = 0; i < Math.min(a.bibliographyOnly.length, 10); i++) {
+      parts.push(`  - ${a.bibliographyOnly[i]}`);
+    }
+  }
+  return parts.join("\n");
 }
 
 export interface VerifiedUrl {
@@ -376,6 +532,13 @@ export interface VerifiedUrl {
   status?: number;
   note?: string;
   arxivIdMatch?: boolean;
+  // 2026-05 patch: classify 403/401 responses so the LLM can distinguish a real
+  // broken link (S3 AccessDenied, CDN takedown) from a bot-block (Cloudflare/CAPTCHA)
+  // that should NOT be flagged.
+  classification?: "ok" | "broken" | "bot-blocked" | "rate-limited" | "server-error" | "unknown";
+  bodySnippet?: string;
+  waybackTried?: boolean;
+  waybackOk?: boolean;
 }
 
 export function extractUrls(text: string): string[] {
@@ -411,41 +574,125 @@ function isUrlSafeForVerification(rawUrl: string): { ok: true } | { ok: false; r
   return { ok: true };
 }
 
-async function checkUrlReachable(url: string, timeoutMs = 7000): Promise<{ reachable: boolean | null; status?: number; note?: string }> {
+// Sniff a response body to distinguish real broken links (S3 AccessDenied, CDN
+// object-not-found, publisher takedown) from bot-blocks (Cloudflare challenge,
+// CAPTCHA, "automated request" interstitials). Returns "broken" only when the
+// body affirmatively says the resource is gone, denied, or never existed.
+function classifyBody(body: string): { kind: "broken" | "bot-blocked" | "unknown"; reason: string; snippet: string } {
+  const snippet = body.slice(0, 600).replace(/\s+/g, " ").trim();
+  const low = body.toLowerCase();
+  if (/<code>\s*accessdenied\s*<\/code>/i.test(body) || /<code>\s*nosuchkey\s*<\/code>/i.test(body) || /<code>\s*nosuchbucket\s*<\/code>/i.test(body)) {
+    return { kind: "broken", reason: "host returned an explicit access-denied / no-such-key XML payload (S3 / CDN object-not-found or takedown)", snippet };
+  }
+  if (/page not found|object not found|content has been (?:removed|deleted|withdrawn)|takedown notice|dmca/i.test(low)) {
+    return { kind: "broken", reason: "host body explicitly says the resource is gone / removed / taken down", snippet };
+  }
+  if (/cloudflare|cf-ray|attention required|just a moment|checking your browser|enable javascript and cookies|captcha|hcaptcha|recaptcha|access denied.*bot|automated (?:request|traffic)/i.test(low)) {
+    return { kind: "bot-blocked", reason: "body looks like a bot-challenge / CAPTCHA / browser-verification interstitial — not evidence the URL is broken", snippet };
+  }
+  return { kind: "unknown", reason: "non-2xx response with uninformative body — cannot conclusively classify", snippet };
+}
+
+async function fetchBody(url: string, timeoutMs: number, ua: string): Promise<{ status: number; body: string } | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const resp = await fetch(url, {
+      method: "GET",
+      headers: { "User-Agent": ua, "Accept": "text/html,application/xhtml+xml,application/xml,*/*;q=0.8", "Accept-Language": "en-US,en;q=0.9" },
+      signal: ctrl.signal,
+      redirect: "follow",
+    });
+    clearTimeout(t);
+    const body = await resp.text().catch(() => "");
+    return { status: resp.status, body };
+  } catch {
+    return null;
+  }
+}
+
+async function checkWayback(url: string, timeoutMs = 6000): Promise<{ ok: boolean; snapshotUrl?: string }> {
+  try {
+    const api = `https://archive.org/wayback/available?url=${encodeURIComponent(url)}`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const resp = await fetch(api, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!resp.ok) return { ok: false };
+    const j: any = await resp.json().catch(() => null);
+    const snap = j?.archived_snapshots?.closest;
+    if (snap?.available && snap.status === "200") return { ok: true, snapshotUrl: snap.url };
+    return { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function checkUrlReachable(url: string, timeoutMs = 7000): Promise<{ reachable: boolean | null; status?: number; note?: string; classification?: VerifiedUrl["classification"]; bodySnippet?: string; waybackTried?: boolean; waybackOk?: boolean }> {
   const guard = isUrlSafeForVerification(url);
-  if (!guard.ok) return { reachable: null, note: `skipped (${guard.reason})` };
+  if (!guard.ok) return { reachable: null, note: `skipped (${guard.reason})`, classification: "unknown" };
+
+  const defaultUa = "MachineInstitute-EthicsAuditor";
+  let firstStatus: number | undefined;
   for (const method of ["HEAD", "GET"] as const) {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
-      const resp = await fetch(url, {
-        method,
-        headers: { "User-Agent": "MachineInstitute-EthicsAuditor", "Accept": "*/*" },
-        signal: ctrl.signal,
-        redirect: "follow",
-      });
+      const resp = await fetch(url, { method, headers: { "User-Agent": defaultUa, "Accept": "*/*" }, signal: ctrl.signal, redirect: "follow" });
       clearTimeout(t);
       if (resp.status === 405 && method === "HEAD") continue;
-      return { reachable: resp.ok, status: resp.status };
-    } catch {
-      // try next method or fall through
-    }
+      firstStatus = resp.status;
+      if (resp.ok) return { reachable: true, status: resp.status, classification: "ok" };
+      break;
+    } catch { /* try next */ }
   }
-  return { reachable: null };
+
+  if (firstStatus === undefined) {
+    return { reachable: null, classification: "unknown", note: "network error / timeout — could not establish a connection" };
+  }
+  if (firstStatus === 404 || firstStatus === 410) {
+    return { reachable: false, status: firstStatus, classification: "broken", note: `HTTP ${firstStatus} — resource not found` };
+  }
+  if (firstStatus === 429) {
+    return { reachable: null, status: 429, classification: "rate-limited", note: "HTTP 429 — rate-limited; not flagging on first failure" };
+  }
+  if (firstStatus >= 500 && firstStatus < 600) {
+    return { reachable: null, status: firstStatus, classification: "server-error", note: `HTTP ${firstStatus} — server error; transient, INFO only` };
+  }
+  if (firstStatus === 401 || firstStatus === 403) {
+    const browserUa = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
+    const body = await fetchBody(url, timeoutMs, browserUa);
+    if (!body) {
+      return { reachable: null, status: firstStatus, classification: "unknown", note: `HTTP ${firstStatus} — body unfetchable; cannot classify` };
+    }
+    const cls = classifyBody(body.body);
+    if (cls.kind === "broken") {
+      return { reachable: false, status: firstStatus, classification: "broken", note: `HTTP ${firstStatus} — ${cls.reason}`, bodySnippet: cls.snippet };
+    }
+    if (cls.kind === "bot-blocked") {
+      return { reachable: null, status: firstStatus, classification: "bot-blocked", note: `HTTP ${firstStatus} — ${cls.reason}; INFO only, do NOT flag`, bodySnippet: cls.snippet };
+    }
+    const wb = await checkWayback(url);
+    if (wb.ok) {
+      return { reachable: null, status: firstStatus, classification: "bot-blocked", note: `HTTP ${firstStatus} with uninformative body, but Wayback Machine has a 200 snapshot — likely bot-blocked, not broken; INFO only`, bodySnippet: cls.snippet, waybackTried: true, waybackOk: true };
+    }
+    return { reachable: false, status: firstStatus, classification: "broken", note: `HTTP ${firstStatus} with uninformative body and no Wayback snapshot — treating as broken`, bodySnippet: cls.snippet, waybackTried: true, waybackOk: false };
+  }
+  return { reachable: false, status: firstStatus, classification: "unknown", note: `HTTP ${firstStatus}` };
 }
 
 export async function verifyUrls(urls: string[]): Promise<VerifiedUrl[]> {
   const capped = urls.slice(0, 100);
   return pMapLimit(capped, 5, async (url): Promise<VerifiedUrl> => {
-    const { reachable, status, note: checkNote } = await checkUrlReachable(url);
+    const r = await checkUrlReachable(url);
     let arxivIdMatch: boolean | undefined;
-    let note: string | undefined = checkNote;
+    let note = r.note;
     const arxivM = url.match(/arxiv\.org\/abs\/(\d{4}\.\d{4,5})/i);
-    if (arxivM && reachable === false) {
+    if (arxivM && r.reachable === false) {
       arxivIdMatch = false;
       note = note || "arXiv ID does not resolve";
     }
-    return { url, reachable, status, note, arxivIdMatch };
+    return { url, reachable: r.reachable, status: r.status, note, arxivIdMatch, classification: r.classification, bodySnippet: r.bodySnippet, waybackTried: r.waybackTried, waybackOk: r.waybackOk };
   });
 }
 
@@ -453,18 +700,26 @@ export function formatUrlVerificationReport(verified: VerifiedUrl[]): string {
   if (verified.length === 0) {
     return `**Link analysis:** No external URLs were detected in the paper's full text.`;
   }
-  const ok = verified.filter(v => v.reachable === true).length;
-  const broken = verified.filter(v => v.reachable === false).length;
-  const unknown = verified.filter(v => v.reachable === null).length;
+  const ok = verified.filter(v => v.classification === "ok").length;
+  const broken = verified.filter(v => v.classification === "broken").length;
+  const botBlocked = verified.filter(v => v.classification === "bot-blocked").length;
+  const transient = verified.filter(v => v.classification === "rate-limited" || v.classification === "server-error").length;
+  const unknown = verified.filter(v => !v.classification || v.classification === "unknown").length;
   const lines = verified.map((v, i) => {
-    const tag = v.reachable === true
-      ? `OK (HTTP ${v.status})`
-      : v.reachable === false
-      ? `BROKEN (HTTP ${v.status ?? "?"})${v.note ? ` — ${v.note}` : ""}`
-      : `UNREACHABLE${v.note ? ` — ${v.note}` : " (network/timeout)"}`;
+    const wbTag = v.waybackTried ? ` (Wayback ${v.waybackOk ? "snapshot=200" : "no snapshot"})` : "";
+    const snippetTag = v.bodySnippet ? ` | body: "${v.bodySnippet.slice(0, 200)}${v.bodySnippet.length > 200 ? "…" : ""}"` : " | body: no body";
+    let tag: string;
+    switch (v.classification) {
+      case "ok": tag = `OK (HTTP ${v.status})`; break;
+      case "broken": tag = `BROKEN (HTTP ${v.status ?? "?"}) — ${v.note ?? ""}${wbTag}${snippetTag}`; break;
+      case "bot-blocked": tag = `BOT-BLOCKED (HTTP ${v.status ?? "?"}) — ${v.note ?? ""}${wbTag}${snippetTag} *** DO NOT FLAG — auditor was challenged, not the link ***`; break;
+      case "rate-limited": tag = `RATE-LIMITED (HTTP 429) — ${v.note ?? ""} *** DO NOT FLAG on first failure ***`; break;
+      case "server-error": tag = `SERVER-ERROR (HTTP ${v.status ?? "?"}) — ${v.note ?? ""} *** transient, INFO only ***`; break;
+      default: tag = `UNVERIFIABLE${v.note ? ` — ${v.note}` : " (network/timeout)"}`;
+    }
     return `  ${i + 1}. ${v.url} — ${tag}`;
   });
-  return `**Link analysis:** ${verified.length} URL(s) detected. ${ok} reachable, ${broken} broken, ${unknown} unverifiable. (URLs targeting internal/private networks are intentionally skipped for safety; treat skipped entries as auditor tool limitations, NOT ethics findings.)\n${lines.join("\n")}`;
+  return `**Link analysis:** ${verified.length} URL(s) detected. ${ok} reachable, ${broken} broken (host says gone / denied), ${botBlocked} bot-blocked (auditor was challenged — DO NOT flag), ${transient} transient (rate-limited / 5xx — INFO only), ${unknown} unverifiable. Every BROKEN entry below includes the body snippet that drove the verdict and whether the Wayback Machine was tried as a fallback. (URLs targeting internal/private networks are intentionally skipped for safety; treat skipped entries as auditor tool limitations, NOT ethics findings.)\n${lines.join("\n")}`;
 }
 
 export function formatVerificationReport(v: PaperVerification): string {

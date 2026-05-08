@@ -16,6 +16,8 @@ import {
   extractUrls,
   verifyUrls,
   formatUrlVerificationReport,
+  analyzeInTextVsBibliography,
+  formatBibliographyAnalysis,
   type PaperVerification,
 } from "./citation-verifier";
 import type { EthicsReport, ProjectPaper } from "@shared/schema";
@@ -367,27 +369,34 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
   // Citation verification (FS + OpenAlex; OpenAlex covers arXiv via search)
   let verification: PaperVerification = { paperTitle: title, hadFullText, citations: [] };
   let urlReport = "**Link analysis:** Skipped (no full text available).";
+  let bibReport = "**In-text vs bibliography cross-check:** Skipped (no full text available).";
   if (hadFullText) {
-    await emitEvent("ethics-citations", `Extracting and verifying citations against Future Science, OpenAlex, and arXiv...`);
+    await emitEvent("ethics-citations", `Extracting and verifying citations against Future Science, OpenAlex, and arXiv (two-source agreement enforced for arXiv IDs)...`);
     const citations = extractCitations(fullText!);
     const verified = await verifyCitations(citations, fsAbstracts);
     verification = { paperTitle: title, hadFullText: true, citations: verified };
     const verifiedCount = verified.filter(v => v.verifiedSource !== "none").length;
-    await emitEvent("ethics-citations", `Citation verification complete: ${verifiedCount}/${verified.length} citations verified.`);
+    await emitEvent("ethics-citations", `Citation verification complete: ${verifiedCount}/${verified.length} citations verified (two-source rule prevents single-lookup mismatch flags).`);
 
-    await emitEvent("ethics-links", `Extracting and checking all URLs in the paper...`);
+    await emitEvent("ethics-bib", `Cross-checking in-text (Author, Year) references against bibliography entries...`);
+    const bibAnalysis = analyzeInTextVsBibliography(fullText!);
+    bibReport = formatBibliographyAnalysis(bibAnalysis);
+    await emitEvent("ethics-bib", `Bibliography cross-check complete: ${bibAnalysis.inTextCount} in-text, ${bibAnalysis.bibliographyCount} bibliography, ${bibAnalysis.inTextOnly.length} in-text-only.`);
+
+    await emitEvent("ethics-links", `Extracting and checking all URLs in the paper (with body inspection on 403/401 + Wayback fallback)...`);
     const urls = extractUrls(fullText!);
     const urlsVerified = await verifyUrls(urls);
     urlReport = formatUrlVerificationReport(urlsVerified);
-    const okUrls = urlsVerified.filter(u => u.reachable === true).length;
-    const brokenUrls = urlsVerified.filter(u => u.reachable === false).length;
-    await emitEvent("ethics-links", `Link check complete: ${okUrls} OK, ${brokenUrls} broken, ${urlsVerified.length - okUrls - brokenUrls} unverifiable.`);
+    const okUrls = urlsVerified.filter(u => u.classification === "ok").length;
+    const brokenUrls = urlsVerified.filter(u => u.classification === "broken").length;
+    const botBlocked = urlsVerified.filter(u => u.classification === "bot-blocked").length;
+    await emitEvent("ethics-links", `Link check complete: ${okUrls} OK, ${brokenUrls} broken (host says gone), ${botBlocked} bot-blocked (auditor challenged — not flagged), ${urlsVerified.length - okUrls - brokenUrls - botBlocked} other.`);
   } else {
     await emitEvent("ethics-citations", `Full text could not be retrieved — proceeding with abstract-only audit (Sections A and D will be marked as auditor tool limitations).`);
   }
 
   const citationBlock = formatVerificationReport(verification);
-  const paperBlock = `# TARGET PAPER\n\n**Title:** ${title}\n**Authors:** ${authors}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${url}\n\n## Abstract\n${(abstract || "(no abstract available)").slice(0, 6000)}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — auditor could not retrieve)"}\n${hadFullText ? (fullText!.slice(0, 30000)) : "(The auditor's automated full-text fetcher returned no usable body content. This is a tool limitation, not evidence of misconduct.)"}\n\n---\n\n## VERIFICATION REPORTS\n\n${citationBlock}\n\n${urlReport}`;
+  const paperBlock = `# TARGET PAPER\n\n**Title:** ${title}\n**Authors:** ${authors}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${url}\n\n## Abstract\n${(abstract || "(no abstract available)").slice(0, 6000)}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — auditor could not retrieve)"}\n${hadFullText ? (fullText!.slice(0, 30000)) : "(The auditor's automated full-text fetcher returned no usable body content. This is a tool limitation, not evidence of misconduct.)"}\n\n---\n\n## VERIFICATION REPORTS\n\n${citationBlock}\n\n${bibReport}\n\n${urlReport}`;
 
   await emitEvent("ethics-llm", `Sending audit prompt to ${modelConfig.modelName || modelConfig.provider}...`);
   const result = await generateWithConfig(modelConfig, systemPrompt, paperBlock, { maxTokens: 8000, temperature: 0.3 });
@@ -404,7 +413,7 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
   const critCount = flagsList.filter(f => f.severity === "CRITICAL").length;
   const majorCount = flagsList.filter(f => f.severity === "MAJOR").length;
   const minorCount = flagsList.filter(f => f.severity === "MINOR").length;
-  const reportAbstract = `This report presents a focused research-ethics audit of the paper "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The audit covers eight ethics categories plus a dedicated link-integrity check, and is grounded in automated verification of every citation (against Future Science and OpenAlex) and every URL (reachability + arXiv-ID validity) extracted from the paper's full text. ${hadFullText ? "Full text was successfully retrieved for this audit." : "Full text could not be retrieved by the auditor; abstract-only assessment was performed for the categories that allow it."} ${flagsList.length} ethics concern(s) were identified: ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall paper clearance: ${clearanceStatus.replace(/_/g, " ")}.`;
+  const reportAbstract = `This report presents a focused research-ethics audit of the paper "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The audit covers eight ethics categories plus a dedicated link-integrity check, and is grounded in automated verification of every citation (against Future Science and OpenAlex) and every URL (reachability + arXiv-ID validity) extracted from the paper's full text. ${hadFullText ? "Full text was retrieved by the auditor and used as the evidentiary basis for the categories that depend on it (A, D, F, I)." : "Full text could not be retrieved by the auditor; abstract-only assessment was performed for the categories that allow it, and Sections A and D were marked as auditor tool limitations rather than ethics findings."} ${flagsList.length} ethics concern(s) were identified: ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall paper clearance: ${clearanceStatus.replace(/_/g, " ")}.`;
 
   const auditedPaperIds = [`doc:${documentId}`, `title:${title.toLowerCase().trim()}`];
 
