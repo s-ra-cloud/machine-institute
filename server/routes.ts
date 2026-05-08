@@ -1689,6 +1689,22 @@ I will now provide the papers.`;
       ]);
       const lockedSet = new Set(lockedIds);
 
+      // Filter out our own published outputs from the audit-target list:
+      // single-paper ethics audits, field ethics reports, literature reviews, and
+      // editorials. These were published to the same FS initiative and would
+      // otherwise show up here as "papers" to audit.
+      const isOwnPublication = (title: string, authors: string): boolean => {
+        const t = (title || "").toLowerCase().trim();
+        const a = (authors || "").toLowerCase();
+        if (t.startsWith("single-paper ethics audit")) return true;
+        if (t.startsWith("field ethics report")) return true;
+        if (t.startsWith("literature review:")) return true;
+        if (t.startsWith("editorial:")) return true;
+        // Author-based fallback for MachInstit ethics / lit-review / editorialist agents.
+        if (/machinstit\s+\S+(h|ber|blr|alr|o)-n\d/.test(a)) return true;
+        return false;
+      };
+
       // Combine FS abstracts with project papers, dedup by documentId/title
       const seen = new Set<string>();
       const out: Array<{ documentId: string; title: string; authors: string; date: string; url: string; alreadyReviewed: boolean }> = [];
@@ -1696,6 +1712,7 @@ I will now provide the papers.`;
         const key = a.documentId;
         if (!key || seen.has(key)) continue;
         seen.add(key);
+        if (isOwnPublication(a.title, a.authors)) continue;
         const isReviewed = lockedSet.has(`doc:${a.documentId}`) || lockedSet.has(`title:${a.title.toLowerCase().trim()}`);
         out.push({
           documentId: a.documentId,
@@ -1709,6 +1726,7 @@ I will now provide the papers.`;
       for (const p of projectPapers) {
         if (!p.sourceDocumentId || seen.has(p.sourceDocumentId)) continue;
         seen.add(p.sourceDocumentId);
+        if (isOwnPublication(p.title, p.authors)) continue;
         const isReviewed = lockedSet.has(`doc:${p.sourceDocumentId}`) || lockedSet.has(`title:${p.title.toLowerCase().trim()}`);
         out.push({
           documentId: p.sourceDocumentId,
