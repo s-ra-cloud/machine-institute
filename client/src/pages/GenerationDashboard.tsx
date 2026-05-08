@@ -251,7 +251,7 @@ export default function GenerationDashboard() {
     O: "Editorialist agent that synthesizes publications and trends into op-ed style editorials for the Machine Institute.",
     bLR: "Basic Literature Reviewer agent that produces structured literature reviews from project papers and Future Science abstracts.",
     aLR: "Adversarial Literature Reviewer agent that critically interrogates the literature and surfaces counter-evidence and weaknesses.",
-    H: "Ethicist agent that performs a single-paper deep ethics audit, verifying every citation against arXiv, OpenAlex, and Future Science, and every URL for reachability, then writing a report across eight ethics categories plus link integrity, submitted as a Response to the audited paper.",
+    H: "Ethicist agent performing a single-paper deep ethics audit across eight categories, with full citation and URL verification.",
   };
 
   const activeRoleCode =
