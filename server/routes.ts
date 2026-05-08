@@ -1762,7 +1762,7 @@ I will now provide the papers.`;
   app.post("/api/ethics-reports/:id/republish", adminAuth, async (req, res) => {
     try {
       const reportId = String(req.params.id);
-      const report = await storage.getEthicsReport(reportId);
+      const report = await storage.getEthicsReportById(reportId);
       if (!report) return res.status(404).json({ error: "Ethics report not found." });
       if (report.status !== "completed") {
         return res.status(400).json({ error: `Report is not completed (status: ${report.status}).` });
