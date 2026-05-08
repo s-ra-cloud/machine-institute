@@ -1756,6 +1756,66 @@ I will now provide the papers.`;
     }
   });
 
+  // Admin: republish an existing ethics report to Future Science.
+  // Useful when the original FS submission failed (publishedDocumentId is empty)
+  // — re-runs only the FS submission step using the already-stored report content.
+  app.post("/api/ethics-reports/:id/republish", adminAuth, async (req, res) => {
+    try {
+      const reportId = String(req.params.id);
+      const report = await storage.getEthicsReport(reportId);
+      if (!report) return res.status(404).json({ error: "Ethics report not found." });
+      if (report.status !== "completed") {
+        return res.status(400).json({ error: `Report is not completed (status: ${report.status}).` });
+      }
+      if (!report.contentMarkdown || !report.reportTitle || !report.reportAbstract) {
+        return res.status(400).json({ error: "Report is missing content/title/abstract." });
+      }
+      if (!process.env.FUTURE_SCIENCE_API_KEY) {
+        return res.status(500).json({ error: "FUTURE_SCIENCE_API_KEY is not configured." });
+      }
+
+      const initiativeDocId = INITIATIVE_DOC_IDS[report.journalId] || INITIATIVE_DOC_IDS["mirror"];
+      const robotAgentName = buildConventionName(report.modelName || "", report.agentId || "H");
+      const humanOrchestratorName = report.orchestratorName && report.orchestratorName !== robotAgentName
+        ? report.orchestratorName
+        : undefined;
+      const submissionKeywords = (report.keywords?.length ?? 0) >= 3
+        ? report.keywords.slice(0, 8)
+        : ["ethics", "ai research", "automated science", ...(report.keywords || [])].slice(0, 5);
+      const linkOriginalContribution = report.documentId
+        ? `https://future-science.org/${report.journalId}/${report.documentId}`
+        : undefined;
+
+      const subResult = await submitEthicsReportToFutureScience({
+        title: report.reportTitle,
+        markdownContent: report.contentMarkdown,
+        abstract: report.reportAbstract,
+        keywords: submissionKeywords,
+        agentName: robotAgentName,
+        initiativeDocId,
+        initiativeSlug: report.journalId,
+        orchestratorName: humanOrchestratorName,
+        agentDescription: report.agentDescription || undefined,
+        linkOriginalContribution,
+      });
+
+      if (!subResult) {
+        return res.status(502).json({ error: "Future Science rejected all fallback types. See server logs." });
+      }
+      await storage.updateEthicsReport(reportId, { publishedDocumentId: subResult.documentId });
+      await storage.createResearchEvent({
+        source: robotAgentName,
+        agentId: report.agentId || "H",
+        phase: "fs-submission-success",
+        message: `Ethics report republished to Future Science. Document ID: ${subResult.documentId}`,
+      });
+      res.json({ success: true, documentId: subResult.documentId, url: subResult.url });
+    } catch (err: any) {
+      console.error("Error republishing ethics report:", err);
+      res.status(500).json({ error: err?.message || "Internal server error" });
+    }
+  });
+
   // Admin: delete a single literature review
   app.delete("/api/literature-reviews/:id", adminAuth, async (req, res) => {
     try {

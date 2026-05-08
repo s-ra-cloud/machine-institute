@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, Link, useLocation } from "wouter";
-import { ArrowLeft, Loader2, Calendar, Bot, Clock, Info, ExternalLink, AlertTriangle, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Calendar, Bot, Clock, Info, ExternalLink, AlertTriangle, ShieldAlert, ShieldCheck, Trash2, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FadeIn } from "@/components/ui/motion";
 import { Navigation } from "@/components/Navigation";
@@ -21,6 +21,21 @@ export default function EthicsReportDetail() {
       return res.json();
     },
     onSuccess: () => navigate("/generate"),
+  });
+  const [republishMessage, setRepublishMessage] = useState<string | null>(null);
+  const republishMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/ethics-reports/${id}/republish`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Republish failed");
+      return body as { documentId: string; url: string };
+    },
+    onSuccess: (body) => {
+      setRepublishMessage(`Published. Document ID: ${body.documentId}`);
+    },
+    onError: (err: any) => {
+      setRepublishMessage(`Failed: ${err?.message || "unknown error"}`);
+    },
   });
 
   const { data: report, isLoading } = useQuery<EthicsReport>({
@@ -123,19 +138,41 @@ export default function EthicsReportDetail() {
                 </Button>
               </Link>
               {isAdmin && (
-                <button
-                  onClick={() => {
-                    if (confirm("Delete this ethics report? The associated paper will become re-auditable. This cannot be undone.")) {
-                      deleteMutation.mutate();
-                    }
-                  }}
-                  disabled={deleteMutation.isPending}
-                  className="text-[10px] font-mono text-muted-foreground/40 hover:text-red-400 transition-colors flex items-center gap-1.5 disabled:opacity-40"
-                  data-testid="button-admin-delete-report"
-                >
-                  {deleteMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                  Delete report (admin)
-                </button>
+                <div className="flex items-center gap-4">
+                  {report.status === "completed" && !report.publishedDocumentId && (
+                    <button
+                      onClick={() => {
+                        setRepublishMessage(null);
+                        republishMutation.mutate();
+                      }}
+                      disabled={republishMutation.isPending}
+                      className="text-[10px] font-mono text-muted-foreground/60 hover:text-primary transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                      data-testid="button-admin-republish-report"
+                      title="Re-submit this report to Future Science (uses the stored report content; no regeneration)."
+                    >
+                      {republishMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <UploadCloud className="w-3 h-3" />}
+                      Republish to Future Science (admin)
+                    </button>
+                  )}
+                  {republishMessage && (
+                    <span className="text-[10px] font-mono text-muted-foreground" data-testid="text-republish-status">
+                      {republishMessage}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (confirm("Delete this ethics report? The associated paper will become re-auditable. This cannot be undone.")) {
+                        deleteMutation.mutate();
+                      }
+                    }}
+                    disabled={deleteMutation.isPending}
+                    className="text-[10px] font-mono text-muted-foreground/40 hover:text-red-400 transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                    data-testid="button-admin-delete-report"
+                  >
+                    {deleteMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                    Delete report (admin)
+                  </button>
+                </div>
               )}
             </div>
           </FadeIn>
