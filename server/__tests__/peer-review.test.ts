@@ -153,6 +153,112 @@ describe("Peer review — ethics-failure co-author gating", () => {
   });
 });
 
+describe("Peer review — bR chunk-2 prompt: Section 5 fabrication guard (prompt-level constraints)", () => {
+  // These tests verify that the required anti-fabrication rules are encoded
+  // in REVIEW_CHUNK_2_PROMPT. They fail if the prompt is reverted to a version
+  // that lacks the explicit prohibitions.
+
+  it("empty corpus → prompt mandates transparency statement opening Section 5", () => {
+    // The prompt must explicitly instruct the agent to open Section 5 with a
+    // prescribed sentence when the Publications section is empty.
+    expect(REVIEW_CHUNK_2_PROMPT).toContain(
+      "No prior works from this venue were available for direct comparison; the discussion below is based on the literature cited in the audited paper itself."
+    );
+  });
+
+  it("corpus availability check rule is present", () => {
+    expect(REVIEW_CHUNK_2_PROMPT).toContain("CORPUS AVAILABILITY CHECK");
+    // Rule must instruct: use only Publications section OR audited paper's own bibliography
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/audited paper'?s? own bibliography/i);
+  });
+
+  it("bibliography fabrication prohibition is present and absolute", () => {
+    expect(REVIEW_CHUNK_2_PROMPT).toContain("FABRICATION PROHIBITION");
+    // Must cover at minimum: paper title, author name, journal name
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/paper title/i);
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/journal name/i);
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/author name/i);
+  });
+
+  it("quotation prohibition is present — no quotation marks unless verbatim text is in input", () => {
+    expect(REVIEW_CHUNK_2_PROMPT).toContain("QUOTATION PROHIBITION");
+    // Must explicitly forbid quotation marks and offer paraphrase alternative
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/quotation marks/i);
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/paraphrase/i);
+  });
+
+  it("methodological connection prohibition is present", () => {
+    expect(REVIEW_CHUNK_2_PROMPT).toContain("CONNECTION PROHIBITION");
+  });
+
+  it("pre-emission validation pass is mandated", () => {
+    expect(REVIEW_CHUNK_2_PROMPT).toContain("PRE-EMISSION VALIDATION");
+    // Must require traceable sources for all cited works
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/traceable/i);
+  });
+
+  it("single-verified-work path: paraphrase-only instruction is present (no fabricated quotes)", () => {
+    // When only one corpus entry exists, agent must paraphrase not quote.
+    // This is covered by the QUOTATION PROHIBITION rule.
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/X et al\. argue that/i);
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/X et al\. find that/i);
+  });
+});
+
+describe("Peer review — bR chunk-3 prompt: calibration and scope rules (prompt-level constraints)", () => {
+  it("Section 7 scope rule prohibits minor ethics/formatting findings from appearing there", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toContain("SCOPE RULE (STRICT)");
+    // Must explicitly exclude missing bibliography entries, broken links, formatting
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/missing bibliography/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/broken hyperlinks|broken links/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/formatting/i);
+    // Must direct those to Section 8
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Section 8/);
+  });
+
+  it("superlatives + no core-finding failure → forced Minor Revision calibration rule is present", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toContain("CALIBRATION PROCEDURE");
+    // Must enumerate superlative terms
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/exceptional/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/compelling/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/outstanding/i);
+    // Must define core-finding failure
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/core-finding failure/i);
+    // Must force Minor Revision when superlatives + no core-finding failure
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Minor Revision.*under these conditions|MUST be Minor Revision/i);
+  });
+
+  it("calibration state message is specified in the prompt", () => {
+    // The prompt must specify the exact text the agent should emit to acknowledge calibration
+    expect(REVIEW_CHUNK_3_PROMPT).toContain(
+      "Calibration check: Strengths language was affirmative; no core-finding failure was identified in Weaknesses; recommendation is calibrated to Minor Revision."
+    );
+  });
+
+  it("recommendations must be 1:1 with findings — generic best-practice exclusion is present", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Do NOT include generic best-practice/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/tied to a specific finding/i);
+  });
+
+  it("section ordering is mandated as 7, 8, 9, Bibliography with no gaps", () => {
+    // Must explicitly state the required order and prohibit gaps
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/7, 8, 9, Bibliography/);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/no skipped|no gaps/i);
+  });
+
+  it("bibliography in chunk-3 also carries the source-traceability requirement", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/verified sources/i);
+    // Must prohibit invented bibliographic fields
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/omit that field rather than invent/i);
+  });
+
+  it("severity definitions are spelled out in the recommendation section", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Reject: fundamental flaws not addressable/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Major Revision: concerns that, if not addressed/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Minor Revision: paper.s core findings hold/i);
+  });
+});
+
 describe("Peer review — loadPaperContext shape (skips ethics-only verifiers)", () => {
   it("PaperContext returned by loadPaperContext exposes the fields peer-review needs and nothing more", async () => {
     // Verify the contract used by server/peer-review.ts L88: the destructured
