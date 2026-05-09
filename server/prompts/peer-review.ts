@@ -110,13 +110,31 @@ Give a final editorial recommendation: Accept, Minor Revision, Major Revision, o
 
 ### Bibliography
 
-List only works that appeared in either (a) the Publications section of Part 2's input or (b) the audited paper's own bibliography. Do NOT include any work that was not in one of these two verified sources. If a bibliographic field (journal name, volume, pages) was not present in the source, omit that field rather than inventing it. Use Chicago style.
+**CRITICAL SOURCING RULES — READ BEFORE EMITTING A SINGLE ENTRY:**
+
+A. SOURCE-TRACEABILITY (ABSOLUTE). Every bibliography entry MUST be copied verbatim (modulo whitespace and Chicago-style punctuation normalization) from one of exactly two source documents:
+   (i) the Publications section of Part 2's input, or
+   (ii) the audited paper's own bibliography.
+   Every field — author list, year, title, venue/journal/conference name, volume, issue, page numbers, DOI, URL — must be traceable to one of those source documents. If you cannot point to the exact source line for a field, that field does not exist for purposes of your output.
+
+B. NO FIELD SYNTHESIS. You may NEVER generate a title, venue, journal name, conference name, volume, issue, or page range that was not present in the source documents. If the source provides only some fields, your entry contains only those fields. Missing fields are omitted, not synthesized. Do NOT replace "Transformer Circuits Thread" with "Journal of Machine Learning". Do NOT replace "arXiv preprint 2502.14010" with "Proceedings of NeurIPS". Do NOT invent venues for unpublished or workshop papers.
+
+C. NO AUTHOR ENRICHMENT. You may NEVER complete or "fix" partial author initials, expand "et al." into a full author list, or otherwise enrich a citation with information not present in the source. If the audited paper's bibliography says "Olsson, C., et al.", your bibliography says "Olsson, C., et al." — not "Olsson, C., Elhage, N., Nanda, N., et al.". If the source initial is "Z." you write "Z." — not "X." and not "Zachary." Initials must match the source character-for-character.
+
+D. BODY REFERENCE WITHOUT BIBLIOGRAPHY ENTRY IS PERMITTED. If you reference a work in the body of the review (any section, including 5, 7, 8) and that work has no entry in either source document, you have two options: (1) keep the body reference but emit no bibliography entry for it, or (2) remove the body reference. You may NEVER invent a bibliography entry to support a body reference.
+
+E. PRE-EMISSION VALIDATION PASS (MANDATORY). Before emitting the bibliography section, walk through every entry and verify, one by one, that it string-matches (after normalization) an entry in either source document. For each entry, mentally annotate the source: "[from audited paper bib]" or "[from Publications section]". If any entry has no matching source, REMOVE IT before emission. If you cannot confidently verify a field, OMIT that field rather than guessing.
+
+F. CROSS-OUTPUT APPLICATION. The same source-traceability rule applies to ANY structured output you produce in this report — bibliography entries, in-text citation blocks, comparison tables, summary lists of works, "related work" enumerations, footnoted references. Whenever you list or describe an external work, every field must be traceable to (i) the Publications section input or (ii) the audited paper's own bibliography. The fabrication patch you applied in Section 5 also applies here.
+
+After applying rules A–F, list the verified entries in Chicago style.
 
 ## Style Requirements
 - Follow a formal academic tone
 - Sections must be numbered 7, 8, 9, Bibliography — in that order, with no gaps or renaming
 - The final recommendation must be one of: Accept, Minor Revision, Major Revision, Reject
-- Synthesize and reference your earlier analysis rather than repeating it verbatim`;
+- Synthesize and reference your earlier analysis rather than repeating it verbatim
+- Every external-work field in every structured output (bibliography, citation lists, comparison tables) must be traceable to the two verified source documents — never invent titles, venues, initials, or any other bibliographic field`;
 
 export const AR_REVIEW_CHUNK_1_PROMPT = `You are an adversarial peer-review agent for a scientific journal. You are producing PART 1 of a rigorous, demanding peer review. Your role (aR — Adversarial Reviewer) is to probe every weakness, challenge every assumption, and hold the paper to the highest possible standards.
 

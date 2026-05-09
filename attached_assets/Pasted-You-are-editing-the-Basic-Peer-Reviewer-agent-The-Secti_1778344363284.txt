@@ -1,0 +1,46 @@
+You are editing the Basic Peer Reviewer agent. The Section 5 fabrication issue is fixed and the calibration patches are working. One remaining fabrication issue in the bibliography needs to be addressed.
+
+## Bug: Fabricated bibliography entries
+
+In a recent test run, the reviewer's own bibliography listed four works it had referenced in Section 5: Olsson et al. 2022, Yin & Steinhardt 2025, Todd et al. 2023, Cho et al. 2024. Every single entry had a fabricated title and a fabricated venue. The agent appears to have taken the (author, year) tuple from the audited paper's bibliography and then generated plausible-sounding descriptive titles and journal names rather than copying the actual entries.
+
+For reference, the audited paper's bibliography lists these works as:
+
+- Olsson, C., Elhage, N., Nanda, N., et al. (2022). "In-context learning and induction heads." Transformer Circuits Thread.
+- Yin, Z., & Steinhardt, J. (2025). "Which attention heads matter for in-context learning?" arXiv preprint 2502.14010.
+- Todd, E., Li, M. L., Sharma, A. S., Mueller, A., Wallace, B. C., & Bau, D. (2023). "Function vectors in large language models." ICLR 2024.
+- Cho, Y., Kim, J., Lee, S., & Kim, T. (2024). "How do transformers learn in-context beyond simple functions?" ICLR 2025.
+
+The reviewer instead produced fake titles ("Induction Heads in Transformer Models," "Function Vector Heads in Large Transformer Models," "Restoring ICL Ability with Function Vectors," "A Three-Step Circuit Model for Transformer Interpretability") and fake venues ("Journal of Machine Learning," "Proceedings of the Neural Information Processing Systems," "AI Interpretability Workshop"), and got author initials wrong (Yin "X." instead of "Z.", Todd "A." instead of "E.").
+
+This is the same fabrication-on-incomplete-input failure mode that was patched out of Section 5, now showing up in the bibliography section. The fix follows the same pattern.
+
+Apply this constraint:
+
+1. The peer reviewer's own bibliography may contain ONLY entries that are copied verbatim from the audited paper's bibliography or from a comparison-corpus input. Every field — author list, year, title, venue, page numbers, URLs — must be traceable to one of those source documents.
+
+2. The agent may NEVER generate a title, venue, journal name, conference name, volume, issue, or page range that was not present in the source documents. If the source provides only some fields, the output contains only those fields. Missing fields are omitted, not synthesized.
+
+3. The agent may NEVER complete or "fix" partial author initials, expand "et al." into a full author list, or otherwise enrich a citation with information not present in the source. If the audited paper's bibliography says "Olsson, C., et al.", the peer review's bibliography says the same — not "Olsson, C., Elhage, N., Nanda, N., et al." unless the source already provides that.
+
+4. Add a pre-emission validation pass: every bibliography entry in the peer review must string-match (after normalization) an entry in the audited paper's bibliography or in the comparison-corpus input. Mismatches block emission of the report.
+
+5. If the reviewer references a work in the body of the review (e.g., in Section 5) and that work has no entry in either source document, it must be referenced in the body without a bibliography entry, or the reference must be removed. The reviewer must not invent a bibliography entry to support a body reference.
+
+## Constraints
+
+- Do not change the Section 5 transparent-fallback behavior — that's working.
+- Do not change the calibration logic — that's working.
+- Do not change the ethics-integration mechanic — that's working.
+- The same source-traceability rule should apply uniformly to any structured output the agent produces (bibliography, citation lists, comparison tables, summary lists). Audit other sections for the same fabrication pattern and apply the same constraint.
+
+## Test cases to add
+
+- Audited paper bibliography contains "Olsson, C., et al. (2022). In-context learning and induction heads. Transformer Circuits Thread." -> Peer review bibliography contains exactly that entry, not a paraphrase or expansion.
+- Audited paper bibliography contains author initials "Yin, Z." -> Peer review bibliography contains "Yin, Z." not "Yin, X." or "Yin, Zachary."
+- Reviewer wants to reference a work not in the audited paper's bibliography -> either remove the reference from the body, or accept the body reference without a bibliography entry. Never invent an entry.
+- Pre-emission validation finds a bibliography entry not present in any source -> blocks emission with a specific error pointing to the offending entry.
+
+## Deliverable
+
+A patched peer reviewer that, when re-run on the induction-heads paper, produces a bibliography whose every entry matches the audited paper's bibliography verbatim (modulo formatting normalization). No fabricated titles, venues, or initials. Show the diff and demonstrate the test cases pass on the patched version and fail on the current one.

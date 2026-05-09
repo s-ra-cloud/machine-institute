@@ -247,9 +247,86 @@ describe("Peer review — bR chunk-3 prompt: calibration and scope rules (prompt
   });
 
   it("bibliography in chunk-3 also carries the source-traceability requirement", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/verified sources/i);
     // Must prohibit invented bibliographic fields
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/omit that field rather than invent/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/omitted, not synthesized|omit that field rather than invent|omit.*field/i);
+  });
+});
+
+describe("Peer review — bR chunk-3 prompt: bibliography fabrication guard (per spec)", () => {
+  // Regression tests for the bibliography fabrication failure mode.
+  // The reviewer was generating plausible-sounding titles/venues/initials when
+  // the audited paper's bibliography contained only partial information.
+
+  it("SOURCE-TRACEABILITY rule (A): every bibliography entry must be verbatim from one of two sources", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toContain("SOURCE-TRACEABILITY");
+    // Must enumerate the two allowed sources (Publications + audited paper's own bibliography)
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Publications section/);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/audited paper'?s? own bibliography/i);
+    // Must require verbatim copying
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/verbatim/i);
+    // Must list the fields covered
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/author list/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/title/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/venue|journal/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/page/i);
+  });
+
+  it("NO FIELD SYNTHESIS rule (B): cannot replace 'Transformer Circuits Thread' with 'Journal of Machine Learning'", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toContain("NO FIELD SYNTHESIS");
+    // Must contain the concrete failure-mode example
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Transformer Circuits Thread/);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Journal of Machine Learning/);
+    // Must require omission rather than synthesis
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/omitted, not synthesized/i);
+  });
+
+  it("NO AUTHOR ENRICHMENT rule (C): 'Olsson, C., et al.' must not be expanded", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toContain("NO AUTHOR ENRICHMENT");
+    // Must contain the concrete failure-mode examples
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/et al\./);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Olsson/);
+    // Must forbid expanding et al. into a full author list
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/expand.*et al/i);
+  });
+
+  it("NO AUTHOR ENRICHMENT rule (C): initials must match source character-for-character ('Z.' not 'X.')", () => {
+    // The Yin/Steinhardt failure mode: initial 'Z.' was changed to 'X.'
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Z\./);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/X\./);
+    // Must forbid expanding initials into full first names
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Zachary/);
+    // Must require character-for-character match
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/character.for.character/i);
+  });
+
+  it("BODY REFERENCE WITHOUT BIBLIOGRAPHY rule (D): body reference may exist without a bibliography entry", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toContain("BODY REFERENCE WITHOUT BIBLIOGRAPHY ENTRY");
+    // Must offer the two-option choice: keep body reference without entry, or remove body reference
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/keep the body reference/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/remove the body reference/i);
+    // Must explicitly forbid inventing entries to support body references
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/never invent a bibliography entry/i);
+  });
+
+  it("PRE-EMISSION VALIDATION PASS rule (E): mandatory walk-through of every entry against sources", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toContain("PRE-EMISSION VALIDATION PASS");
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/MANDATORY/);
+    // Must require per-entry source annotation
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/from audited paper bib|from Publications section/);
+    // Must require removal of unverifiable entries
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/REMOVE IT/);
+  });
+
+  it("CROSS-OUTPUT APPLICATION rule (F): same rule applies to all structured outputs, not just bibliography", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toContain("CROSS-OUTPUT APPLICATION");
+    // Must extend rule beyond bibliography to other structured outputs
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/comparison tables/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/citation lists|in-text citation/i);
+  });
+
+  it("style-requirements footer reiterates the no-fabrication rule for all structured outputs", () => {
+    // Final style block must echo the cross-cutting rule
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/never invent titles, venues, initials/i);
   });
 
   it("severity definitions are spelled out in the recommendation section", () => {
