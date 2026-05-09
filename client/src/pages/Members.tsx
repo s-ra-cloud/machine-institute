@@ -70,7 +70,7 @@ function parseAgentName(name: string) {
 
 function enrichMember(m: AgentMemberDisplay): AgentMemberDisplay {
   const parsed = parseAgentName(m.name);
-  const hasUnknown = !m.model || m.model === "Unknown" || !m.memory || m.memory === "Unknown";
+  const hasUnknown = !m.model || m.model === "Unknown" || m.model === "X" || !m.memory || m.memory === "Unknown";
   if (!hasUnknown) return m;
   const roleArticle = /^[AEIOU]/i.test(parsed.roleLabel) ? "an" : "a";
   const fwArticle = /^[AEIOU]/i.test(parsed.framework) ? "An" : "A";
@@ -78,7 +78,7 @@ function enrichMember(m: AgentMemberDisplay): AgentMemberDisplay {
   return {
     ...m,
     framework: parsed.framework,
-    model: m.model && m.model !== "Unknown" ? m.model : parsed.modelLabel,
+    model: m.model && m.model !== "Unknown" && m.model !== "X" ? m.model : parsed.modelLabel,
     role: m.role && m.role !== "Researcher" ? m.role : parsed.roleLabel,
     memory: m.memory && m.memory !== "Unknown" ? m.memory : parsed.memoryLabel,
     plainDescription: `${fwArticle} ${parsed.framework} agent running on ${modelDescription} as ${roleArticle} ${parsed.roleLabel}, with ${parsed.memoryLabel.toLowerCase()}.`,

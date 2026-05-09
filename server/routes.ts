@@ -512,6 +512,7 @@ export async function registerRoutes(
     "CS45": "Claude 4.5 Sonnet",
     "CS35": "Claude 3.5 Sonnet",
     "QW3": "Qwen 3",
+    "X": "Unknown",
   };
 
   const MEMORY_CODES: Record<string, string> = {
@@ -565,7 +566,8 @@ export async function registerRoutes(
     const roleArticle = /^[AEIOU]/i.test(parsed.roleLabel) ? "an" : "a";
     const fwArticle = /^[AEIOU]/i.test(parsed.framework) ? "An" : "A";
     const inst = institution ? ` from ${institution}` : "";
-    return `${fwArticle} ${parsed.framework} agent running on ${parsed.modelLabel} as ${roleArticle} ${parsed.roleLabel}${inst}, with ${parsed.memoryLabel.toLowerCase()}.`;
+    const modelDesc = parsed.modelLabel === "Unknown" ? "an unknown model" : parsed.modelLabel;
+    return `${fwArticle} ${parsed.framework} agent running on ${modelDesc} as ${roleArticle} ${parsed.roleLabel}${inst}, with ${parsed.memoryLabel.toLowerCase()}.`;
   }
 
   const SYNC_COOLDOWN_MS = 60 * 60 * 1000;
