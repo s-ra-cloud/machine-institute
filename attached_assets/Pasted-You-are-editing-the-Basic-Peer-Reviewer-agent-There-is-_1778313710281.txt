@@ -1,0 +1,63 @@
+You are editing the Basic Peer Reviewer agent. There is one critical fabrication bug to fix, plus several calibration issues.
+
+## CRITICAL BUG: Section 5 fabricates comparison literature
+
+The reviewer's Section 5 ("Comparison with Prior Literature") is generating fake bibliography entries when its comparison-corpus input is empty or sparse. In a recent test run, the agent produced two fabricated papers ("Activation Steering in Large Language Models: Methods, Applications, and Limitations" and "Linear Probing and Geometric Structure in Transformer Representations: A Comprehensive Review"), attributed three quoted phrases to them that do not exist anywhere, invented a journal name ("Journal of Mechanistic Interpretability") that does not match the actual venue, and fabricated a methodological connection between the audited paper and these non-existent works. None of these sources exist on Future Science or anywhere else.
+
+This is a hard fabrication failure and the most damaging output the agent can produce. Fix as follows:
+
+1. Section 5 must operate against an explicit comparison-corpus input. If no input is provided, or the input is empty, the section must say so transparently and proceed to compare only against works actually cited in the paper under review (extracted from the paper's own bibliography).
+
+   Specifically: if no comparison corpus is available, Section 5 should open with: "No prior works from this venue were available for direct comparison; the discussion below is based on the literature cited in the audited paper itself." Then discuss the audited paper's positioning relative to the works it cites (Olsson et al., Yin & Steinhardt, Todd et al., Cho et al., etc.).
+
+2. The agent may NEVER generate a bibliography entry, paper title, journal name, volume number, issue number, page range, or author identifier that was not present in either (a) the comparison-corpus input or (b) the audited paper's own bibliography. Every field in every cited work must be traceable to one of these two sources. If a field is missing from the source, it is omitted, not invented.
+
+3. The agent may NEVER attribute a direct quotation to a comparison work unless the quoted text was extracted verbatim from the work's actual content and the agent has access to that content. When discussing a comparison work whose content the agent cannot directly verify, it must paraphrase in its own words and use no quotation marks. Patterns like "X et al. argue that..." or "X et al. find that..." are acceptable when paraphrasing; quoted phrases attributed to specific sources require verbatim source access.
+
+4. The agent may not invent methodological connections between the audited paper and other works. A claim like "the audited paper addresses a limitation identified in [other work]" requires that the audited paper itself explicitly position its choice as a response to that work, OR that the connection is supported by direct quotation from both sources. If neither holds, the claim must be removed.
+
+5. Add a pre-emission validation pass: any bibliography entry in the review must match either an entry in the comparison corpus or an entry in the audited paper's bibliography. Mismatches block emission of the report.
+
+## Calibration issues to fix in the same patch
+
+6. Section 7 (Weaknesses) must contain only substantive scientific weaknesses of the paper. Minor ethics findings (missing bibliography entries, broken peripheral links, formatting issues) belong only in Section 8 under Minor Revisions, never in Section 7.
+
+7. The final recommendation must be calibrated against the body. If Section 6 (Strengths) describes the methodology with words like "exceptional," "compelling," or "rigorous," the final recommendation cannot be Major Revision unless Section 7 identifies a core-finding failure (a flaw that, if not addressed, would invalidate the paper's main claims). Scoping concerns, sample-size requests, and multiple-comparisons-correction requests are Minor Revision territory unless they invalidate a specific reported result.
+
+   Severity definitions:
+   - Reject: fundamental flaws not addressable by revision.
+   - Major Revision: concerns that, if not addressed, would undermine the paper's main conclusions.
+   - Minor Revision: paper's core findings hold but specific clarifications, additions, or corrections would improve it.
+   - Accept: no substantive concerns.
+
+   Add a calibration check before emission: if the Strengths section uses superlative language and the Weaknesses section identifies only scoping/methodology-improvement concerns, force the verdict to Minor Revision or downgrade the Strengths language.
+
+8. Recommendations must be ~1:1 with flags. For two MINOR ethics flags plus N substantive revisions, the Recommendations section should have approximately N+2 entries, each tied to a specific flag or revision request. Generic best-practice recommendations not tied to a specific finding in this paper must be removed.
+
+9. Table of contents must match the body. If the body has Part 1 and Part 3, either rename Part 3 to Part 2 or add a Part 2 section. No skipped numbers.
+
+## Constraints
+
+- Do not change the 9-section structure.
+- Do not change the substantive methodology critiques in Sections 3 and 4 — those are working correctly.
+- Do not change the parallel-audit integration mechanic.
+
+## Test cases to add
+
+- Empty comparison corpus -> Section 5 acknowledges this transparently, discusses positioning relative to the audited paper's own citations, generates no fabricated entries.
+- Comparison corpus with one verified work -> Section 5 cites that work with paraphrase (no quotation marks unless verbatim text is available), no other works invented.
+- Quoted phrase attributed to a source the agent cannot verify -> validation error, blocks emission.
+- Bibliography entry not present in either input source -> validation error, blocks emission.
+- Strengths section contains "exceptional" + final verdict is Major Revision + no core-finding failure in Weaknesses -> calibration warning, force verdict downgrade or Strengths revision.
+- Minor ethics finding placed in Section 7 -> validation error, must move to Section 8.
+- TOC contains skipped section number -> validation error.
+
+## Deliverable
+
+A patched peer reviewer that, when re-run on the induction-heads paper:
+- Produces a Section 5 grounded only in works actually cited by the audited paper, with no fabricated entries, no fabricated quotations, and no fabricated methodological connections.
+- Confines minor ethics findings to Section 8.
+- Issues a final verdict (likely Minor Revision) calibrated to match the body.
+- Has a sequential, gap-free Table of Contents.
+
+Show the diff and demonstrate the test cases pass on the patched version and fail on the current one.

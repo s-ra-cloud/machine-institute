@@ -1053,24 +1053,30 @@ export default function GenerationDashboard() {
                         </label>
                         <div className="grid grid-cols-3 gap-3 mb-3">
                           {([
-                            { code: "bR" as const, label: "Basic", desc: "Balanced 9-section review" },
-                            { code: "iR" as const, label: "Innovation", desc: "Novelty & positioning focus" },
-                            { code: "aR" as const, label: "Adversarial", desc: "Stress-tests every claim" },
+                            { code: "bR" as const, label: "Basic", desc: "Balanced 9-section review", locked: false },
+                            { code: "iR" as const, label: "Innovation", desc: "Novelty & positioning focus", locked: true },
+                            { code: "aR" as const, label: "Adversarial", desc: "Stress-tests every claim", locked: true },
                           ]).map(p => (
                             <button
                               key={p.code}
-                              onClick={() => setPeerPersona(p.code)}
-                              className={`p-3 border text-left transition-all ${
-                                peerPersona === p.code
-                                  ? p.code === "aR"
-                                    ? "border-red-500 bg-red-500/10 text-red-300"
-                                    : "border-primary bg-primary/10"
-                                  : "border-border/50 bg-muted/5 hover:border-primary/40 hover:bg-muted/10"
+                              onClick={() => !p.locked && setPeerPersona(p.code)}
+                              disabled={p.locked}
+                              className={`p-3 border text-left transition-all relative overflow-hidden ${
+                                p.locked
+                                  ? "border-border/20 bg-muted/5 opacity-50 cursor-not-allowed"
+                                  : peerPersona === p.code
+                                    ? "border-primary bg-primary/10"
+                                    : "border-border/50 bg-muted/5 hover:border-primary/40 hover:bg-muted/10"
                               }`}
                               data-testid={`button-peer-persona-${p.code}`}
                             >
-                              <div className="text-xs font-mono uppercase tracking-widest">{p.label} <span className="text-muted-foreground/50">({p.code})</span></div>
-                              <div className="text-[10px] font-mono text-muted-foreground/60 mt-1">{p.desc}</div>
+                              <div className="text-xs font-mono uppercase tracking-widest flex items-center gap-1.5">
+                                {p.label} <span className="text-muted-foreground/50">({p.code})</span>
+                                {p.locked && <Lock className="w-2.5 h-2.5 text-muted-foreground/40 ml-auto" />}
+                              </div>
+                              <div className="text-[10px] font-mono text-muted-foreground/60 mt-1">
+                                {p.locked ? "Coming soon" : p.desc}
+                              </div>
                             </button>
                           ))}
                         </div>
