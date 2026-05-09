@@ -80,7 +80,8 @@ export interface IStorage {
   updatePeerReview(id: string, updates: Partial<PeerReview>): Promise<PeerReview>;
   deletePeerReview(id: string): Promise<void>;
   deleteAllPeerReviews(): Promise<void>;
-  getReviewedPaperPersonasForJournal(journalId: string): Promise<Array<{ documentId: string; persona: string }>>;
+  getReviewedPaperPersonasForJournal(journalId: string): Promise<Array<{ documentId: string; persona: string; modelName: string | null }>>;
+  resetPeerReviewLocksForJournal(journalId: string): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -496,11 +497,17 @@ export class DatabaseStorage implements IStorage {
     await db.delete(peerReviews);
   }
 
-  async getReviewedPaperPersonasForJournal(journalId: string): Promise<Array<{ documentId: string; persona: string }>> {
-    const rows = await db.select({ documentId: peerReviews.documentId, persona: peerReviews.persona })
+  async getReviewedPaperPersonasForJournal(journalId: string): Promise<Array<{ documentId: string; persona: string; modelName: string | null }>> {
+    const rows = await db.select({ documentId: peerReviews.documentId, persona: peerReviews.persona, modelName: peerReviews.modelName })
       .from(peerReviews)
       .where(and(eq(peerReviews.journalId, journalId), ne(peerReviews.status, "failed")));
     return rows;
+  }
+
+  async resetPeerReviewLocksForJournal(journalId: string): Promise<number> {
+    const result = await db.delete(peerReviews)
+      .where(and(eq(peerReviews.journalId, journalId), ne(peerReviews.status, "completed")));
+    return (result as any).rowCount ?? 0;
   }
 
   async getAuditedPaperIdsForJournal(journalId: string): Promise<string[]> {

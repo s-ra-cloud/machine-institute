@@ -1907,8 +1907,20 @@ I will now provide the papers.`;
         return false;
       };
 
+      // Build two maps per documentId:
+      //   reviewedPersonas: Set<persona>   — for the display badge (which personas have any review)
+      //   lockedCombos: Set<"persona:model"> — for model-aware lock check in the UI
+      const reviewedPersonasMap = new Map<string, Set<string>>();
+      const lockedCombosMap = new Map<string, Set<string>>();
+      for (const r of reviewedRows) {
+        if (!reviewedPersonasMap.has(r.documentId)) reviewedPersonasMap.set(r.documentId, new Set());
+        reviewedPersonasMap.get(r.documentId)!.add(r.persona);
+        if (!lockedCombosMap.has(r.documentId)) lockedCombosMap.set(r.documentId, new Set());
+        lockedCombosMap.get(r.documentId)!.add(`${r.persona}:${r.modelName || ""}`);
+      }
+
       const seen = new Set<string>();
-      const out: Array<{ documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[] }> = [];
+      const out: Array<{ documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[]; lockedCombos: string[] }> = [];
       for (const a of fsData.abstracts) {
         const key = a.documentId;
         if (!key || seen.has(key)) continue;
@@ -1920,7 +1932,8 @@ I will now provide the papers.`;
           authors: a.authors,
           date: a.date,
           url: `https://future-science.org/${initiativeSlug}/${a.documentId}`,
-          reviewedPersonas: Array.from(reviewedMap.get(a.documentId) || []),
+          reviewedPersonas: Array.from(reviewedPersonasMap.get(a.documentId) || []),
+          lockedCombos: Array.from(lockedCombosMap.get(a.documentId) || []),
         });
       }
       for (const p of projectPapers) {
@@ -1933,7 +1946,8 @@ I will now provide the papers.`;
           authors: p.authors,
           date: p.date,
           url: p.url || `https://future-science.org/${initiativeSlug}/${p.sourceDocumentId}`,
-          reviewedPersonas: Array.from(reviewedMap.get(p.sourceDocumentId) || []),
+          reviewedPersonas: Array.from(reviewedPersonasMap.get(p.sourceDocumentId) || []),
+          lockedCombos: Array.from(lockedCombosMap.get(p.sourceDocumentId) || []),
         });
       }
       out.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
@@ -2026,10 +2040,11 @@ I will now provide the papers.`;
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
       if (!documentId || typeof documentId !== "string") return res.status(400).json({ error: "documentId is required." });
 
-      // Per-paper-per-persona lock
+      // Per-paper-per-persona-per-model lock
       const reviewed = await storage.getReviewedPaperPersonasForJournal(effectiveJournalId);
-      if (reviewed.some(r => r.documentId === documentId && r.persona === effectivePersona)) {
-        return res.status(409).json({ error: `This paper has already been reviewed by the ${effectivePersona} persona.` });
+      const resolvedModelForCheck = resolveModelName(modelConfig);
+      if (reviewed.some(r => r.documentId === documentId && r.persona === effectivePersona && r.modelName === resolvedModelForCheck)) {
+        return res.status(409).json({ error: `This paper has already been reviewed by the ${effectivePersona} persona using this model. Select a different model to run another review.` });
       }
 
       const [defaultP1, defaultP2, defaultP3] = getPeerReviewChunkPrompts(effectivePersona);
@@ -2373,6 +2388,18 @@ I will now provide the papers.`;
   });
 
   // Admin: reset the global "already reviewed" lock for a journal
+  app.post("/api/admin/peer-review-lock/reset", adminAuth, async (req, res) => {
+    try {
+      const journalId = (req.body?.journalId as string | undefined) || "mirror";
+      if (!INITIATIVE_DOC_IDS[journalId]) return res.status(400).json({ error: "Unknown journal." });
+      const cleared = await storage.resetPeerReviewLocksForJournal(journalId);
+      res.json({ success: true, clearedReviews: cleared });
+    } catch (err: any) {
+      console.error("Error resetting peer review lock:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.post("/api/admin/audit-lock/reset", adminAuth, async (req, res) => {
     try {
       const journalId = (req.body?.journalId as string | undefined) || "mirror";

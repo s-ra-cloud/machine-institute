@@ -349,6 +349,22 @@ export default function GenerationDashboard() {
     },
   });
 
+  const resetPeerReviewLockMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/peer-review-lock/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ journalId: selectedJournal }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to reset peer review lock");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews/available-papers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews-all"] });
+    },
+  });
+
   const deleteEthicsReportMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(`/api/ethics-reports/${id}`, { method: "DELETE" });
@@ -381,7 +397,7 @@ export default function GenerationDashboard() {
     enabled: activeType === "peer-review",
   });
 
-  interface PeerAvailablePaper { documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[] }
+  interface PeerAvailablePaper { documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[]; lockedCombos: string[] }
   const { data: peerAvailableData } = useQuery<{ papers: PeerAvailablePaper[] }>({
     queryKey: ["/api/peer-reviews/available-papers", selectedJournal],
     queryFn: async () => {
@@ -1093,9 +1109,26 @@ export default function GenerationDashboard() {
                       </div>
 
                       <div className="space-y-3">
-                        <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block">
-                          3. Pick a paper to review
-                        </label>
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block">
+                            3. Pick a paper to review
+                          </label>
+                          {isAdmin && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`Reset all pending peer review locks for ${selectedJournal}? Completed reviews are kept; only in-progress or failed locks are cleared.`)) {
+                                  resetPeerReviewLockMutation.mutate();
+                                }
+                              }}
+                              disabled={resetPeerReviewLockMutation.isPending}
+                              className="text-[10px] font-mono text-muted-foreground/40 hover:text-yellow-400 transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                              data-testid="button-reset-peer-review-lock"
+                            >
+                              {resetPeerReviewLockMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                              Reset review locks
+                            </button>
+                          )}
+                        </div>
                         <input
                           type="text"
                           value={peerPickerQuery}
@@ -1112,7 +1145,7 @@ export default function GenerationDashboard() {
                           )}
                           {filtered.map((p) => {
                             const isSelected = p.documentId === peerSelectedDocId;
-                            const isLockedForPersona = p.reviewedPersonas.includes(peerPersona);
+                            const isLockedForPersona = p.lockedCombos?.includes(`${peerPersona}:${modelConfig.modelName || ""}`) ?? false;
                             return (
                               <button
                                 key={p.documentId}
@@ -1155,7 +1188,7 @@ export default function GenerationDashboard() {
                           })}
                         </div>
                         <p className="text-[10px] font-mono text-muted-foreground/50">
-                          A given paper can be reviewed at most once by each persona ({peerPersona} is currently selected). Already-reviewed papers for this persona are locked.
+                          A paper is locked for the selected persona + model combination. Switch to a different model to review the same paper again with {peerPersona}.
                         </p>
                         {peerSelectedDocId && (
                           <div className="border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-mono" data-testid="text-peer-selected-paper">

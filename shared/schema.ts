@@ -382,10 +382,11 @@ export const peerReviews = pgTable("peer_reviews", {
   promptTrace: text("prompt_trace"),
   sourceTrace: text("source_trace"),
 }, (table) => ({
-  // Partial unique: a paper+persona is locked only by non-failed reviews.
+  // Partial unique: a paper+persona+model is locked only by non-failed reviews.
+  // The same paper can be reviewed by the same persona using a different LLM model.
   // Failed rows can coexist so the user can retry after a transient failure.
-  uniquePersonaPaper: uniqueIndex("peer_reviews_journal_doc_persona_uniq")
-    .on(table.journalId, table.documentId, table.persona)
+  uniquePersonaPaperModel: uniqueIndex("peer_reviews_journal_doc_persona_model_uniq")
+    .on(table.journalId, table.documentId, table.persona, table.modelName)
     .where(sql`status <> 'failed'`),
 }));
 
