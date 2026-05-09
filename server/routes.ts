@@ -2040,6 +2040,13 @@ I will now provide the papers.`;
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
       if (!documentId || typeof documentId !== "string") return res.status(400).json({ error: "documentId is required." });
 
+      const modelConfig: ModelProviderConfig = {
+        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
+        provider: modelProvider || "openrouter",
+        modelName: modelName || "",
+        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
+      };
+
       // Per-paper-per-persona-per-model lock
       const reviewed = await storage.getReviewedPaperPersonasForJournal(effectiveJournalId);
       const resolvedModelForCheck = resolveModelName(modelConfig);
@@ -2050,13 +2057,6 @@ I will now provide the papers.`;
       const [defaultP1, defaultP2, defaultP3] = getPeerReviewChunkPrompts(effectivePersona);
       const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", effectivePersona);
       const includeEthics = !!includeEthicsCoauthor;
-
-      const modelConfig: ModelProviderConfig = {
-        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
-        provider: modelProvider || "openrouter",
-        modelName: modelName || "",
-        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
-      };
 
       const parsed = insertPeerReviewSchema.safeParse({
         projectId: projectId || effectiveJournalId,
