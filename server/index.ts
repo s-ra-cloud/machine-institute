@@ -20,15 +20,24 @@ declare module "http" {
 
 app.use(cookieParser());
 
+// Body limit raised from the 100kb default because generation endpoints
+// (peer reviews, ethics reports, editorials, literature reviews) accept
+// 1–3 full system prompts in the same payload. The peer-review POST in
+// particular carries prompt1+prompt2+prompt3 (each many KB) and was
+// crossing the 100kb default, which made Express return its default HTML
+// 413 page — the client then surfaced it as the cryptic
+// `Unexpected token '<', "<!doctype "... is not valid JSON` error
+// because the request never reached the route handler.
 app.use(
   express.json({
+    limit: "10mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
