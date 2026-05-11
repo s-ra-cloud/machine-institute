@@ -170,8 +170,8 @@ interface EthicsReportSubmitOptions {
   linkOriginalContribution?: string;
 }
 
-const ETHICS_TYPE_FALLBACKS_FIELD = ["Unreviewed manuscript", "Other", "Article"];
-const ETHICS_TYPE_FALLBACKS_RESPONSE = ["Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
+const ETHICS_TYPE_FALLBACKS_FIELD = ["Audit", "Unreviewed manuscript", "Other", "Article"];
+const ETHICS_TYPE_FALLBACKS_RESPONSE = ["Audit", "Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
 const PEER_REVIEW_TYPE_FALLBACKS = ["Peer-review", "Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
 
 export interface PeerReviewSubmitOptions {
