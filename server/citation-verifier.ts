@@ -967,7 +967,7 @@ export function formatUrlVerificationReport(verified: VerifiedUrl[]): string {
   return `**Link analysis:** ${verified.length} URL(s) detected. ${ok} reachable, ${broken} broken (host says gone / denied), ${botBlocked} bot-blocked (auditor was challenged — DO NOT flag), ${transient} transient (rate-limited / 5xx — INFO only), ${unknown} unverifiable. Every BROKEN entry below includes the body snippet that drove the verdict and whether the Wayback Machine was tried as a fallback. (URLs targeting internal/private networks are intentionally skipped for safety; treat skipped entries as auditor tool limitations, NOT ethics findings.)\n${lines.join("\n")}`;
 }
 
-export function formatVerificationReport(v: PaperVerification): string {
+export function formatVerificationReport(v: PaperVerification, bibliographyCount?: number): string {
   if (!v.hadFullText) {
     return `**Citation analysis:** [AUDITOR TOOL LIMITATION] The auditor's automated full-text fetcher could not retrieve this paper's body content from Future Science. Only the abstract is available. THIS IS AN INTERNAL LIMITATION OF THE AUDITING TOOL — IT IS NOT EVIDENCE OF MISCONDUCT BY THE PAPER, ITS AUTHORS, OR THE JOURNAL. Do NOT raise any FLAG (CRITICAL, MAJOR, or MINOR) under Section A (Citation Fraud) or Section D (Plagiarism) on the basis of this limitation. Write exactly: "No automated citation analysis available — auditor tool limitation; not an ethics finding." and move on. Other categories (B/C/E/F/G/H) may still be assessed from the abstract where evidence exists.`;
   }
@@ -993,5 +993,17 @@ export function formatVerificationReport(v: PaperVerification): string {
   const mismatchHeadline = mismatched > 0
     ? ` *** ${mismatched} citation(s) RESOLVE TO A DIFFERENT WORK than the bibliography claims — flag in Section A as mis-citation/possible fraud. ***`
     : "";
-  return `**Citation analysis:** Full text retrieved. ${v.citations.length} citation(s) detected. Verified ${verifiedFs} via Future Science, ${verifiedAx} via arXiv, ${verifiedOa} via OpenAlex; ${unverified} unverified; ${mismatched} title-mismatched.${mismatchHeadline}\n${lines.join("\n")}`;
+  // The "in bibliography" count must come from the parsed bibliography section
+  // (one entry per complete author + year + title + venue record), NOT from
+  // the count of citation patterns extracted across the full text. The latter
+  // includes in-text (Author, Year) regex matches and would over-count.
+  // Authors connected by "and" / "&" inside a single bibliography entry count
+  // as one entry. When no bibliographyCount is supplied (e.g. parser found no
+  // References heading), fall back to the extracted-pattern total but label
+  // it explicitly as "citation pattern(s) extracted" so it is not confused
+  // with a bibliography size.
+  const bibLine = typeof bibliographyCount === "number"
+    ? `${bibliographyCount} bibliography entry/entries detected (each one complete author-list + year + title + venue record; multi-author entries connected by "and" or "&" count as one entry); ${v.citations.length} citation pattern(s) extracted from the full text for verification`
+    : `${v.citations.length} citation pattern(s) extracted from the full text (no bibliography section heading detected — bibliography size unknown)`;
+  return `**Citation analysis:** Full text retrieved. ${bibLine}. Verified ${verifiedFs} via Future Science, ${verifiedAx} via arXiv, ${verifiedOa} via OpenAlex; ${unverified} unverified; ${mismatched} title-mismatched.${mismatchHeadline}\n${lines.join("\n")}`;
 }

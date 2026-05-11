@@ -1,0 +1,72 @@
+You are editing the Ethicist auditing agent. The semantic-gloss verification is now finding real issues, which is good. Two consistency bugs and one routing bug need fixing.
+
+## Bug 1: Abstract flag count contradicts body
+
+In a recent test run, the abstract stated "0 ethics concern(s) were identified: 0 critical, 0 major, and 0 minor" but the body contained one MINOR flag in Section G, that same flag was listed in Section J (Consolidated Flags), and the clearance statement was "CLEARED WITH CONDITIONS" (which is incompatible with zero concerns).
+
+The self-consistency pass that already runs before emission must additionally verify:
+
+1. The total flag count in the abstract matches the actual count of flags in the body sections (A through I) AND matches the count in Section J (Consolidated Flags). All three must agree.
+
+2. The severity breakdown in the abstract ("X critical, Y major, Z minor") matches the actual distribution.
+
+3. The clearance verdict in the abstract and in Section L must match the flag count:
+   - 0 flags → "CLEARED" only. "CLEARED WITH CONDITIONS" is not valid for zero-concern papers.
+   - 1+ MINOR flags, no MAJOR/CRITICAL → "CLEARED WITH CONDITIONS".
+   - 1+ MAJOR flags → "CLEARED WITH CONDITIONS" or "NOT CLEARED" depending on severity.
+   - 1+ CRITICAL flags → "NOT CLEARED".
+
+If any of these checks fail, the agent must reconcile (regenerate the abstract counts from the body) before emission, not after.
+
+## Bug 2: Citation-integrity findings routed to wrong section
+
+A title-mismatch finding (gloss attributing the wrong title to arXiv:2410.02185) was filed under Section G (Scope Misrepresentation). Title mismatches are citation-integrity findings and belong in Section A (Citation Fraud) regardless of which internal check produced the finding.
+
+Section G is specifically for cases where the paper's claims overgeneralize beyond its evidence base — testing on a narrow set of tasks/models and claiming broader applicability, scoping limitations not acknowledged in the discussion, etc. Citation-content checks belong in A.
+
+Routing rules:
+
+- Title mismatches between bibliography entries and the works they cite → Section A.
+- Misattributions where one arXiv ID is associated with another paper's content → Section A.
+- Glosses where the paper's description of a cited work doesn't match the cited work's actual content → Section A under a "claim-gloss mismatch" subcategory.
+- Section G should only flag cases where the paper's own claims about its own scope are misleading, not cases where the paper misrepresents external works.
+
+Additionally, Section A's reporting must be consistent with whatever it routes in. If a title mismatch is filed in A, the line "X title-mismatched" must reflect it. The current report has Section A saying "0 title-mismatched" while Section G describes a title mismatch; this contradiction must be impossible after the fix.
+
+## Bug 3: Bibliography citation count is over-counted
+
+Section A reported "12 citations detected in bibliography" for a paper with 10 bibliography entries. The parser appears to be counting multi-author entries with "and" connectors as multiple entries, or counting in-text citations toward the bibliography total.
+
+Fix the bibliography counter so it counts only entries in the References section, where each entry is a complete bibliographic record (author list + year + title + venue/source). Authors connected by "and" or "&" within a single entry count as one entry, not multiple.
+
+## Bug 4 (regression): Generic platitudes returning to Recommendations
+
+A recommendation reading "Consider consolidating in-text and bibliography formatting" appeared in the report. This is generic best-practice advice not tied to a specific flag in this paper. Earlier patches removed this pattern; it has regressed.
+
+Recommendations should be approximately 1:1 with flags. For each flag, generate one corresponding recommendation that addresses that specific flag. Generic recommendations not tied to a finding in this paper must be removed.
+
+## Constraints
+
+- Do not change the semantic-gloss verification logic — it's working correctly and just needs to route output to Section A instead of Section G.
+- Do not change the unverified-citations transparent-fallback behavior — it correctly noted formatting variations rather than promoting them to fraud.
+- Do not change the link-integrity behavior — correctly reporting "no external URLs detected" rather than fabricating a finding is the right behavior.
+
+## Test cases to add
+
+- Body contains one MINOR flag → abstract says "1 ethics concern, 0 critical, 0 major, 1 minor"; clearance is CLEARED WITH CONDITIONS. Contradicting counts trigger pre-emission reconciliation.
+- Title mismatch detected by gloss check → flag routed to Section A, counted in Section A's title-mismatched bucket, not in Section G.
+- Bibliography contains 10 entries (some multi-author with "and") → counter reports 10, not 12+.
+- A recommendation not tied to a specific flag → blocked from emission.
+- Section A says "0 title-mismatched" while another section describes a title mismatch → validation error, blocks emission until reconciled.
+
+## Deliverable
+
+A patched audit agent that, when re-run on the same format-invariant paper, produces:
+- Abstract reading "1 ethics concern(s) were identified: 0 critical, 0 major, and 1 minor."
+- The Chatterjee/Dumas title mismatch flagged in Section A as a title mismatch, with Section A's title-mismatched count incremented accordingly.
+- Section G reading "No concern identified" since the finding doesn't belong there.
+- Bibliography count of 10, not 12.
+- Recommendations limited to addressing the actual flag plus, at most, the unverified-citation reconciliation note.
+- Clearance: CLEARED WITH CONDITIONS, consistent with abstract.
+
+Show the diff and demonstrate the test cases pass on the patched version and fail on the current one.

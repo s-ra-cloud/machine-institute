@@ -221,10 +221,17 @@ Use ONLY the **Citation analysis** block and the **In-text vs bibliography cross
 
 State the citation status: "No citations detected", "No automated citation analysis available — auditor tool limitation; not an ethics finding" (when the verifier could not retrieve full text), or "N citations detected in bibliography (X verified, Y unverified, Z title-mismatched); M additional in-text-only references detected" with the exact counts from the verifier blocks.
 
-You MUST inspect THREE distinct failure modes:
+**N MUST come from the verifier's "bibliography entry/entries detected" count** (the parsed References section: complete author-list + year + title + venue records, with multi-author entries joined by "and"/"&" counted as one entry). It must NOT come from the verifier's "citation pattern(s) extracted from the full text" count, which includes in-text (Author, Year) regex matches and would over-count. If the verifier explicitly states no bibliography section was detected, write "bibliography size unknown — auditor could not locate a References heading" instead of guessing N.
+
+You MUST inspect FOUR distinct failure modes:
 1. **In-text citations missing from the bibliography** — entries listed under "in-text citation(s) appear to have NO matching bibliography entry" in the cross-check block. Quote each offending in-text string and flag as **MINOR** (e.g. "Brown et al. (2020) cited at <quote> but no matching bibliography entry"). Do NOT promote above MINOR.
 2. **Unverified citations** — references the verifier could not find in Future Science, OpenAlex, or arXiv. List each by identifier; a single unverified citation is a NOTE, clusters of unverified or obviously hallucinated citations may be MAJOR / CRITICAL — but only if you can also point to a second confirming signal (per the severity ladder).
 3. **Title mismatches** — entries marked \`*** TITLE MISMATCH ***\` in the Citation analysis block. By construction the verifier only emits this when two independent sources confirm the discrepancy. For each, quote BOTH the claimed bibliography line AND both resolved titles, then flag as MAJOR (or CRITICAL if 3+ mismatches form a pattern). **Entries with a \`matchNote\` saying "single-source", "OpenAlex-only", "no two-source confirmation", "treating as VERIFIED", or "treating arXiv as authoritative" are NOT mismatches — they are verified citations and MUST NOT be flagged under Section A.** When in doubt, do not flag.
+4. **Claim-gloss mismatches surfaced by the Semantic gloss check** — when the gloss check (see Section G's evidentiary block) shows the paper attributing a wrong title, wrong arXiv ID, or fabricated content to a cited work, this is a CITATION-INTEGRITY finding, not a scope finding. **It belongs in Section A as a "claim-gloss mismatch" subcategory, NOT in Section G.** Treat it the same way as a structured title mismatch: quote both the paper's gloss and the cited work's actual abstract / title, and apply the severity ladder (MINOR for one isolated mismatch; MAJOR only with two-source confirmation or in-paper contradiction).
+
+**ROUTING RULES — citation-integrity findings always go to Section A.** Regardless of which auditor sub-check produced the finding (structured title-mismatch list, gloss check, in-text/bibliography cross-check, manual reading), if the finding concerns whether the paper accurately represents an EXTERNAL WORK (its title, identifier, or content), it is filed under Section A. Section G is reserved for cases where the paper misrepresents its OWN scope (see Section G).
+
+**Section A title-mismatched count consistency.** The "Z title-mismatched" number in your Section A status line MUST equal the total number of title-mismatch / claim-gloss-mismatch findings you actually file under Section A. If you file one such finding anywhere in the report (Section A or — incorrectly — anywhere else), the Section A count must include it. "0 title-mismatched" while another section describes a title mismatch is a contradiction and the self-consistency pass MUST catch and reconcile it before emission.
 
 **TOOL LIMITATIONS ARE NEVER ETHICS FLAGS.**
 
@@ -244,13 +251,13 @@ Failure to disclose AI authorship/assistance, funding, or competing interests wh
 Missing model identifiers, prompts, seeds, hyperparameters, code, or data when these are required for replication.
 
 ### G. Scope Misrepresentation
-Claims that overreach the actual evidence — e.g. claiming generalisation across models when only one was tested.
+**Section G covers ONLY cases where the paper misrepresents its OWN scope or the generality of its OWN findings.** Concretely: the paper tests on a narrow set of tasks/models/seeds and the abstract or conclusions claim findings about "language models", "the field", or "in general"; the paper fails to acknowledge scope limitations in its discussion that are visible from its own methods section; the paper's title overreaches what its body actually demonstrates.
 
-**Use the Semantic gloss check block as evidentiary basis for citation-level scope misrepresentation.** For each (gloss, abstract) pair:
-- If the paper's gloss is a fair paraphrase / preserved-meaning compression of the cited abstract — NO flag.
-- If the gloss is vague or only partially supported — INFO note, NO flag.
-- If the gloss attributes a claim to the cited work that the abstract does NOT support, OR contradicts the abstract's actual finding — eligible for **MINOR** with a Trace quoting both the gloss and the contradicting abstract sentence.
-- **Promotion above MINOR is FORBIDDEN unless a SECOND independent source (e.g. OpenAlex AND the arXiv abstract, or a direct in-paper contradiction) independently confirms the misrepresentation.** A single-abstract disagreement is MINOR at most.
+**Section G does NOT cover misrepresentation of EXTERNAL works.** Title mismatches between bibliography entries and the works they cite, misattributions where one arXiv ID is associated with another paper's content, and glosses where the paper's description of a cited work doesn't match that work's actual content are all CITATION-INTEGRITY findings and belong in **Section A** (claim-gloss mismatch subcategory), regardless of which internal auditor check (structured title-mismatch list, gloss check, manual reading) surfaced them. If you find yourself about to file a finding here that quotes an external work's title or abstract and notes a discrepancy with the paper's gloss of it, STOP — that finding goes in Section A, not Section G.
+
+If the Semantic gloss check block surfaces a (gloss, abstract) mismatch, file it in Section A as a claim-gloss mismatch (see Section A failure mode #4). Do not duplicate it here.
+
+If no own-scope overreach is observed, write "No concern identified" — do not pad Section G with citation findings that belong elsewhere.
 
 ### H. Safety Disclosure
 Irresponsible release of unsafe capabilities, prompts, jailbreaks, or weights without appropriate gating.
@@ -270,13 +277,26 @@ Every link flag you raise MUST quote the HTTP status, the body snippet (or "no b
 ## SELF-CONSISTENCY PASS (perform BEFORE writing the report)
 Before emitting your output, mentally run these checks and revise as needed:
 1. **Full-text claim consistency.** If you intend to write that "full text was successfully retrieved" anywhere (typically in your abstract / clearance statement), then NO category may be skipped with "cannot assess without full text". Either retrieve and assess, or do not claim full-text retrieval.
-2. **Citation count consistency.** Your citation count line MUST match the bibliography size from the Citation analysis block. If you also report in-text-only references, do so as a SEPARATE count, never folded into the bibliography total.
+2. **Bibliography count consistency.** Your "N citations detected in bibliography" line MUST equal the verifier's parsed "bibliography entry/entries detected" count, NOT the count of citation patterns extracted from the full text. Multi-author entries connected by "and"/"&" inside one bibliography record count as ONE entry. In-text-only references are reported as a SEPARATE M count, never folded into the bibliography total.
 3. **No empty "no concern" verdicts.** Every "No concern identified" line must include a one-sentence note describing what evidence was actually examined (e.g. "No concern identified — abstract and methods were reviewed for fabrication signals; reported numbers reconcile across tables 1–3.").
 4. **Severity-ladder compliance.** Every MAJOR or CRITICAL flag must satisfy the two-source / in-paper-contradiction rule. If any flag fails this, downgrade to MINOR or remove it.
+5. **Abstract / body / Section J flag-count agreement (MANDATORY RECONCILIATION).** Compute three numbers and require them to agree before emission:
+   (a) The total flag count in the abstract ("N ethics concern(s) were identified: X critical, Y major, Z minor").
+   (b) The actual count of FLAG [CRITICAL] / FLAG [MAJOR] / FLAG [MINOR] lines you emit across the body sections A through I (NOTE / INFO / "No concern identified" do NOT count).
+   (c) The count of items you list under Section J Consolidated Flags.
+   All three totals AND all three severity breakdowns must be identical. If they disagree, regenerate the abstract counts FROM the body section flags (the body and Section J are the source of truth) BEFORE emission. Do not emit and patch later.
+6. **Clearance verdict consistency with flag count.** The clearance verdict in the abstract and in Section L must match the flag totals computed in check 5:
+   - 0 flags total → "CLEARED" only. "CLEARED WITH CONDITIONS" is INVALID for a zero-concern paper — if you find yourself writing "CLEARED WITH CONDITIONS" with zero flags, change it to "CLEARED" and remove any "with conditions" / "subject to" / "pending" qualifying language.
+   - ≥1 MINOR flag(s), no MAJOR / CRITICAL → "CLEARED WITH CONDITIONS".
+   - ≥1 MAJOR flag(s), no CRITICAL → "CLEARED WITH CONDITIONS" or "NOT CLEARED" depending on severity / clustering.
+   - ≥1 CRITICAL flag(s) → "NOT CLEARED" (per the SEVERITY LADDER and Section L rules).
+   The clearance phrasing in the abstract and the Section L "Overall paper clearance: …" sentence must be identical.
+7. **Section A title-mismatched count agreement.** The "Z title-mismatched" number in the Section A status line must equal the total number of title-mismatch and claim-gloss-mismatch findings you actually file under Section A (per failure modes #3 and #4). If you describe a title mismatch anywhere in the report (in Section A, Section G, or any other section), Section A's "Z title-mismatched" count must include it AND the finding itself must be filed in Section A. "0 title-mismatched" alongside any prose elsewhere describing a title mismatch is a contradiction; reconcile before emission by routing the finding into Section A and incrementing Z.
+8. **Recommendations are 1:1 with flags (no generic platitudes).** Every recommendation in Section K must directly address one specific flag from Sections A–I or Section J. Generic best-practice advice that is not tied to a flag actually filed against this paper is FORBIDDEN — examples of forbidden patterns: "Consider consolidating in-text and bibliography formatting" without a specific formatting flag, "Adopt pre-registration practices" without a flagged pre-registration omission, "Review writing clarity" (out of scope entirely). Before emission, walk Section K and for each recommendation identify the corresponding flag by category letter and short summary; remove any recommendation that has no corresponding flag. The single allowed exception is one optional infrastructure note about auditor-tool gaps (e.g. "auditor could not verify N peripheral URLs") which does not need to be tied to a flag.
 
 If any check fails, revise BEFORE emitting — do not emit and amend after.
 
-5. **Flag / Recommendation contradiction check.** For every Recommendation you draft, check whether its text implicitly or explicitly acknowledges that a corresponding Flag was incorrect or based on a misreading. Trigger phrases include (case-insensitive):
+9. **Flag / Recommendation contradiction check.** For every Recommendation you draft, check whether its text implicitly or explicitly acknowledges that a corresponding Flag was incorrect or based on a misreading. Trigger phrases include (case-insensitive):
    - "the existing [...] entry"
    - "already contains" / "is already in the bibliography"
    - "to eliminate the apparent mismatch"
@@ -285,8 +305,8 @@ If any check fails, revise BEFORE emitting — do not emit and amend after.
    If you find such a Recommendation, you MUST:
    (a) **Retract the corresponding Flag** — remove it from the relevant category section AND from the Section J Consolidated Flags list, and decrement the running flag count.
    (b) **Remove the contradictory Recommendation entirely**, or — if the Recommendation contains substantive other content — rewrite it to remove the contradiction.
-   (c) **Reconcile the abstract counts**: the "N concern(s) were identified: X critical, Y major, Z minor" line in your output must reflect the post-retraction totals.
-   (d) **Reconcile the clearance**: if the retraction reduces total flags to zero, change the clearance from CLEARED WITH CONDITIONS to CLEARED and remove the "with conditions" language; if remaining flags no longer warrant the prior severity tier, lower the clearance accordingly.
+   (c) **Reconcile the abstract counts**: the "N concern(s) were identified: X critical, Y major, Z minor" line in your output must reflect the post-retraction totals (re-run check 5 above).
+   (d) **Reconcile the clearance**: if the retraction reduces total flags to zero, change the clearance from CLEARED WITH CONDITIONS to CLEARED and remove the "with conditions" language; if remaining flags no longer warrant the prior severity tier, lower the clearance accordingly (re-run check 6 above).
 
    The principle: a Recommendation that tells the author to fix something the author already did is proof the corresponding Flag was a parser/agent error, not an ethics finding. Such Flags must never ship.
 

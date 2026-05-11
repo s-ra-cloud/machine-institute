@@ -405,6 +405,7 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
   let urlReport = "**Link analysis:** Skipped (no full text available).";
   let bibReport = "**In-text vs bibliography cross-check:** Skipped (no full text available).";
   let glossReport = "**Semantic gloss check:** Skipped (no full text available).";
+  let bibAnalysisRef: ReturnType<typeof analyzeInTextVsBibliography> | undefined;
   if (hadFullText) {
     await emitEvent("ethics-citations", `Extracting and verifying citations against Future Science, OpenAlex, and arXiv (two-source agreement enforced for arXiv IDs)...`);
     const citations = extractCitations(fullText!);
@@ -419,9 +420,9 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
     await emitEvent("ethics-gloss", `Semantic gloss check complete: ${glossPairs.length} pair(s) built from verified arXiv/OpenAlex citations.`);
 
     await emitEvent("ethics-bib", `Cross-checking in-text (Author, Year) references against bibliography entries...`);
-    const bibAnalysis = analyzeInTextVsBibliography(fullText!);
-    bibReport = formatBibliographyAnalysis(bibAnalysis);
-    await emitEvent("ethics-bib", `Bibliography cross-check complete: ${bibAnalysis.inTextCount} in-text, ${bibAnalysis.bibliographyCount} bibliography, ${bibAnalysis.inTextOnly.length} in-text-only.`);
+    bibAnalysisRef = analyzeInTextVsBibliography(fullText!);
+    bibReport = formatBibliographyAnalysis(bibAnalysisRef);
+    await emitEvent("ethics-bib", `Bibliography cross-check complete: ${bibAnalysisRef.inTextCount} in-text, ${bibAnalysisRef.bibliographyCount} bibliography, ${bibAnalysisRef.inTextOnly.length} in-text-only.`);
 
     await emitEvent("ethics-links", `Extracting and checking all URLs in the paper (with body inspection on 403/401 + Wayback fallback)...`);
     const urls = extractUrls(fullText!);
@@ -435,7 +436,14 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
     await emitEvent("ethics-citations", `Full text could not be retrieved — proceeding with abstract-only audit (Sections A and D will be marked as auditor tool limitations).`);
   }
 
-  const citationBlock = formatVerificationReport(verification);
+  // Pass the parsed bibliography count so the verification block reports the
+  // bibliography size from the parsed References section rather than from the
+  // count of citation patterns extracted across the full text (which lumps
+  // in-text (Author, Year) matches with bibliography entries).
+  const parsedBibCount = bibAnalysisRef && bibAnalysisRef.bibliographyDetected
+    ? bibAnalysisRef.bibliographyCount
+    : undefined;
+  const citationBlock = formatVerificationReport(verification, parsedBibCount);
   const paperBlock = `# TARGET PAPER\n\n**Title:** ${title}\n**Authors:** ${authors}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${url}\n\n## Abstract\n${(abstract || "(no abstract available)").slice(0, 6000)}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — auditor could not retrieve)"}\n${hadFullText ? (fullText!.slice(0, 30000)) : "(The auditor's automated full-text fetcher returned no usable body content. This is a tool limitation, not evidence of misconduct.)"}\n\n---\n\n## VERIFICATION REPORTS\n\n${citationBlock}\n\n${bibReport}\n\n${glossReport}\n\n${urlReport}`;
 
   await emitEvent("ethics-llm", `Sending audit prompt to ${modelConfig.modelName || modelConfig.provider}...`);
