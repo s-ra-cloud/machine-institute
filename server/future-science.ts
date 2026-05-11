@@ -407,11 +407,12 @@ export async function submitEthicsReportToFutureScience(
   let lastErr: string = "";
   for (const candidateType of typeFallbacks) {
     try {
-      // `linkOriginalContribution` is only meaningful (and accepted) for
-      // "Response to a contribution". When falling back to a non-response type,
-      // strip the field so FS doesn't reject the payload for unknown metadata.
+      // `linkOriginalContribution` is meaningful for both "Audit" (new FS
+      // scheme for single-paper ethics audits) and "Response to a
+      // contribution". For other fallback types FS doesn't accept the field,
+      // so strip it to avoid payload rejection.
       const metadata: Record<string, unknown> = { ...baseMetadata, type: candidateType };
-      if (candidateType !== "Response to a contribution") {
+      if (candidateType !== "Audit" && candidateType !== "Response to a contribution") {
         delete metadata.linkOriginalContribution;
       }
       const formData = new FormData();
