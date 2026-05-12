@@ -148,8 +148,8 @@ const labWorkflowCards = [
     title: "Generate Editorial",
     description: "Synthesize research across the institute's publications into an op-ed, informed by arXiv trends.",
     icon: PenTool,
-    status: "Locked",
-    locked: true,
+    status: "Available",
+    locked: false,
   },
   {
     id: "peer-review",
@@ -798,6 +798,10 @@ export default function GenerationDashboard() {
                                   setPeerSelectedDocId("");
                                   setPeerSelectedTitle("");
                                   setPeerPickerQuery("");
+                                } else if (workflow.id === "editorial") {
+                                  setActiveType("editorial");
+                                  setPromptManuallyEdited(false);
+                                  setPrompt("");
                                 } else {
                                   setActiveType("literature-review");
                                   setPromptManuallyEdited(false);

@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, insertPeerReviewSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport, type PeerReview, type InsertEthicsReport } from "@shared/schema";
 import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPORT_CHUNK_3_PROMPT, H_SINGLE_PAPER_PROMPT, applyJournalName } from "./prompts/h-solo";
 import { runEthicsReport, type EthicsReviewOutput } from "./ethics-review";
+import { fetchFsPaperContent } from "./citation-verifier";
 import { runPeerReview } from "./peer-review";
 import { getPeerReviewChunkPrompts, REVIEW_CHUNK_1_PROMPT, REVIEW_CHUNK_2_PROMPT, REVIEW_CHUNK_3_PROMPT, AR_REVIEW_CHUNK_1_PROMPT, AR_REVIEW_CHUNK_2_PROMPT, AR_REVIEW_CHUNK_3_PROMPT, IR_REVIEW_CHUNK_1_PROMPT, IR_REVIEW_CHUNK_2_PROMPT, IR_REVIEW_CHUNK_3_PROMPT, type PeerReviewPersona } from "./prompts/peer-review";
 import { fromZodError } from "zod-validation-error";
@@ -2934,6 +2935,44 @@ List every cited paper in Chicago author-date bibliography format:
     }
   });
 
+  // Fetch the full HTML body of an arXiv paper (the ar5iv/arXiv HTML version
+  // is available for most papers from 2022 onwards). Strips tags down to plain
+  // text and truncates to a safe length so the editorial prompt stays bounded.
+  // Returns null on any network/parse error so the caller can fall back to the
+  // arXiv API <summary> (i.e. the abstract) without failing the whole run.
+  async function fetchArxivFullText(arxivId: string, maxChars = 6000): Promise<string | null> {
+    const tryUrls = [
+      `https://arxiv.org/html/${encodeURIComponent(arxivId)}`,
+      `https://arxiv.org/html/${encodeURIComponent(arxivId)}v1`,
+    ];
+    for (const url of tryUrls) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        const resp = await fetch(url, { redirect: "follow", signal: controller.signal });
+        if (!resp.ok) { clearTimeout(timer); continue; }
+        const html = await resp.text();
+        const text = html
+          .replace(/<script[\s\S]*?<\/script>/gi, " ")
+          .replace(/<style[\s\S]*?<\/style>/gi, " ")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&nbsp;/g, " ")
+          .replace(/&amp;/g, "&")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/\s+/g, " ")
+          .trim();
+        clearTimeout(timer);
+        if (text.length < 400) continue;
+        return text.slice(0, maxChars);
+      } catch (err) {
+        clearTimeout(timer);
+        // try next URL
+      }
+    }
+    return null;
+  }
+
   async function searchArxiv(query: string): Promise<Array<{ title: string; summary: string; authors: string; published: string; arxivId: string }>> {
     try {
       const encodedQuery = encodeURIComponent(query);
@@ -3076,6 +3115,100 @@ List every cited paper in Chicago author-date bibliography format:
           ).join("\n\n")
         : "No recent arXiv papers found for the current research topics.";
 
+      // Relevance-rank both Future Science papers and arXiv hits against the
+      // editorial topic, then fetch full text for the top-K of each so the
+      // editorialist can ground specific claims in actual paper bodies rather
+      // than abstracts alone.
+      const TOP_K_FS = 5;
+      const TOP_K_ARXIV = 5;
+      const FS_EXCERPT_CHARS = 5000;
+      const ARXIV_EXCERPT_CHARS = 5000;
+
+      const scoreAgainstTopic = (text: string, terms: string[]): number => {
+        const lower = (text || "").toLowerCase();
+        let s = 0;
+        for (const t of terms) {
+          if (!t) continue;
+          if (lower.includes(t)) s += 1;
+        }
+        return s;
+      };
+      const topicTerms = ((topic || "") + " " + (userPrompt || ""))
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(w => w.length > 4);
+
+      const fsRanked = fsAbstracts
+        .map(a => ({ a, score: scoreAgainstTopic(a.title + " " + a.abstract + " " + a.keywords.join(" "), topicTerms) }))
+        .sort((x, y) => y.score - x.score)
+        .slice(0, TOP_K_FS)
+        .map(x => x.a);
+
+      const arxivRanked = arxivResults
+        .map(r => ({ r, score: scoreAgainstTopic(r.title + " " + r.summary, topicTerms) }))
+        .sort((x, y) => y.score - x.score)
+        .slice(0, TOP_K_ARXIV)
+        .map(x => x.r);
+
+      await emitEDEvent(edAgentId, "relevance-ranking", `Selected top ${fsRanked.length} Future Science paper(s) and top ${arxivRanked.length} arXiv paper(s) by topic relevance for full-text reading.`);
+
+      const edInitiativeSlug = INITIATIVE_SLUGS[edJournalId] || "mirror";
+
+      type ReadResult = {
+        source: "FS" | "arXiv";
+        title: string;
+        authors: string;
+        date: string;
+        identifier: string;
+        body: string;
+        readInFull: boolean;
+      };
+
+      const fsReads: ReadResult[] = await Promise.all(
+        fsRanked.map(async (a) => {
+          const full = await fetchFsPaperContent(a.documentId, edInitiativeSlug).catch(() => null);
+          const hadFull = !!(full && full.length > 400);
+          return {
+            source: "FS",
+            title: a.title,
+            authors: a.authors,
+            date: a.date,
+            identifier: a.documentId,
+            body: hadFull ? full!.slice(0, FS_EXCERPT_CHARS) : (a.abstract || ""),
+            readInFull: hadFull,
+          };
+        }),
+      );
+      const fsFullCount = fsReads.filter(r => r.readInFull).length;
+      await emitEDEvent(edAgentId, "fs-fulltext", `Read ${fsFullCount}/${fsReads.length} Future Science paper(s) in full (rest fell back to abstract).`);
+
+      const arxivReads: ReadResult[] = await Promise.all(
+        arxivRanked.map(async (r) => {
+          const full = await fetchArxivFullText(r.arxivId, ARXIV_EXCERPT_CHARS).catch(() => null);
+          const hadFull = !!(full && full.length > 400);
+          return {
+            source: "arXiv",
+            title: r.title,
+            authors: r.authors,
+            date: r.published,
+            identifier: r.arxivId,
+            body: hadFull ? full! : (r.summary || ""),
+            readInFull: hadFull,
+          };
+        }),
+      );
+      const arxivFullCount = arxivReads.filter(r => r.readInFull).length;
+      await emitEDEvent(edAgentId, "arxiv-fulltext", `Read ${arxivFullCount}/${arxivReads.length} arXiv paper(s) in full (rest fell back to abstract).`);
+
+      const allReads = [...fsReads, ...arxivReads];
+      const fullTextExcerpts = allReads.length > 0
+        ? allReads.map((r, i) => {
+            const idLine = r.source === "arXiv" ? `arXiv: ${r.identifier}` : `Future Science doc: ${r.identifier}`;
+            const note = r.readInFull ? "" : " — NOTE: full text unavailable; excerpt is the abstract only.";
+            return `Full-text Excerpt ${i + 1} [${r.source}]${note}\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.date}\n${idLine}\nBody:\n${r.body}`;
+          }).join("\n\n---\n\n")
+        : "";
+
       const config = modelConfig || { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
       if (config.providerMode === "byoc" && !config.apiKey) {
         const editorialForKey = await storage.getEditorialById(editorialId);
@@ -3103,6 +3236,7 @@ Hot arXiv topics (recent publications in related fields):
 
 ${arxivTexts}
 
+${fullTextExcerpts ? `\nFull-text excerpts (use these to ground specific claims and quotations — these are the actual paper bodies, not just abstracts):\n\n${fullTextExcerpts}\n` : ""}
 ${previousEditorials.length > 0 ? `IMPORTANT — PREVIOUSLY PUBLISHED EDITORIALS (DO NOT REPEAT THESE TOPICS):
 The following editorials have already been published by this journal. You MUST choose a DIFFERENT angle, topic, or thesis. Do not write about the same subject or reach the same conclusions as any of these:
 
@@ -3129,6 +3263,13 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
         reviews: completedReviews.map(r => ({ id: r.id, researchQuestion: r.researchQuestion, agentId: r.agentId })),
         arxivResults: arxivResults.map(r => ({ title: r.title, authors: r.authors, published: r.published, arxivId: r.arxivId })),
         previousEditorials: previousEditorials.map(e => ({ title: e.title })),
+        fullTextReads: allReads.map(r => ({
+          source: r.source,
+          title: r.title,
+          identifier: r.identifier,
+          readInFull: r.readInFull,
+          excerptChars: r.body.length,
+        })),
       });
 
       await storage.updateEditorial(editorialId, { promptTrace, sourceTrace });
