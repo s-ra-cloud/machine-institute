@@ -44,12 +44,16 @@ interface Props {
 //   - Editorial:        ~6k input + ~3k output tokens (1 LLM call, op-ed length)
 //   - Literature Rev.:  ~15k input + ~6k output tokens (corpus + synthesis)
 //   - Ethics Report:    ~15k input + ~5k output tokens (full paper + verifier blocks)
+//   - Peer Review:      ~15k input + ~5k output tokens (3 chunks, similar profile)
 // Combined with OpenRouter pass-through pricing per 1M tokens
-// (DeepSeek Chat $0.27/$1.10, Claude Sonnet 4 $3/$15, GPT-4o $2.50/$10).
+// (DeepSeek Chat $0.27/$1.10, Claude Sonnet 4 $3/$15, GPT-4o $2.50/$10,
+//  GPT-5 $1.25/$10, Claude Opus 4 $15/$75).
 const MODEL_AGENT_CREDITS: Record<string, Partial<Record<"editorial" | "literature-review" | "ethics-report" | "peer-review", number>>> = {
   "deepseek/deepseek-chat":      { editorial: 1,  "literature-review": 1,  "ethics-report": 1,  "peer-review": 1  },
   "anthropic/claude-sonnet-4":   { editorial: 6,  "literature-review": 14, "ethics-report": 12, "peer-review": 12 },
   "openai/gpt-4o":               { editorial: 5,  "literature-review": 10, "ethics-report": 9,  "peer-review": 9  },
+  "openai/gpt-5":                { editorial: 4,  "literature-review": 8,  "ethics-report": 7,  "peer-review": 7  },
+  "anthropic/claude-opus-4":     { editorial: 32, "literature-review": 68, "ethics-report": 60, "peer-review": 60 },
 };
 
 function formatCostBadge(modelKey: string, activeType?: Props["activeType"], multiplier: number = 1): string | null {
@@ -212,10 +216,6 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasP
                       return badge ? (
                         <span className="ml-2 text-[10px] font-mono text-muted-foreground/60" data-testid={`cost-${m.model}`}>
                           {badge}
-                        </span>
-                      ) : typeof m.credits === "number" ? (
-                        <span className="ml-2 text-[10px] font-mono text-amber-400/70" data-testid={`model-credits-${m.model}`}>
-                          {m.credits}c
                         </span>
                       ) : null;
                     })()}
