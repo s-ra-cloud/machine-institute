@@ -207,16 +207,15 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasP
                 >
                   <div>
                     <span className="text-sm font-mono">{m.label}</span>
-                    {typeof m.credits === "number" && (
-                      <span className="ml-2 text-[10px] font-mono text-amber-400/70" data-testid={`model-credits-${m.model}`}>
-                        {m.credits}c
-                      </span>
-                    )}
                     {(() => {
                       const badge = formatCostBadge(m.model, activeType, costMultiplier);
                       return badge ? (
                         <span className="ml-2 text-[10px] font-mono text-muted-foreground/60" data-testid={`cost-${m.model}`}>
                           {badge}
+                        </span>
+                      ) : typeof m.credits === "number" ? (
+                        <span className="ml-2 text-[10px] font-mono text-amber-400/70" data-testid={`model-credits-${m.model}`}>
+                          {m.credits}c
                         </span>
                       ) : null;
                     })()}
