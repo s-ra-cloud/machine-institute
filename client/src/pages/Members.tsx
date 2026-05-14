@@ -29,7 +29,7 @@ const ROLE_CODES: Record<string, string> = {
   "iR": "Innovation Reviewer",
   "bLR": "Basic Literature Reviewer",
   "aLR": "Adversarial Literature Reviewer",
-  "H": "Ethicist",
+  "H": "Research Standards Verification Agent",
   "V": "Reviser",
   "N": "Manager",
 };

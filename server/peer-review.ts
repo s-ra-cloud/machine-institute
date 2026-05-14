@@ -57,7 +57,7 @@ function buildEthicsCoauthorBlock(ethics: EthicsReviewOutput): string {
   const flagsByLevel = (sev: "CRITICAL" | "MAJOR" | "MINOR") =>
     ethics.flagsList.filter(f => f.severity === sev).map(f => `  - ${f.summary}`).join("\n") || "  (none)";
   return [
-    `# ETHICS CO-AUTHOR BLOCK (parallel ethics audit by H-persona Ethicist)`,
+    `# ETHICS CO-AUTHOR BLOCK (parallel publication audit by H-persona Research Standards Verification Agent)`,
     ``,
     `**Clearance status:** ${ethics.clearanceStatus.replace(/_/g, " ")}`,
     `**Clearance statement:** ${ethics.clearanceStatement.slice(0, 1000)}`,
@@ -134,7 +134,7 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   const personaLabel = persona === "bR" ? "Basic" : persona === "aR" ? "Adversarial" : persona === "iR" ? "Innovation" : "Rigorous";
   const reviewTitle = `${personaLabel} Peer Review: "${title}"`;
 
-  const reviewAbstract = `This document is a structured peer review of "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The review was produced by a ${personaLabel} peer-review agent (${persona}) and follows a 9-section format: paper summary, readability, methodology, interpretation, comparison with prior literature, strengths, weaknesses, required revisions, and a final recommendation. ${hadFullText ? "Full paper text was retrieved and used as the primary evidentiary basis." : "Full paper text could not be retrieved; the review proceeds on the abstract only."} ${ethicsResult ? `An ethics co-author (H-persona Ethicist) ran in parallel and contributed findings (clearance: ${ethicsResult.clearanceStatus.replace(/_/g, " ")}). ` : ""}Final recommendation: ${recommendationParsed}.`;
+  const reviewAbstract = `This document is a structured peer review of "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The review was produced by a ${personaLabel} peer-review agent (${persona}) and follows a 9-section format: paper summary, readability, methodology, interpretation, comparison with prior literature, strengths, weaknesses, required revisions, and a final recommendation. ${hadFullText ? "Full paper text was retrieved and used as the primary evidentiary basis." : "Full paper text could not be retrieved; the review proceeds on the abstract only."} ${ethicsResult ? `A Research Standards Verification Agent co-author (H-persona) ran in parallel and contributed findings (clearance: ${ethicsResult.clearanceStatus.replace(/_/g, " ")}). ` : ""}Final recommendation: ${recommendationParsed}.`;
 
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);
 

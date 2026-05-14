@@ -137,7 +137,7 @@ const labWorkflowCards = [
   },
   {
     id: "ethics-citations",
-    title: "Ethics and citation analysis",
+    title: "Audit a publication",
     description: "Audit literature for citation integrity, unsupported claims, and fabricated references.",
     icon: Info,
     status: "Available",
@@ -154,7 +154,7 @@ const labWorkflowCards = [
   {
     id: "peer-review",
     title: "Peer review a publication",
-    description: "Run structured peer review on an existing Machine Institute publication. Optionally co-author with the H ethics agent.",
+    description: "Run structured peer review on an existing Machine Institute publication. Optionally co-author with the H Research Standards Verification Agent.",
     icon: BookOpen,
     status: "Available",
     locked: false,
@@ -286,7 +286,7 @@ export default function GenerationDashboard() {
     O: "Editorialist agent that synthesizes publications and trends into op-ed style editorials for the Machine Institute.",
     bLR: "Basic Literature Reviewer agent that produces structured literature reviews from project papers and Future Science abstracts.",
     aLR: "Adversarial Literature Reviewer agent that critically interrogates the literature and surfaces counter-evidence and weaknesses.",
-    H: "Ethicist agent performing a single-paper deep ethics audit across eight categories, with full citation and URL verification.",
+    H: "Research Standards Verification Agent performing a single-paper deep publication audit across eight categories, with full citation and URL verification.",
     bR: "Basic Peer Reviewer agent producing a structured 9-section peer review of a single submitted paper.",
     iR: "Innovation-focused Peer Reviewer agent emphasising originality, novelty, and positioning of a single submitted paper.",
     aR: "Adversarial Peer Reviewer agent stress-testing every claim, assumption and methodology of a single submitted paper.",
@@ -851,7 +851,7 @@ export default function GenerationDashboard() {
                     {activeType === "editorial" ? (
                       <><PenTool className="w-5 h-5 text-primary" /> Generate Editorial</>
                     ) : activeType === "ethics-report" ? (
-                      <><Info className="w-5 h-5 text-primary" /> Generate Field Ethics Report</>
+                      <><Info className="w-5 h-5 text-primary" /> Audit a publication</>
                     ) : activeType === "peer-review" ? (
                       <><BookOpen className="w-5 h-5 text-primary" /> Generate Peer Review</>
                     ) : (
@@ -862,9 +862,9 @@ export default function GenerationDashboard() {
                     {activeType === "editorial"
                       ? "Configure and generate an editorial synthesizing recent research."
                       : activeType === "ethics-report"
-                      ? "Run a structured 3-part ethics audit (paper-by-paper → systemic → consolidated flags) of a journal's recent publications."
+                      ? "Run a structured 3-part publication audit (paper-by-paper → systemic → consolidated flags) of a journal's recent publications."
                       : activeType === "peer-review"
-                      ? "Run a structured 3-part peer review of a single submitted paper. Each persona (basic / innovation / adversarial) can review a paper once. Optionally add the H ethics agent as a parallel co-author."
+                      ? "Run a structured 3-part peer review of a single submitted paper. Each persona (basic / innovation / adversarial) can review a paper once. Optionally add the H Research Standards Verification Agent as a parallel co-author."
                       : "Configure and generate a literature review on a specific research question."}
                   </p>
                 </div>
@@ -933,7 +933,7 @@ export default function GenerationDashboard() {
                     value={modelConfig}
                     onChange={setModelConfig}
                     rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : activeType === "peer-review" ? peerStatus : reviewStatus}
-                    limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "ethics report generations" : activeType === "peer-review" ? "peer review generations" : "review generations"}
+                    limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "publication audit generations" : activeType === "peer-review" ? "peer review generations" : "review generations"}
                     hasPlatformAccess={hasPlatformAccess}
                     activeType={activeType as "editorial" | "literature-review" | "ethics-report" | "peer-review"}
                     costMultiplier={activeType === "peer-review" && peerIncludeEthics ? 2 : 1}
@@ -1020,7 +1020,7 @@ export default function GenerationDashboard() {
                         })}
                       </div>
                       <p className="text-[10px] font-mono text-muted-foreground/50">
-                        Single-paper deep audit: pick ONE paper. Each paper can be ethics-reviewed only once globally — already-reviewed papers are locked. The audit verifies every citation against Future Science / OpenAlex / arXiv and checks every URL for reachability.
+                        Single-paper deep audit: pick ONE paper. Each paper can be audited only once globally — already-audited papers are locked. The audit verifies every citation against Future Science / OpenAlex / arXiv and checks every URL for reachability.
                       </p>
                       {selectedPaperDocId && (
                         <div className="border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-mono" data-testid="text-selected-paper">
@@ -1111,7 +1111,7 @@ export default function GenerationDashboard() {
                             className="accent-primary"
                             data-testid="checkbox-include-ethics-coauthor"
                           />
-                          <span>Include H ethics agent as co-author (runs in parallel; adds ethics findings to final synthesis and lists H as second author on Future Science)</span>
+                          <span>Include H Research Standards Verification Agent as co-author (runs in parallel; adds audit findings to final synthesis and lists H as second author on Future Science)</span>
                         </label>
                       </div>
 
@@ -1278,7 +1278,7 @@ export default function GenerationDashboard() {
                     {ethicsPromptsExpanded && (
                       <div className="space-y-6">
                         {[
-                          { idx: 1, label: "Single-Paper Ethics Audit Prompt", value: ethicsPrompt1, set: setEthicsPrompt1, edited: ethicsPrompt1Edited, setEdited: setEthicsPrompt1Edited, dflt: defaultEthicsPrompts?.singlePaperPrompt },
+                          { idx: 1, label: "Single-Paper Publication Audit Prompt", value: ethicsPrompt1, set: setEthicsPrompt1, edited: ethicsPrompt1Edited, setEdited: setEthicsPrompt1Edited, dflt: defaultEthicsPrompts?.singlePaperPrompt },
                         ].map(p => (
                           <div key={p.idx} className="space-y-2">
                             <div className="flex items-center justify-between">
@@ -1428,7 +1428,7 @@ export default function GenerationDashboard() {
                   )}
                   {generateEthicsMutation.isSuccess && (
                     <p className="text-[10px] font-mono text-green-400 mt-3" data-testid="text-success-ethics">
-                      Ethics report submitted — 3-part audit in progress. This may take several minutes.
+                      Publication audit submitted — 3-part audit in progress. This may take several minutes.
                     </p>
                   )}
                   {generatePeerReviewMutation.isSuccess && (
@@ -1595,7 +1595,7 @@ export default function GenerationDashboard() {
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-3">
                       <Info className="w-4 h-4 text-primary/60" />
-                      <span className="text-[10px] font-mono text-primary uppercase tracking-widest">Ethics Report</span>
+                      <span className="text-[10px] font-mono text-primary uppercase tracking-widest">Publication Audit</span>
                       <StatusBadge status={rep.status} />
                       {rep.clearanceStatus && (
                         <span className="text-[10px] font-mono text-yellow-400/80 border border-yellow-400/20 px-2 py-0.5">
@@ -1652,7 +1652,7 @@ export default function GenerationDashboard() {
                   {isAdmin && (
                     <button
                       onClick={() => {
-                        if (confirm("Delete this ethics report? The associated paper will become re-auditable. This cannot be undone.")) {
+                        if (confirm("Delete this publication audit? The associated paper will become re-auditable. This cannot be undone.")) {
                           deleteEthicsReportMutation.mutate(rep.id);
                         }
                       }}
@@ -1691,7 +1691,7 @@ export default function GenerationDashboard() {
                               ? "text-purple-300 border-purple-500/30"
                               : "text-muted-foreground/50 border-border/40 line-through"
                           }`}
-                          title={rev.ethicsReportId ? "Co-authored with H ethics agent" : "Ethics co-author requested but unavailable"}
+                          title={rev.ethicsReportId ? "Co-authored with H Research Standards Verification Agent" : "Research Standards co-author requested but unavailable"}
                           data-testid={`badge-ethics-${rev.id}`}
                         >
                           + H
@@ -1725,7 +1725,7 @@ export default function GenerationDashboard() {
                   {(rev.status === "pending" || rev.status === "generating") && (
                     <div className="flex items-center gap-2 mt-3 text-xs font-mono text-primary/50">
                       <Loader2 className="w-3 h-3 animate-spin" />
-                      <span>Running 3-part review{rev.includeEthicsCoauthor ? " with parallel ethics audit" : ""}...</span>
+                      <span>Running 3-part review{rev.includeEthicsCoauthor ? " with parallel publication audit" : ""}...</span>
                     </div>
                   )}
 

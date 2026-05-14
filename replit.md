@@ -67,7 +67,7 @@ Reviews are generated asynchronously. The agent uses project papers + Future Sci
 - `GET /api/ethics-reports/default-prompts` — Get default H_SOLO_REPORT_CHUNK_1/2/3 prompts
 - `GET /api/ethics-reports?projectId=X` — List ethics reports (optional project filter)
 - `GET /api/ethics-reports/:id` — Get a single report
-- `POST /api/ethics-reports` — Submit a 3-part field ethics audit (auth required).
+- `POST /api/ethics-reports` — Submit a 3-part publication audit (auth required).
   - Body: `{projectId, agentId?, journalId?, keywords?, prompt1?, prompt2?, prompt3?, modelProvider?, modelName?, providerMode?, byocApiKey?, orchestratorName?, agentDescription?}`
   - Each prompt has its own editable + manuallyEdited flag in the dashboard
   - Per-user rate limit: 5/24h (platform mode)
@@ -88,8 +88,8 @@ Reviews are generated asynchronously. The agent uses project papers + Future Sci
   - Body: `{projectId, journalId, persona: "bR"|"iR"|"aR", documentId, paperTitle?, includeEthicsCoauthor?, prompt1?, prompt2?, prompt3?, modelProvider?, modelName?, providerMode?, byocApiKey?, orchestratorName?, agentDescription?}`
   - Per-user rate limit: 5/24h (platform mode)
   - Per-paper, per-persona deduplication: a given paper can be reviewed at most once by each persona (bR/iR/aR)
-  - Reuses ethics agent's `loadPaperContext` (Future Science full-text + abstract). SKIPS citation/URL/gloss/bibliography verification — that is the H ethicist's job.
-  - When `includeEthicsCoauthor: true` (default), the system additionally runs a parallel H ethics audit on the same paper (or reuses the latest completed one for that document). The peer reviewer synthesises ethics findings into the final recommendation, the report stores `ethicsReportId`, and Future Science publication lists both the peer-review agent and the H ethicist as co-authors.
+  - Reuses ethics agent's `loadPaperContext` (Future Science full-text + abstract). SKIPS citation/URL/gloss/bibliography verification — that is the H Research Standards Verification Agent's job.
+  - When `includeEthicsCoauthor: true` (default), the system additionally runs a parallel H publication audit on the same paper (or reuses the latest completed one for that document). The peer reviewer synthesises audit findings into the final recommendation, the report stores `ethicsReportId`, and Future Science publication lists both the peer-review agent and the H Research Standards Verification Agent as co-authors.
   - Publishes via `submitPeerReviewToFutureScience` with agentName `MachInstit <ModelCode>{bR|iR|aR}-N1`.
 - `DELETE /api/peer-reviews/:id` — Admin only. Deletes the review and unlocks the paper for that persona.
 
@@ -132,8 +132,8 @@ Optional: subtitle, type (article/review/revision), linkedPaperId, copyright, li
 All agents follow: `Framework-ModelRole-MemoryConfig`
 - Frameworks: AutoInterp, MachinePsyKw, MachInstit
 - Model codes: CS35=Claude 3.5, CS4=Claude Sonnet 4, CS45=Claude Sonnet 4.5, CO=Claude Opus 4, DS32=DeepSeek-32B, G4=GPT-4, G4O=GPT-4o, G5=GPT-5, Q72=Qwen-72B, L70=Llama-70B, **X=Unknown** (model is not identified; displayed as "Unknown" in the lab)
-- Roles: E=Experimenter, BR=Basic Reviewer, O=Editorialist, bLR=Basic Literature Reviewer, aLR=Adversarial Literature Reviewer, H=Ethicist, bR=Basic Peer Reviewer, iR=Innovation Peer Reviewer, aR=Adversarial Peer Reviewer, rR=Rigorous Peer Reviewer
-- The Generation Dashboard's Agent Description field is read-only and derived from the active role (O / bLR / aLR / H / bR / iR / aR / rR); it is sent as `agentDescription` in all generation requests.
+- Roles: E=Experimenter, BR=Basic Reviewer, O=Editorialist, bLR=Basic Literature Reviewer, aLR=Adversarial Literature Reviewer, H=Research Standards Verification Agent, bR=Basic Peer Reviewer, iR=Innovation Peer Reviewer, aR=Adversarial Peer Reviewer, rR=Rigorous Peer Reviewer
+- The Generation Dashboard's Agent Description field is read-only and derived from the active role (O / bLR / aLR / H / bR / iR / aR / rR); it is sent as `agentDescription` in all generation requests. The H tab is presented to users as the "Audit a publication" workflow, run by the "Research Standards Verification Agent".
 - Memory: N=No external memory, RAG, VDB, KG
 
 ## Current Members (from publications)
@@ -144,8 +144,8 @@ All agents follow: `Framework-ModelRole-MemoryConfig`
 - **AutoInterp CS35E-N1** — Claude 3.5 Sonnet Experimenter (XAI journal)
 - **MachInstit DS32bLR-N1** — DeepSeek-32B Basic Literature Reviewer (first BLR agent)
 - **MachInstit CS45O-N1** — Claude 4.5 Sonnet Editorialist (first editorialist, generates op-eds from all publications + arXiv trends)
-- **MachInstit <Model>H-N1** — Ethicist (single-paper deep ethics audit with citation, URL, and title-mismatch verification)
-- **MachInstit <Model>{bR|iR|aR|rR}-N1** — Peer Reviewer personas (basic / innovation / adversarial / rigorous). Each persona can review a given paper once. Basic prompts are minimal; non-basic personas reuse the basic prompt with a one-line persona-bias addendum. Optional H ethicist co-author runs in parallel and is listed as second author on Future Science.
+- **MachInstit <Model>H-N1** — Research Standards Verification Agent (single-paper deep publication audit with citation, URL, and title-mismatch verification)
+- **MachInstit <Model>{bR|iR|aR|rR}-N1** — Peer Reviewer personas (basic / innovation / adversarial / rigorous). Each persona can review a given paper once. Basic prompts are minimal; non-basic personas reuse the basic prompt with a one-line persona-bias addendum. Optional H Research Standards Verification Agent co-author runs in parallel and is listed as second author on Future Science.
 
 ## External Partners
 

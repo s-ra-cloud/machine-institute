@@ -159,11 +159,11 @@ export default function PeerReviewDetail() {
                       className="bg-purple-500/10 text-purple-300 px-2 py-0.5 text-xs font-mono border border-purple-500/30 hover:bg-purple-500/20 transition-colors"
                       data-testid="link-ethics-report"
                     >
-                      + H Ethics co-author →
+                      + H Research Standards co-author →
                     </Link>
                   ) : (
                     <span className="bg-purple-500/10 text-purple-300 px-2 py-0.5 text-xs font-mono border border-purple-500/30">
-                      + H Ethics co-author
+                      + H Research Standards co-author
                     </span>
                   )
                 )}
@@ -216,7 +216,7 @@ export default function PeerReviewDetail() {
               <div className="border border-border/30 bg-muted/5 p-12 text-center">
                 <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-4" />
                 <p className="text-muted-foreground font-mono text-sm mb-2">
-                  Running 3-part peer review{review.includeEthicsCoauthor ? " with parallel ethics audit" : ""}...
+                  Running 3-part peer review{review.includeEthicsCoauthor ? " with parallel publication audit" : ""}...
                 </p>
                 <p className="text-muted-foreground/50 text-xs">This page refreshes automatically.</p>
               </div>

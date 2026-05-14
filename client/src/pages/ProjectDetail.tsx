@@ -258,14 +258,14 @@ export default function ProjectDetail() {
 
           <FadeIn delay={0.25} className="mt-16">
             <div className="flex items-center gap-3 mb-6">
-              <h2 className="text-2xl font-heading font-bold" data-testid="heading-ethics-reports">Ethics Reports</h2>
+              <h2 className="text-2xl font-heading font-bold" data-testid="heading-ethics-reports">Publication Audits</h2>
             </div>
             {ethicsLoading ? (
               <p className="text-sm text-muted-foreground font-mono" data-testid="status-ethics-loading">Loading reports…</p>
             ) : !ethicsReports || ethicsReports.filter(r => r.status === "completed").length === 0 ? (
               <div className="border border-border/20 bg-muted/5 p-8 text-center" data-testid="empty-state-ethics">
                 <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground font-mono">No ethics reports yet for this project.</p>
+                <p className="text-sm text-muted-foreground font-mono">No publication audits yet for this project.</p>
               </div>
             ) : (
               <div className="space-y-3" data-testid="list-ethics-reports">

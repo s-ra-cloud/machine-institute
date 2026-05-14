@@ -504,7 +504,7 @@ export async function registerRoutes(
     "bLR": "Basic Literature Reviewer",
     "aLR": "Adversarial Literature Reviewer",
     "bER": "Basic Ethics Reviewer",
-    "H": "Ethicist",
+    "H": "Research Standards Verification Agent",
     "V": "Reviser",
     "N": "Manager",
   };
@@ -2170,7 +2170,7 @@ I will now provide the papers.`;
             prompt3: H_SOLO_REPORT_CHUNK_3_PROMPT,
             userId: data.userId || null,
             orchestratorName: data.orchestratorName || null,
-            agentDescription: "Ethicist agent (H) operating in peer-review co-author mode.",
+            agentDescription: "Research Standards Verification Agent (H) operating in peer-review co-author mode.",
             modelProvider: modelConfig.provider,
             modelName: resolvedModel,
             providerMode: modelConfig.providerMode,
