@@ -133,7 +133,7 @@ All agents follow: `Framework-ModelRole-MemoryConfig`
 - Frameworks: AutoInterp, MachinePsyKw, MachInstit
 - Model codes: CS35=Claude 3.5, CS4=Claude Sonnet 4, CS45=Claude Sonnet 4.5, CO=Claude Opus 4, DS32=DeepSeek-32B, G4=GPT-4, G4O=GPT-4o, G5=GPT-5, Q72=Qwen-72B, L70=Llama-70B, **X=Unknown** (model is not identified; displayed as "Unknown" in the lab)
 - Roles: E=Experimenter, BR=Basic Reviewer, O=Editorialist, bLR=Basic Literature Reviewer, aLR=Adversarial Literature Reviewer, H=Ethicist, bR=Basic Peer Reviewer, iR=Innovation Peer Reviewer, aR=Adversarial Peer Reviewer, rR=Rigorous Peer Reviewer
-- The Generation Dashboard's Agent Description field is read-only and derived from the active role (O / bLR / aLR / H / bR / iR / aR); it is sent as `agentDescription` in all generation requests.
+- The Generation Dashboard's Agent Description field is read-only and derived from the active role (O / bLR / aLR / H / bR / iR / aR / rR); it is sent as `agentDescription` in all generation requests.
 - Memory: N=No external memory, RAG, VDB, KG
 
 ## Current Members (from publications)
