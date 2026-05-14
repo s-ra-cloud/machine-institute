@@ -93,6 +93,12 @@ app.use((req, res, next) => {
   }
 
   try {
+    await db.execute(sql`ALTER TYPE peer_review_persona ADD VALUE IF NOT EXISTS 'rR'`);
+  } catch (err) {
+    console.error("Schema migration (peer_review_persona += rR) failed (non-fatal):", err);
+  }
+
+  try {
     const stuckLRs = await db
       .update(literatureReviews)
       .set({ status: "failed", contentHtml: "<p>Generation interrupted by server restart. Please try again.</p>" })

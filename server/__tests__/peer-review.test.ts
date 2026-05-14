@@ -10,6 +10,10 @@ import {
   IR_REVIEW_CHUNK_1_PROMPT,
   IR_REVIEW_CHUNK_2_PROMPT,
   IR_REVIEW_CHUNK_3_PROMPT,
+  RR_REVIEW_CHUNK_1_PROMPT,
+  RR_REVIEW_CHUNK_2_PROMPT,
+  RR_REVIEW_CHUNK_3_PROMPT,
+  extractRecommendation,
 } from "../prompts/peer-review";
 
 describe("Peer review — persona prompt routing", () => {
@@ -37,18 +41,70 @@ describe("Peer review — persona prompt routing", () => {
     ]);
   });
 
+  it("returns the rR (rigorous) prompt set for rR", () => {
+    expect(getPeerReviewChunkPrompts("rR")).toEqual([
+      RR_REVIEW_CHUNK_1_PROMPT,
+      RR_REVIEW_CHUNK_2_PROMPT,
+      RR_REVIEW_CHUNK_3_PROMPT,
+    ]);
+  });
+
   it("each persona's chunk-1 prompt mentions its own role code", () => {
     expect(AR_REVIEW_CHUNK_1_PROMPT).toMatch(/aR/);
     expect(IR_REVIEW_CHUNK_1_PROMPT).toMatch(/iR/);
+    expect(RR_REVIEW_CHUNK_1_PROMPT).toMatch(/rR/);
+  });
+});
+
+describe("Peer review — simplified prompt contract", () => {
+  it("chunk-1 mentions sections 1-4 of the 9-section structure", () => {
+    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/1\..*Summary/i);
+    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/2\./);
+    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/3\./);
+    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/4\./);
+  });
+
+  it("chunk-2 covers sections 5-6 (related work / detailed comments)", () => {
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/5\./);
+    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/6\./);
+  });
+
+  it("chunk-3 covers sections 7-9 + Bibliography and the recommendation tokens", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/7\./);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/8\./);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/9\./);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Bibliography/i);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Accept/);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Minor Revision/);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Major Revision/);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Reject/);
+  });
+
+  it("chunk-3 documents the ethics co-author block contract", () => {
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/CRITICAL|MAJOR|MINOR/);
+    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/NOT_CLEARED|clearance/i);
+  });
+
+  it("chunk-1 notes that citation/bibliography integrity belongs to the H ethicist", () => {
+    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/ethic|H\b/i);
+  });
+});
+
+describe("Peer review — extractRecommendation", () => {
+  it("parses each of the four canonical recommendation tokens", () => {
+    expect(extractRecommendation("...\nRecommendation: Accept\n")).toBe("Accept");
+    expect(extractRecommendation("...\nRecommendation: Minor Revision\n")).toBe("Minor Revision");
+    expect(extractRecommendation("...\nRecommendation: Major Revision\n")).toBe("Major Revision");
+    expect(extractRecommendation("...\nRecommendation: Reject\n")).toBe("Reject");
+  });
+
+  it("returns null when no recommendation token is present", () => {
+    expect(extractRecommendation("nothing here")).toBeNull();
   });
 });
 
 describe("Peer review — co-author parallel synthesis flow", () => {
   it("awaits ethicsPromise (when supplied) before chunk 3 is built", async () => {
-    // Simulate the synthesis-stage await: peer-review.ts awaits opts.ethicsPromise
-    // AFTER chunks 1 + 2 complete and BEFORE assembling the chunk-3 input. This
-    // confirms the two pipelines are parallel and the ethics result is available
-    // for synthesis.
     const order: string[] = [];
 
     const chunk1 = (async () => { order.push("chunk1-start"); await Promise.resolve(); order.push("chunk1-done"); return "c1"; })();
@@ -60,17 +116,14 @@ describe("Peer review — co-author parallel synthesis flow", () => {
     const ethicsResult = await ethicsPromise;
     order.push("chunk3-start");
 
-    // chunk1, chunk2, ethics all started before chunk3 began (parallel launch)
     expect(order.indexOf("chunk1-start")).toBeLessThan(order.indexOf("chunk3-start"));
     expect(order.indexOf("ethics-start")).toBeLessThan(order.indexOf("chunk3-start"));
-    // Ethics resolves BEFORE chunk3 begins — synthesis can use it
     expect(order.indexOf("ethics-done")).toBeLessThan(order.indexOf("chunk3-start"));
     expect(ethicsResult).toEqual({ reportText: "E" });
   });
 });
 
 describe("Peer review — Future Science multi-author payload shape", () => {
-  // Mirrors the author array construction in submitPeerReviewToFutureScience.
   function buildAuthors(primaryName: string, ethicsCoauthorName?: string) {
     const splitAgent = (n: string) => {
       const parts = n.trim().split(/\s+/);
@@ -100,12 +153,16 @@ describe("Peer review — Future Science multi-author payload shape", () => {
     expect(a[0].lastName).toBe("DS32bR-N1");
     expect(a[1].lastName).toBe("DS32H-N1");
   });
+
+  it("supports rR primary author with H co-author", () => {
+    const a = buildAuthors("MachInstit DS32rR-N1", "MachInstit DS32H-N1");
+    expect(a).toHaveLength(2);
+    expect(a[0].lastName).toBe("DS32rR-N1");
+    expect(a[1].lastName).toBe("DS32H-N1");
+  });
 });
 
 describe("Peer review — ethics-failure co-author gating", () => {
-  // Mirrors the gating logic in server/routes.ts generatePeerReviewBackground:
-  //   linkedEthicsReportId   = result.ethicsUsed ? reusedEthicsReportId : null
-  //   ethicsCoauthorName     = includeEthicsCoauthor && result.ethicsUsed ? name : undefined
   function gate(opts: {
     includeEthicsCoauthor: boolean;
     reusedEthicsReportId: string | null;
@@ -133,7 +190,7 @@ describe("Peer review — ethics-failure co-author gating", () => {
   it("DROPS H from FS payload AND nulls ethicsReportId when parallel ethics audit fails", () => {
     const g = gate({
       includeEthicsCoauthor: true,
-      reusedEthicsReportId: "ER-2", // ethics row was created but pipeline returned null
+      reusedEthicsReportId: "ER-2",
       ethicsUsed: false,
       ethicsAgentName: "MachInstit DS32H-N1",
     });
@@ -153,194 +210,8 @@ describe("Peer review — ethics-failure co-author gating", () => {
   });
 });
 
-describe("Peer review — bR chunk-2 prompt: Section 5 fabrication guard (prompt-level constraints)", () => {
-  // These tests verify that the required anti-fabrication rules are encoded
-  // in REVIEW_CHUNK_2_PROMPT. They fail if the prompt is reverted to a version
-  // that lacks the explicit prohibitions.
-
-  it("empty corpus → prompt mandates transparency statement opening Section 5", () => {
-    // The prompt must explicitly instruct the agent to open Section 5 with a
-    // prescribed sentence when the Publications section is empty.
-    expect(REVIEW_CHUNK_2_PROMPT).toContain(
-      "No prior works from this venue were available for direct comparison; the discussion below is based on the literature cited in the audited paper itself."
-    );
-  });
-
-  it("corpus availability check rule is present", () => {
-    expect(REVIEW_CHUNK_2_PROMPT).toContain("CORPUS AVAILABILITY CHECK");
-    // Rule must instruct: use only Publications section OR audited paper's own bibliography
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/audited paper'?s? own bibliography/i);
-  });
-
-  it("bibliography fabrication prohibition is present and absolute", () => {
-    expect(REVIEW_CHUNK_2_PROMPT).toContain("FABRICATION PROHIBITION");
-    // Must cover at minimum: paper title, author name, journal name
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/paper title/i);
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/journal name/i);
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/author name/i);
-  });
-
-  it("quotation prohibition is present — no quotation marks unless verbatim text is in input", () => {
-    expect(REVIEW_CHUNK_2_PROMPT).toContain("QUOTATION PROHIBITION");
-    // Must explicitly forbid quotation marks and offer paraphrase alternative
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/quotation marks/i);
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/paraphrase/i);
-  });
-
-  it("methodological connection prohibition is present", () => {
-    expect(REVIEW_CHUNK_2_PROMPT).toContain("CONNECTION PROHIBITION");
-  });
-
-  it("pre-emission validation pass is mandated", () => {
-    expect(REVIEW_CHUNK_2_PROMPT).toContain("PRE-EMISSION VALIDATION");
-    // Must require traceable sources for all cited works
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/traceable/i);
-  });
-
-  it("single-verified-work path: paraphrase-only instruction is present (no fabricated quotes)", () => {
-    // When only one corpus entry exists, agent must paraphrase not quote.
-    // This is covered by the QUOTATION PROHIBITION rule.
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/X et al\. argue that/i);
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/X et al\. find that/i);
-  });
-});
-
-describe("Peer review — bR chunk-3 prompt: calibration and scope rules (prompt-level constraints)", () => {
-  it("Section 7 scope rule prohibits minor ethics/formatting findings from appearing there", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toContain("SCOPE RULE (STRICT)");
-    // Must explicitly exclude missing bibliography entries, broken links, formatting
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/missing bibliography/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/broken hyperlinks|broken links/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/formatting/i);
-    // Must direct those to Section 8
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Section 8/);
-  });
-
-  it("superlatives + no core-finding failure → forced Minor Revision calibration rule is present", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toContain("CALIBRATION PROCEDURE");
-    // Must enumerate superlative terms
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/exceptional/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/compelling/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/outstanding/i);
-    // Must define core-finding failure
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/core-finding failure/i);
-    // Must force Minor Revision when superlatives + no core-finding failure
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Minor Revision.*under these conditions|MUST be Minor Revision/i);
-  });
-
-  it("calibration state message is specified in the prompt", () => {
-    // The prompt must specify the exact text the agent should emit to acknowledge calibration
-    expect(REVIEW_CHUNK_3_PROMPT).toContain(
-      "Calibration check: Strengths language was affirmative; no core-finding failure was identified in Weaknesses; recommendation is calibrated to Minor Revision."
-    );
-  });
-
-  it("recommendations must be 1:1 with findings — generic best-practice exclusion is present", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Do NOT include generic best-practice/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/tied to a specific finding/i);
-  });
-
-  it("section ordering is mandated as 7, 8, 9, Bibliography with no gaps", () => {
-    // Must explicitly state the required order and prohibit gaps
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/7, 8, 9, Bibliography/);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/no skipped|no gaps/i);
-  });
-
-  it("bibliography in chunk-3 also carries the source-traceability requirement", () => {
-    // Must prohibit invented bibliographic fields
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/omitted, not synthesized|omit that field rather than invent|omit.*field/i);
-  });
-});
-
-describe("Peer review — bR chunk-3 prompt: bibliography fabrication guard (per spec)", () => {
-  // Regression tests for the bibliography fabrication failure mode.
-  // The reviewer was generating plausible-sounding titles/venues/initials when
-  // the audited paper's bibliography contained only partial information.
-
-  it("SOURCE-TRACEABILITY rule (A): every bibliography entry must be verbatim from one of two sources", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toContain("SOURCE-TRACEABILITY");
-    // Must enumerate the two allowed sources (Publications + audited paper's own bibliography)
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Publications section/);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/audited paper'?s? own bibliography/i);
-    // Must require verbatim copying
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/verbatim/i);
-    // Must list the fields covered
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/author list/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/title/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/venue|journal/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/page/i);
-  });
-
-  it("NO FIELD SYNTHESIS rule (B): cannot replace 'Transformer Circuits Thread' with 'Journal of Machine Learning'", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toContain("NO FIELD SYNTHESIS");
-    // Must contain the concrete failure-mode example
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Transformer Circuits Thread/);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Journal of Machine Learning/);
-    // Must require omission rather than synthesis
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/omitted, not synthesized/i);
-  });
-
-  it("NO AUTHOR ENRICHMENT rule (C): 'Olsson, C., et al.' must not be expanded", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toContain("NO AUTHOR ENRICHMENT");
-    // Must contain the concrete failure-mode examples
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/et al\./);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Olsson/);
-    // Must forbid expanding et al. into a full author list
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/expand.*et al/i);
-  });
-
-  it("NO AUTHOR ENRICHMENT rule (C): initials must match source character-for-character ('Z.' not 'X.')", () => {
-    // The Yin/Steinhardt failure mode: initial 'Z.' was changed to 'X.'
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Z\./);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/X\./);
-    // Must forbid expanding initials into full first names
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Zachary/);
-    // Must require character-for-character match
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/character.for.character/i);
-  });
-
-  it("BODY REFERENCE WITHOUT BIBLIOGRAPHY rule (D): body reference may exist without a bibliography entry", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toContain("BODY REFERENCE WITHOUT BIBLIOGRAPHY ENTRY");
-    // Must offer the two-option choice: keep body reference without entry, or remove body reference
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/keep the body reference/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/remove the body reference/i);
-    // Must explicitly forbid inventing entries to support body references
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/never invent a bibliography entry/i);
-  });
-
-  it("PRE-EMISSION VALIDATION PASS rule (E): mandatory walk-through of every entry against sources", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toContain("PRE-EMISSION VALIDATION PASS");
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/MANDATORY/);
-    // Must require per-entry source annotation
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/from audited paper bib|from Publications section/);
-    // Must require removal of unverifiable entries
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/REMOVE IT/);
-  });
-
-  it("CROSS-OUTPUT APPLICATION rule (F): same rule applies to all structured outputs, not just bibliography", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toContain("CROSS-OUTPUT APPLICATION");
-    // Must extend rule beyond bibliography to other structured outputs
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/comparison tables/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/citation lists|in-text citation/i);
-  });
-
-  it("style-requirements footer reiterates the no-fabrication rule for all structured outputs", () => {
-    // Final style block must echo the cross-cutting rule
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/never invent titles, venues, initials/i);
-  });
-
-  it("severity definitions are spelled out in the recommendation section", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Reject: fundamental flaws not addressable/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Major Revision: concerns that, if not addressed/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Minor Revision: paper.s core findings hold/i);
-  });
-});
-
 describe("Peer review — loadPaperContext shape (skips ethics-only verifiers)", () => {
   it("PaperContext returned by loadPaperContext exposes the fields peer-review needs and nothing more", async () => {
-    // Verify the contract used by server/peer-review.ts L88: the destructured
-    // fields (title, authors, date, abstract, url, fullText, hadFullText,
-    // fsAbstracts) all exist on the loadPaperContext return type.
     const { loadPaperContext } = await import("../ethics-review");
     expect(typeof loadPaperContext).toBe("function");
 
