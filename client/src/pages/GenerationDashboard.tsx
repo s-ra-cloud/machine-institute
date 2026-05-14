@@ -25,6 +25,8 @@ import {
 
 type GenerationType = "editorial" | "literature-review" | "ethics-report" | "peer-review";
 
+interface PeerPromptResponse { prompt: string }
+
 interface PeerReviewRecord {
   id: string;
   projectId: string;
@@ -243,9 +245,7 @@ export default function GenerationDashboard() {
   const [peerSelectedDocId, setPeerSelectedDocId] = useState<string>("");
   const [peerSelectedTitle, setPeerSelectedTitle] = useState<string>("");
   const [peerPickerQuery, setPeerPickerQuery] = useState<string>("");
-  const [peerPrompt1, setPeerPrompt1] = useState<string>("");
-  const [peerPrompt2, setPeerPrompt2] = useState<string>("");
-  const [peerPrompt3, setPeerPrompt3] = useState<string>("");
+  const [peerPrompt, setPeerPrompt] = useState<string>("");
   const [peerPromptsExpanded, setPeerPromptsExpanded] = useState(false);
 
   const queryClient = useQueryClient();
@@ -390,7 +390,7 @@ export default function GenerationDashboard() {
     },
   });
 
-  const { data: defaultPeerPrompts } = useQuery<{ prompt1: string; prompt2: string; prompt3: string }>({
+  const { data: defaultPeerPrompts } = useQuery<PeerPromptResponse>({
     queryKey: ["/api/peer-reviews/default-prompts", peerPersona],
     queryFn: async () => {
       const res = await fetch(`/api/peer-reviews/default-prompts?persona=${encodeURIComponent(peerPersona)}`);
@@ -466,9 +466,7 @@ export default function GenerationDashboard() {
       if (!ethicsPrompt3Edited) setEthicsPrompt3(defaultEthicsPrompts.prompt3);
     }
     if (activeType === "peer-review" && defaultPeerPrompts) {
-      setPeerPrompt1(defaultPeerPrompts.prompt1);
-      setPeerPrompt2(defaultPeerPrompts.prompt2);
-      setPeerPrompt3(defaultPeerPrompts.prompt3);
+      setPeerPrompt(defaultPeerPrompts.prompt);
     }
   }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, defaultEthicsPrompts, defaultPeerPrompts, reviewMode, peerPersona]);
 
@@ -615,9 +613,7 @@ export default function GenerationDashboard() {
           documentId: peerSelectedDocId,
           paperTitle: peerSelectedTitle,
           includeEthicsCoauthor: peerIncludeEthics,
-          prompt1: peerPrompt1 || undefined,
-          prompt2: peerPrompt2 || undefined,
-          prompt3: peerPrompt3 || undefined,
+          prompt: peerPrompt || undefined,
           orchestratorName: orchestratorName || undefined,
           agentDescription: agentDescription || undefined,
           providerMode: modelConfig.providerMode,
@@ -697,7 +693,7 @@ export default function GenerationDashboard() {
     ethicsPrompt1.trim().length > 0 && selectedPaperDocId.length > 0 &&
     (modelConfig.providerMode === "byoc" || ethicsStatus?.remaining === null || (ethicsStatus?.remaining ?? 1) > 0);
   const canSubmitPeer = !peerIsPending && !hasGeneratingPeer && byocReady &&
-    peerSelectedDocId.length > 0 && peerPrompt1.trim().length > 0 &&
+    peerSelectedDocId.length > 0 && peerPrompt.trim().length > 0 &&
     (modelConfig.providerMode === "byoc" || peerStatus?.remaining === null || (peerStatus?.remaining ?? 1) > 0);
 
   return (
@@ -1212,34 +1208,26 @@ export default function GenerationDashboard() {
                           data-testid="button-toggle-peer-prompts"
                         >
                           {peerPromptsExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                          5. Peer Review Prompts (3 parts, editable)
+                          5. Peer Review Prompt (editable)
                         </button>
                         {peerPromptsExpanded && (
-                          <div className="space-y-4">
-                            {[
-                              { idx: 1, label: "Part 1 (sections 1–4)", value: peerPrompt1, set: setPeerPrompt1, dflt: defaultPeerPrompts?.prompt1 },
-                              { idx: 2, label: "Part 2 (sections 5–6)", value: peerPrompt2, set: setPeerPrompt2, dflt: defaultPeerPrompts?.prompt2 },
-                              { idx: 3, label: "Part 3 (sections 7–9 + bibliography + recommendation)", value: peerPrompt3, set: setPeerPrompt3, dflt: defaultPeerPrompts?.prompt3 },
-                            ].map(p => (
-                              <div key={p.idx} className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-mono text-primary/80 uppercase tracking-widest">{p.label}</span>
-                                  <button
-                                    onClick={() => { if (p.dflt) p.set(p.dflt); }}
-                                    className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-                                    data-testid={`button-reset-peer-prompt-${p.idx}`}
-                                  >
-                                    <RotateCcw className="w-3 h-3" /> Reset
-                                  </button>
-                                </div>
-                                <textarea
-                                  value={p.value}
-                                  onChange={(e) => p.set(e.target.value)}
-                                  className="w-full h-40 bg-background border border-border/50 px-4 py-3 text-xs text-foreground/70 resize-none focus:outline-none focus:border-primary/50 font-mono"
-                                  data-testid={`input-peer-prompt-${p.idx}`}
-                                />
-                              </div>
-                            ))}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-mono text-primary/80 uppercase tracking-widest">Peer reviewer prompt</span>
+                              <button
+                                onClick={() => { if (defaultPeerPrompts?.prompt) setPeerPrompt(defaultPeerPrompts.prompt); }}
+                                className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                                data-testid="button-reset-peer-prompt"
+                              >
+                                <RotateCcw className="w-3 h-3" /> Reset
+                              </button>
+                            </div>
+                            <textarea
+                              value={peerPrompt}
+                              onChange={(e) => setPeerPrompt(e.target.value)}
+                              className="w-full h-40 bg-background border border-border/50 px-4 py-3 text-xs text-foreground/70 resize-none focus:outline-none focus:border-primary/50 font-mono"
+                              data-testid="input-peer-prompt"
+                            />
                           </div>
                         )}
                       </div>

@@ -6,7 +6,7 @@ import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPO
 import { runEthicsReport, type EthicsReviewOutput } from "./ethics-review";
 import { fetchFsPaperContent } from "./citation-verifier";
 import { runPeerReview } from "./peer-review";
-import { getPeerReviewChunkPrompts, REVIEW_CHUNK_1_PROMPT, REVIEW_CHUNK_2_PROMPT, REVIEW_CHUNK_3_PROMPT, AR_REVIEW_CHUNK_1_PROMPT, AR_REVIEW_CHUNK_2_PROMPT, AR_REVIEW_CHUNK_3_PROMPT, IR_REVIEW_CHUNK_1_PROMPT, IR_REVIEW_CHUNK_2_PROMPT, IR_REVIEW_CHUNK_3_PROMPT, RR_REVIEW_CHUNK_1_PROMPT, RR_REVIEW_CHUNK_2_PROMPT, RR_REVIEW_CHUNK_3_PROMPT, type PeerReviewPersona } from "./prompts/peer-review";
+import { getPeerReviewPrompt, BR_PROMPT, IR_PROMPT, AR_PROMPT, RR_PROMPT, type PeerReviewPersona } from "./prompts/peer-review";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -1872,16 +1872,10 @@ I will now provide the papers.`;
 
   app.get("/api/peer-reviews/default-prompts", (req, res) => {
     const persona = (req.query.persona as string | undefined) || "bR";
-    if (persona === "aR") {
-      return res.json({ prompt1: AR_REVIEW_CHUNK_1_PROMPT, prompt2: AR_REVIEW_CHUNK_2_PROMPT, prompt3: AR_REVIEW_CHUNK_3_PROMPT });
-    }
-    if (persona === "iR") {
-      return res.json({ prompt1: IR_REVIEW_CHUNK_1_PROMPT, prompt2: IR_REVIEW_CHUNK_2_PROMPT, prompt3: IR_REVIEW_CHUNK_3_PROMPT });
-    }
-    if (persona === "rR") {
-      return res.json({ prompt1: RR_REVIEW_CHUNK_1_PROMPT, prompt2: RR_REVIEW_CHUNK_2_PROMPT, prompt3: RR_REVIEW_CHUNK_3_PROMPT });
-    }
-    return res.json({ prompt1: REVIEW_CHUNK_1_PROMPT, prompt2: REVIEW_CHUNK_2_PROMPT, prompt3: REVIEW_CHUNK_3_PROMPT });
+    if (persona === "aR") return res.json({ prompt: AR_PROMPT });
+    if (persona === "iR") return res.json({ prompt: IR_PROMPT });
+    if (persona === "rR") return res.json({ prompt: RR_PROMPT });
+    return res.json({ prompt: BR_PROMPT });
   });
 
   app.get("/api/peer-reviews/available-papers", async (req, res) => {
@@ -2005,7 +1999,7 @@ I will now provide the papers.`;
     try {
       const {
         projectId, journalId, persona, documentId, paperTitle,
-        prompt1, prompt2, prompt3,
+        prompt,
         modelProvider, modelName, providerMode, byocApiKey,
         orchestratorName, agentDescription,
         includeEthicsCoauthor,
@@ -2061,7 +2055,8 @@ I will now provide the papers.`;
         return res.status(409).json({ error: `This paper has already been reviewed by the ${effectivePersona} persona using this model. Select a different model to run another review.` });
       }
 
-      const [defaultP1, defaultP2, defaultP3] = getPeerReviewChunkPrompts(effectivePersona);
+      const defaultPrompt = getPeerReviewPrompt(effectivePersona);
+      const effectivePrompt = prompt || defaultPrompt;
       const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", effectivePersona);
       const includeEthics = !!includeEthicsCoauthor;
 
@@ -2073,9 +2068,9 @@ I will now provide the papers.`;
         documentId,
         paperTitle: paperTitle || null,
         includeEthicsCoauthor: includeEthics,
-        prompt1: prompt1 || defaultP1,
-        prompt2: prompt2 || defaultP2,
-        prompt3: prompt3 || defaultP3,
+        prompt1: effectivePrompt,
+        prompt2: "",
+        prompt3: "",
         userId: user?.id || null,
         orchestratorName: effectiveOrchestratorName,
         agentDescription: agentDescription || null,
@@ -2102,7 +2097,7 @@ I will now provide the papers.`;
 
   async function generatePeerReviewBackground(
     reviewId: string,
-    data: { projectId: string; agentId: string; journalId: string; persona: string; documentId: string; paperTitle?: string | null; prompt1: string; prompt2: string; prompt3: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
+    data: { projectId: string; agentId: string; journalId: string; persona: string; documentId: string; paperTitle?: string | null; prompt1: string; prompt2?: string; prompt3?: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
     modelConfig: ModelProviderConfig,
     includeEthicsCoauthor: boolean,
   ) {
@@ -2246,9 +2241,7 @@ I will now provide the papers.`;
         journalDisplayName: JOURNAL_DISPLAY_NAMES[data.journalId] || data.journalId,
         documentId: data.documentId,
         paperTitle: data.paperTitle || null,
-        prompt1: data.prompt1,
-        prompt2: data.prompt2,
-        prompt3: data.prompt3,
+        prompt: data.prompt1,
         modelConfig: { ...modelConfig, modelName: resolvedModel },
         emitEvent: emit,
         ethicsPromise: includeEthicsCoauthor ? ethicsPromise : undefined,
@@ -2258,7 +2251,7 @@ I will now provide the papers.`;
       const safeHtml = sanitizeHtml(rawHtml);
 
       const promptTrace = JSON.stringify({
-        prompt1: data.prompt1, prompt2: data.prompt2, prompt3: data.prompt3,
+        prompt: data.prompt1,
         model: resolvedModel, provider: modelConfig.provider, providerMode: modelConfig.providerMode,
         timestamp: new Date().toISOString(),
       });

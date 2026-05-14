@@ -44,9 +44,7 @@ const baseOpts = {
   journalDisplayName: "Mirror",
   documentId: "doc-1",
   paperTitle: "A Test Paper",
-  prompt1: "PROMPT-1",
-  prompt2: "PROMPT-2",
-  prompt3: "PROMPT-3",
+  prompt: "PEER-PROMPT",
   modelConfig: { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" },
   emitEvent: async (_phase: string, _msg: string) => {},
 };
@@ -81,64 +79,58 @@ describe("runPeerReview — end-to-end with stubbed LLM", () => {
     loadPaperContextMock.mockResolvedValue(baseCtx);
   });
 
-  it("passes prompt1→chunk1, prompt2→chunk2, prompt3→chunk3 (in order) and parses recommendation from chunk 3", async () => {
+  it("makes exactly one LLM call with the single prompt and combined input, parses recommendation", async () => {
     const calls: Array<{ prompt: string; user: string }> = [];
     generateWithConfigMock.mockImplementation(async (_cfg, prompt, user) => {
       calls.push({ prompt, user });
-      if (prompt === "PROMPT-1") return { content: "### 1. Paper Summary\nC1 body" };
-      if (prompt === "PROMPT-2") return { content: "### 5. Comparison\nC2 body" };
-      if (prompt === "PROMPT-3") return { content: "### 9. Final Recommendation\nRecommendation: Minor Revision\n" };
-      throw new Error("unexpected prompt");
+      return { content: "Final assessment\nRecommendation: Minor Revision\n" };
     });
 
     const out = await runPeerReview(baseOpts);
 
-    expect(calls).toHaveLength(3);
-    expect(calls[0].prompt).toBe("PROMPT-1");
-    expect(calls[1].prompt).toBe("PROMPT-2");
-    expect(calls[2].prompt).toBe("PROMPT-3");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].prompt).toBe("PEER-PROMPT");
 
-    // chunk 1 input is the paper body
+    // The single user message contains the paper body…
     expect(calls[0].user).toContain("# SUBMITTED PAPER");
     expect(calls[0].user).toContain("A Test Paper");
 
-    // chunk 2 input includes prior-literature block (other documents, not self)
-    expect(calls[1].user).toContain("# PUBLICATIONS (Prior work from Mirror)");
-    expect(calls[1].user).toContain("Other A");
-    expect(calls[1].user).toContain("Other B");
-    expect(calls[1].user).not.toContain('"Self"');
+    // …and the prior-literature block (other documents, not self)…
+    expect(calls[0].user).toContain("# PUBLICATIONS (Prior work from Mirror)");
+    expect(calls[0].user).toContain("Other A");
+    expect(calls[0].user).toContain("Other B");
+    expect(calls[0].user).not.toContain('"Self"');
 
-    // chunk 3 input is the synthesis of chunks 1 and 2
-    expect(calls[2].user).toContain("# PART 1 (Sections 1–4)");
-    expect(calls[2].user).toContain("C1 body");
-    expect(calls[2].user).toContain("# PART 2 (Sections 5–6)");
-    expect(calls[2].user).toContain("C2 body");
+    // …and NO ethics block when no ethics supplied.
+    expect(calls[0].user).not.toContain("ETHICS CO-AUTHOR BLOCK");
 
     expect(out.recommendation).toBe("Minor Revision");
     expect(out.ethicsUsed).toBe(false);
     expect(out.ethicsSummary).toBeUndefined();
-    // chunk 3 must NOT contain ethics block when no ethics supplied
-    expect(calls[2].user).not.toContain("ETHICS CO-AUTHOR BLOCK");
+
+    // For backward compatibility with storage, the full text lives in chunk1.
+    expect(out.chunk1).toBe(out.reviewText);
+    expect(out.chunk2).toBe("");
+    expect(out.chunk3).toBe("");
   });
 
-  it("prepends the ethics co-author block into the chunk-3 input when ethicsPromise resolves", async () => {
+  it("includes the ethics co-author block in the single LLM call when ethicsPromise resolves", async () => {
     const calls: Array<{ prompt: string; user: string }> = [];
     generateWithConfigMock.mockImplementation(async (_cfg, prompt, user) => {
       calls.push({ prompt, user });
-      if (prompt === "PROMPT-1") return { content: "C1" };
-      if (prompt === "PROMPT-2") return { content: "C2" };
       return { content: "Recommendation: Major Revision\n" };
     });
 
     const ethics = makeEthics();
     const out = await runPeerReview({ ...baseOpts, ethicsPromise: Promise.resolve(ethics) });
 
-    const chunk3Input = calls[2].user;
-    expect(chunk3Input).toContain("ETHICS CO-AUTHOR BLOCK");
-    expect(chunk3Input).toContain("CLEARED WITH CONDITIONS");
-    expect(chunk3Input).toContain("Fabricated citation in §2");
-    expect(chunk3Input).toContain("Selective reporting in Table 3");
-    expect(chunk3Input).toContain("Missing license disclosure");
+    expect(calls).toHaveLength(1);
+    const userInput = calls[0].user;
+    expect(userInput).toContain("ETHICS CO-AUTHOR BLOCK");
+    expect(userInput).toContain("CLEARED WITH CONDITIONS");
+    expect(userInput).toContain("Fabricated citation in §2");
+    expect(userInput).toContain("Selective reporting in Table 3");
+    expect(userInput).toContain("Missing license disclosure");
 
     expect(out.ethicsUsed).toBe(true);
     expect(out.ethicsSummary).toMatch(/CLEARED WITH CONDITIONS/);
@@ -150,8 +142,6 @@ describe("runPeerReview — end-to-end with stubbed LLM", () => {
     const calls: Array<{ prompt: string; user: string }> = [];
     generateWithConfigMock.mockImplementation(async (_cfg, prompt, user) => {
       calls.push({ prompt, user });
-      if (prompt === "PROMPT-1") return { content: "C1" };
-      if (prompt === "PROMPT-2") return { content: "C2" };
       return { content: "Recommendation: Reject\n" };
     });
 
@@ -160,19 +150,15 @@ describe("runPeerReview — end-to-end with stubbed LLM", () => {
       ethicsPromise: Promise.reject(new Error("ethics LLM down")),
     });
 
-    expect(calls[2].user).not.toContain("ETHICS CO-AUTHOR BLOCK");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].user).not.toContain("ETHICS CO-AUTHOR BLOCK");
     expect(out.ethicsUsed).toBe(false);
     expect(out.ethicsSummary).toBeUndefined();
     expect(out.recommendation).toBe("Reject");
   });
 
-  it("falls back to 'Major Revision' when chunk 3 has no recognisable recommendation token", async () => {
-    generateWithConfigMock.mockImplementation(async (_cfg, prompt) => {
-      if (prompt === "PROMPT-1") return { content: "C1" };
-      if (prompt === "PROMPT-2") return { content: "C2" };
-      return { content: "no verdict here" };
-    });
-
+  it("falls back to 'Major Revision' when output has no recognisable recommendation token", async () => {
+    generateWithConfigMock.mockImplementation(async () => ({ content: "no verdict here" }));
     const out = await runPeerReview(baseOpts);
     expect(out.recommendation).toBe("Major Revision");
   });

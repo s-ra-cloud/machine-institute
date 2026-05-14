@@ -2,7 +2,7 @@ import { storage } from "./storage";
 import { generateWithConfig, type ModelProviderConfig } from "./model-service";
 import { loadPaperContext } from "./ethics-review";
 import {
-  getPeerReviewChunkPrompts,
+  getPeerReviewPrompt,
   extractRecommendation,
   type PeerReviewPersona,
 } from "./prompts/peer-review";
@@ -33,9 +33,7 @@ interface RunPeerReviewOptions {
   journalDisplayName: string;
   documentId: string;
   paperTitle?: string | null;
-  prompt1: string;
-  prompt2: string;
-  prompt3: string;
+  prompt: string;
   modelConfig: ModelProviderConfig;
   emitEvent: (phase: string, message: string) => Promise<void>;
   ethicsResult?: EthicsReviewOutput | null;
@@ -78,7 +76,7 @@ function buildEthicsCoauthorBlock(ethics: EthicsReviewOutput): string {
 
 export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerReviewOutput> {
   const startTime = Date.now();
-  const { projectId, persona, journalDisplayName, initiativeDocId, initiativeSlug, documentId, paperTitle, modelConfig, emitEvent, prompt1, prompt2, prompt3, ethicsPromise } = opts;
+  const { projectId, persona, journalDisplayName, initiativeDocId, initiativeSlug, documentId, paperTitle, modelConfig, emitEvent, prompt, ethicsPromise } = opts;
   let { ethicsResult } = opts;
 
   await emitEvent("peer-review-init", `Starting ${persona} peer review on "${paperTitle || documentId}" in ${journalDisplayName}.`);
@@ -88,20 +86,10 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
 
   const paperBody = `# SUBMITTED PAPER\n\n**Title:** ${title}\n**Authors:** ${authors}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${url}\n\n## Abstract\n${(abstract || "(no abstract available)").slice(0, 6000)}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — reviewer could not retrieve)"}\n${hadFullText ? (fullText!.slice(0, 30000)) : "(The reviewer's automated full-text fetcher returned no usable body content. Review proceeds on abstract only — note this limitation in your assessment.)"}`;
 
-  await emitEvent("peer-review-llm-1", `Sending Part 1 (sections 1–4) to ${modelConfig.modelName || modelConfig.provider}...`);
-  const chunk1Result = await generateWithConfig(modelConfig, prompt1, paperBody, { maxTokens: 6000, temperature: 0.4 });
-  const chunk1 = chunk1Result.content;
-  await emitEvent("peer-review-llm-1", `Part 1 complete (${chunk1.length} chars).`);
-
   const priorLitBlock = buildPriorLiteratureBlock(fsAbstracts, documentId);
-  const part2Input = `${paperBody}\n\n---\n\n# PUBLICATIONS (Prior work from ${journalDisplayName})\n\n${priorLitBlock}`;
-  await emitEvent("peer-review-llm-2", `Sending Part 2 (sections 5–6) with ${fsAbstracts.length} prior-literature abstracts...`);
-  const chunk2Result = await generateWithConfig(modelConfig, prompt2, part2Input, { maxTokens: 5000, temperature: 0.4 });
-  const chunk2 = chunk2Result.content;
-  await emitEvent("peer-review-llm-2", `Part 2 complete (${chunk2.length} chars).`);
 
   if (!ethicsResult && ethicsPromise) {
-    await emitEvent("peer-review-ethics-await", "Parts 1 & 2 complete; awaiting parallel ethics co-author audit before final synthesis...");
+    await emitEvent("peer-review-ethics-await", "Awaiting parallel ethics co-author audit before final synthesis...");
     try {
       ethicsResult = await ethicsPromise;
       if (!ethicsResult) {
@@ -120,29 +108,29 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   if (ethicsResult) {
     ethicsBlock = `\n\n---\n\n${buildEthicsCoauthorBlock(ethicsResult)}`;
     ethicsSummary = `Ethics co-author (H): ${ethicsResult.clearanceStatus.replace(/_/g, " ")} — ${ethicsResult.flagsList.filter(f => f.severity === "CRITICAL").length} critical, ${ethicsResult.flagsList.filter(f => f.severity === "MAJOR").length} major, ${ethicsResult.flagsList.filter(f => f.severity === "MINOR").length} minor flags.`;
-    await emitEvent("peer-review-ethics-merge", `Integrating ethics co-author findings into final synthesis. ${ethicsSummary}`);
+    await emitEvent("peer-review-ethics-merge", `Integrating ethics co-author findings into review. ${ethicsSummary}`);
   }
 
-  const part3Input = `# PART 1 (Sections 1–4)\n\n${chunk1}\n\n---\n\n# PART 2 (Sections 5–6)\n\n${chunk2}${ethicsBlock}`;
-  await emitEvent("peer-review-llm-3", `Sending Part 3 (sections 7–9 + bibliography) for synthesis${ethicsResult ? " with ethics integration" : ""}...`);
-  const chunk3Result = await generateWithConfig(modelConfig, prompt3, part3Input, { maxTokens: 5000, temperature: 0.4 });
-  const chunk3 = chunk3Result.content;
-  await emitEvent("peer-review-llm-3", `Part 3 complete (${chunk3.length} chars).`);
+  const userInput = `${paperBody}\n\n---\n\n# PUBLICATIONS (Prior work from ${journalDisplayName})\n\n${priorLitBlock}${ethicsBlock}`;
 
-  const reviewText = `${chunk1}\n\n${chunk2}\n\n${chunk3}`;
-  const recommendationParsed = extractRecommendation(chunk3) || "Major Revision";
+  await emitEvent("peer-review-llm", `Sending peer review to ${modelConfig.modelName || modelConfig.provider}${ethicsResult ? " with ethics integration" : ""}...`);
+  const result = await generateWithConfig(modelConfig, prompt, userInput, { maxTokens: 8000, temperature: 0.4 });
+  const reviewText = result.content;
+  await emitEvent("peer-review-llm", `Peer review complete (${reviewText.length} chars).`);
+
+  const recommendationParsed = extractRecommendation(reviewText) || "Major Revision";
   const personaLabel = persona === "bR" ? "Basic" : persona === "aR" ? "Adversarial" : persona === "iR" ? "Innovation" : "Rigorous";
   const reviewTitle = `${personaLabel} Peer Review: "${title}"`;
 
-  const reviewAbstract = `This document is a structured peer review of "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The review was produced by a ${personaLabel} peer-review agent (${persona}) and follows a 9-section format: paper summary, readability, methodology, interpretation, comparison with prior literature, strengths, weaknesses, required revisions, and a final recommendation. ${hadFullText ? "Full paper text was retrieved and used as the primary evidentiary basis." : "Full paper text could not be retrieved; the review proceeds on the abstract only."} ${ethicsResult ? `A Research Standards Verification Agent co-author (H-persona) ran in parallel and contributed findings (clearance: ${ethicsResult.clearanceStatus.replace(/_/g, " ")}). ` : ""}Final recommendation: ${recommendationParsed}.`;
+  const reviewAbstract = `This document is a peer review of "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The review was produced by a ${personaLabel} peer-review agent (${persona}). ${hadFullText ? "Full paper text was retrieved and used as the primary evidentiary basis." : "Full paper text could not be retrieved; the review proceeds on the abstract only."} ${ethicsResult ? `A Research Standards Verification Agent co-author (H-persona) ran in parallel and contributed findings (clearance: ${ethicsResult.clearanceStatus.replace(/_/g, " ")}). ` : ""}Final recommendation: ${recommendationParsed}.`;
 
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);
 
   return {
     reviewText,
-    chunk1,
-    chunk2,
-    chunk3,
+    chunk1: reviewText,
+    chunk2: "",
+    chunk3: "",
     reviewTitle,
     reviewAbstract,
     recommendation: recommendationParsed,

@@ -1,93 +1,64 @@
 import { describe, it, expect } from "vitest";
 import {
-  getPeerReviewChunkPrompts,
-  REVIEW_CHUNK_1_PROMPT,
-  REVIEW_CHUNK_2_PROMPT,
-  REVIEW_CHUNK_3_PROMPT,
-  AR_REVIEW_CHUNK_1_PROMPT,
-  AR_REVIEW_CHUNK_2_PROMPT,
-  AR_REVIEW_CHUNK_3_PROMPT,
-  IR_REVIEW_CHUNK_1_PROMPT,
-  IR_REVIEW_CHUNK_2_PROMPT,
-  IR_REVIEW_CHUNK_3_PROMPT,
-  RR_REVIEW_CHUNK_1_PROMPT,
-  RR_REVIEW_CHUNK_2_PROMPT,
-  RR_REVIEW_CHUNK_3_PROMPT,
+  getPeerReviewPrompt,
+  BR_PROMPT,
+  IR_PROMPT,
+  AR_PROMPT,
+  RR_PROMPT,
   extractRecommendation,
 } from "../prompts/peer-review";
 
+function wordCount(s: string): number {
+  return s.trim().split(/\s+/).filter(Boolean).length;
+}
+
 describe("Peer review — persona prompt routing", () => {
-  it("returns the bR prompt set by default and for explicit bR", () => {
-    expect(getPeerReviewChunkPrompts("bR")).toEqual([
-      REVIEW_CHUNK_1_PROMPT,
-      REVIEW_CHUNK_2_PROMPT,
-      REVIEW_CHUNK_3_PROMPT,
-    ]);
+  it("returns the bR prompt by default and for explicit bR", () => {
+    expect(getPeerReviewPrompt("bR")).toBe(BR_PROMPT);
+  });
+  it("returns the aR prompt for aR", () => {
+    expect(getPeerReviewPrompt("aR")).toBe(AR_PROMPT);
+  });
+  it("returns the iR prompt for iR", () => {
+    expect(getPeerReviewPrompt("iR")).toBe(IR_PROMPT);
+  });
+  it("returns the rR prompt for rR", () => {
+    expect(getPeerReviewPrompt("rR")).toBe(RR_PROMPT);
   });
 
-  it("returns the aR (adversarial) prompt set for aR", () => {
-    expect(getPeerReviewChunkPrompts("aR")).toEqual([
-      AR_REVIEW_CHUNK_1_PROMPT,
-      AR_REVIEW_CHUNK_2_PROMPT,
-      AR_REVIEW_CHUNK_3_PROMPT,
-    ]);
-  });
-
-  it("returns the iR (innovation) prompt set for iR", () => {
-    expect(getPeerReviewChunkPrompts("iR")).toEqual([
-      IR_REVIEW_CHUNK_1_PROMPT,
-      IR_REVIEW_CHUNK_2_PROMPT,
-      IR_REVIEW_CHUNK_3_PROMPT,
-    ]);
-  });
-
-  it("returns the rR (rigorous) prompt set for rR", () => {
-    expect(getPeerReviewChunkPrompts("rR")).toEqual([
-      RR_REVIEW_CHUNK_1_PROMPT,
-      RR_REVIEW_CHUNK_2_PROMPT,
-      RR_REVIEW_CHUNK_3_PROMPT,
-    ]);
-  });
-
-  it("each persona's chunk-1 prompt mentions its own role code", () => {
-    expect(AR_REVIEW_CHUNK_1_PROMPT).toMatch(/aR/);
-    expect(IR_REVIEW_CHUNK_1_PROMPT).toMatch(/iR/);
-    expect(RR_REVIEW_CHUNK_1_PROMPT).toMatch(/rR/);
+  it("each non-basic persona's prompt mentions its own role code", () => {
+    expect(AR_PROMPT).toMatch(/aR/);
+    expect(IR_PROMPT).toMatch(/iR/);
+    expect(RR_PROMPT).toMatch(/rR/);
   });
 });
 
-describe("Peer review — simplified prompt contract", () => {
-  it("chunk-1 mentions sections 1-4 of the 9-section structure", () => {
-    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/1\..*Summary/i);
-    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/2\./);
-    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/3\./);
-    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/4\./);
-  });
+describe("Peer review — single-prompt contract", () => {
+  const all = { bR: BR_PROMPT, iR: IR_PROMPT, aR: AR_PROMPT, rR: RR_PROMPT };
 
-  it("chunk-2 covers sections 5-6 (related work / detailed comments)", () => {
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/5\./);
-    expect(REVIEW_CHUNK_2_PROMPT).toMatch(/6\./);
-  });
-
-  it("chunk-3 covers sections 7-9 + Bibliography and the recommendation tokens", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/7\./);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/8\./);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/9\./);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Bibliography/i);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Accept/);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Minor Revision/);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Major Revision/);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/Reject/);
-  });
-
-  it("chunk-3 documents the ethics co-author block contract", () => {
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/CRITICAL|MAJOR|MINOR/);
-    expect(REVIEW_CHUNK_3_PROMPT).toMatch(/NOT_CLEARED|clearance/i);
-  });
-
-  it("chunk-1 notes that citation/bibliography integrity belongs to the H ethicist", () => {
-    expect(REVIEW_CHUNK_1_PROMPT).toMatch(/ethic|H\b/i);
-  });
+  for (const [persona, prompt] of Object.entries(all)) {
+    it(`${persona} prompt is ≤100 words`, () => {
+      expect(wordCount(prompt)).toBeLessThanOrEqual(100);
+    });
+    it(`${persona} prompt mentions the H Research Standards Verification Agent`, () => {
+      expect(prompt).toMatch(/Research Standards Verification Agent|ETHICS CO-AUTHOR/i);
+    });
+    it(`${persona} prompt describes the inputs the model will receive`, () => {
+      expect(prompt).toMatch(/full text|paper/i);
+      expect(prompt).toMatch(/prior work|Publications|journal/i);
+    });
+    it(`${persona} prompt mentions all four recommendation tokens`, () => {
+      expect(prompt).toMatch(/Accept/);
+      expect(prompt).toMatch(/Minor Revision/);
+      expect(prompt).toMatch(/Major Revision/);
+      expect(prompt).toMatch(/Reject/);
+    });
+    it(`${persona} prompt has NO numbered section outline`, () => {
+      // Must not enumerate sections like "### 1.", "### 5.", etc.
+      expect(prompt).not.toMatch(/###\s*\d+\./);
+      expect(prompt).not.toMatch(/9-section/i);
+    });
+  }
 });
 
 describe("Peer review — extractRecommendation", () => {
@@ -101,24 +72,24 @@ describe("Peer review — extractRecommendation", () => {
   it("returns null when no recommendation token is present", () => {
     expect(extractRecommendation("nothing here")).toBeNull();
   });
+
+  it("prefers the LAST recommendation token in the text (final verdict)", () => {
+    const text = "Earlier we considered Accept, but ultimately the recommendation is Reject.";
+    expect(extractRecommendation(text)).toBe("Reject");
+  });
 });
 
 describe("Peer review — co-author parallel synthesis flow", () => {
-  it("awaits ethicsPromise (when supplied) before chunk 3 is built", async () => {
+  it("awaits ethicsPromise (when supplied) before the LLM call is built", async () => {
     const order: string[] = [];
 
-    const chunk1 = (async () => { order.push("chunk1-start"); await Promise.resolve(); order.push("chunk1-done"); return "c1"; })();
-    const chunk2 = (async () => { order.push("chunk2-start"); await Promise.resolve(); order.push("chunk2-done"); return "c2"; })();
     const ethicsPromise = (async () => { order.push("ethics-start"); await Promise.resolve(); await Promise.resolve(); order.push("ethics-done"); return { reportText: "E" }; })();
 
-    await chunk1;
-    await chunk2;
     const ethicsResult = await ethicsPromise;
-    order.push("chunk3-start");
+    order.push("llm-call");
 
-    expect(order.indexOf("chunk1-start")).toBeLessThan(order.indexOf("chunk3-start"));
-    expect(order.indexOf("ethics-start")).toBeLessThan(order.indexOf("chunk3-start"));
-    expect(order.indexOf("ethics-done")).toBeLessThan(order.indexOf("chunk3-start"));
+    expect(order.indexOf("ethics-start")).toBeLessThan(order.indexOf("llm-call"));
+    expect(order.indexOf("ethics-done")).toBeLessThan(order.indexOf("llm-call"));
     expect(ethicsResult).toEqual({ reportText: "E" });
   });
 });
@@ -177,34 +148,19 @@ describe("Peer review — ethics-failure co-author gating", () => {
   }
 
   it("includes H as co-author and links the report when ethics succeeds", () => {
-    const g = gate({
-      includeEthicsCoauthor: true,
-      reusedEthicsReportId: "ER-1",
-      ethicsUsed: true,
-      ethicsAgentName: "MachInstit DS32H-N1",
-    });
+    const g = gate({ includeEthicsCoauthor: true, reusedEthicsReportId: "ER-1", ethicsUsed: true, ethicsAgentName: "MachInstit DS32H-N1" });
     expect(g.linkedEthicsReportId).toBe("ER-1");
     expect(g.ethicsCoauthorName).toBe("MachInstit DS32H-N1");
   });
 
   it("DROPS H from FS payload AND nulls ethicsReportId when parallel ethics audit fails", () => {
-    const g = gate({
-      includeEthicsCoauthor: true,
-      reusedEthicsReportId: "ER-2",
-      ethicsUsed: false,
-      ethicsAgentName: "MachInstit DS32H-N1",
-    });
+    const g = gate({ includeEthicsCoauthor: true, reusedEthicsReportId: "ER-2", ethicsUsed: false, ethicsAgentName: "MachInstit DS32H-N1" });
     expect(g.linkedEthicsReportId).toBeNull();
     expect(g.ethicsCoauthorName).toBeUndefined();
   });
 
   it("does not include H when the user opted out, regardless of ethicsUsed", () => {
-    const g = gate({
-      includeEthicsCoauthor: false,
-      reusedEthicsReportId: null,
-      ethicsUsed: false,
-      ethicsAgentName: "MachInstit DS32H-N1",
-    });
+    const g = gate({ includeEthicsCoauthor: false, reusedEthicsReportId: null, ethicsUsed: false, ethicsAgentName: "MachInstit DS32H-N1" });
     expect(g.linkedEthicsReportId).toBeNull();
     expect(g.ethicsCoauthorName).toBeUndefined();
   });
