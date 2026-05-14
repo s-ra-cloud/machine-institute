@@ -18,7 +18,7 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
 export const paperTypeEnum = pgEnum("paper_type", ["article", "review", "revision"]);
-export const peerReviewPersonaEnum = pgEnum("peer_review_persona", ["bR", "iR", "aR"]);
+export const peerReviewPersonaEnum = pgEnum("peer_review_persona", ["bR", "iR", "aR", "rR"]);
 
 export const papers = pgTable("papers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -404,7 +404,7 @@ export const insertPeerReviewSchema = createInsertSchema(peerReviews).omit({
   projectId: z.string().min(1),
   agentId: z.string().min(1),
   journalId: z.string().min(1),
-  persona: z.enum(["bR", "iR", "aR"]),
+  persona: z.enum(["bR", "iR", "aR", "rR"]),
   documentId: z.string().min(1),
   paperTitle: z.string().nullable().optional(),
   includeEthicsCoauthor: z.boolean().default(false),

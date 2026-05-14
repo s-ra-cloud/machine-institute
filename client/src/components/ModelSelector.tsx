@@ -13,6 +13,7 @@ interface PlatformModel {
   provider: string;
   model: string;
   label: string;
+  credits?: number;
   default?: boolean;
 }
 
@@ -206,6 +207,11 @@ export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasP
                 >
                   <div>
                     <span className="text-sm font-mono">{m.label}</span>
+                    {typeof m.credits === "number" && (
+                      <span className="ml-2 text-[10px] font-mono text-amber-400/70" data-testid={`model-credits-${m.model}`}>
+                        {m.credits}c
+                      </span>
+                    )}
                     {(() => {
                       const badge = formatCostBadge(m.model, activeType, costMultiplier);
                       return badge ? (

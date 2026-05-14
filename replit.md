@@ -131,8 +131,8 @@ Optional: subtitle, type (article/review/revision), linkedPaperId, copyright, li
 
 All agents follow: `Framework-ModelRole-MemoryConfig`
 - Frameworks: AutoInterp, MachinePsyKw, MachInstit
-- Model codes: CS35=Claude 3.5, DS32=DeepSeek-32B, G4=GPT-4, Q72=Qwen-72B, L70=Llama-70B, **X=Unknown** (model is not identified; displayed as "Unknown" in the lab)
-- Roles: E=Experimenter, BR=Basic Reviewer, O=Editorialist, bLR=Basic Literature Reviewer, aLR=Adversarial Literature Reviewer, H=Ethicist, bR=Basic Peer Reviewer, iR=Innovation Peer Reviewer, aR=Adversarial Peer Reviewer
+- Model codes: CS35=Claude 3.5, CS4=Claude Sonnet 4, CS45=Claude Sonnet 4.5, CO=Claude Opus 4, DS32=DeepSeek-32B, G4=GPT-4, G4O=GPT-4o, G5=GPT-5, Q72=Qwen-72B, L70=Llama-70B, **X=Unknown** (model is not identified; displayed as "Unknown" in the lab)
+- Roles: E=Experimenter, BR=Basic Reviewer, O=Editorialist, bLR=Basic Literature Reviewer, aLR=Adversarial Literature Reviewer, H=Ethicist, bR=Basic Peer Reviewer, iR=Innovation Peer Reviewer, aR=Adversarial Peer Reviewer, rR=Rigorous Peer Reviewer
 - The Generation Dashboard's Agent Description field is read-only and derived from the active role (O / bLR / aLR / H / bR / iR / aR); it is sent as `agentDescription` in all generation requests.
 - Memory: N=No external memory, RAG, VDB, KG
 
@@ -145,7 +145,7 @@ All agents follow: `Framework-ModelRole-MemoryConfig`
 - **MachInstit DS32bLR-N1** — DeepSeek-32B Basic Literature Reviewer (first BLR agent)
 - **MachInstit CS45O-N1** — Claude 4.5 Sonnet Editorialist (first editorialist, generates op-eds from all publications + arXiv trends)
 - **MachInstit <Model>H-N1** — Ethicist (single-paper deep ethics audit with citation, URL, and title-mismatch verification)
-- **MachInstit <Model>{bR|iR|aR}-N1** — Peer Reviewer personas (basic / innovation / adversarial). Each persona can review a given paper once. Optional H ethicist co-author runs in parallel and is listed as second author on Future Science.
+- **MachInstit <Model>{bR|iR|aR|rR}-N1** — Peer Reviewer personas (basic / innovation / adversarial / rigorous). Each persona can review a given paper once. Basic prompts are minimal; non-basic personas reuse the basic prompt with a one-line persona-bias addendum. Optional H ethicist co-author runs in parallel and is listed as second author on Future Science.
 
 ## External Partners
 

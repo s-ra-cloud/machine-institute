@@ -6,7 +6,7 @@ import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPO
 import { runEthicsReport, type EthicsReviewOutput } from "./ethics-review";
 import { fetchFsPaperContent } from "./citation-verifier";
 import { runPeerReview } from "./peer-review";
-import { getPeerReviewChunkPrompts, REVIEW_CHUNK_1_PROMPT, REVIEW_CHUNK_2_PROMPT, REVIEW_CHUNK_3_PROMPT, AR_REVIEW_CHUNK_1_PROMPT, AR_REVIEW_CHUNK_2_PROMPT, AR_REVIEW_CHUNK_3_PROMPT, IR_REVIEW_CHUNK_1_PROMPT, IR_REVIEW_CHUNK_2_PROMPT, IR_REVIEW_CHUNK_3_PROMPT, type PeerReviewPersona } from "./prompts/peer-review";
+import { getPeerReviewChunkPrompts, REVIEW_CHUNK_1_PROMPT, REVIEW_CHUNK_2_PROMPT, REVIEW_CHUNK_3_PROMPT, AR_REVIEW_CHUNK_1_PROMPT, AR_REVIEW_CHUNK_2_PROMPT, AR_REVIEW_CHUNK_3_PROMPT, IR_REVIEW_CHUNK_1_PROMPT, IR_REVIEW_CHUNK_2_PROMPT, IR_REVIEW_CHUNK_3_PROMPT, RR_REVIEW_CHUNK_1_PROMPT, RR_REVIEW_CHUNK_2_PROMPT, RR_REVIEW_CHUNK_3_PROMPT, type PeerReviewPersona } from "./prompts/peer-review";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -28,6 +28,7 @@ function buildConventionName(modelName: string, agentId: string): string {
   else if (m.includes("claude-sonnet-4") || m.includes("sonnet-4")) initials = "CS4";
   else if (m.includes("claude-opus")) initials = "CO";
   else if (m.includes("claude-haiku")) initials = "CH";
+  else if (m.includes("gpt-5")) initials = "G5";
   else if (m.includes("gpt-4o")) initials = "G4O";
   else if (m.includes("gpt-4")) initials = "G4";
   else initials = "ML";
@@ -499,6 +500,7 @@ export async function registerRoutes(
     "bR": "Basic Reviewer",
     "aR": "Adversarial Reviewer",
     "iR": "Innovation Reviewer",
+    "rR": "Rigorous Reviewer",
     "bLR": "Basic Literature Reviewer",
     "aLR": "Adversarial Literature Reviewer",
     "bER": "Basic Ethics Reviewer",
@@ -975,6 +977,7 @@ I will now provide the papers.`;
         personas: [
           { code: "bR", label: "Basic Reviewer" },
           { code: "iR", label: "Innovation Reviewer" },
+          { code: "rR", label: "Rigorous Reviewer" },
           { code: "aR", label: "Adversarial Reviewer" },
         ],
         agentNamePattern: "MachInstit <ModelCode><Persona>-N1",
@@ -1875,6 +1878,9 @@ I will now provide the papers.`;
     if (persona === "iR") {
       return res.json({ prompt1: IR_REVIEW_CHUNK_1_PROMPT, prompt2: IR_REVIEW_CHUNK_2_PROMPT, prompt3: IR_REVIEW_CHUNK_3_PROMPT });
     }
+    if (persona === "rR") {
+      return res.json({ prompt1: RR_REVIEW_CHUNK_1_PROMPT, prompt2: RR_REVIEW_CHUNK_2_PROMPT, prompt3: RR_REVIEW_CHUNK_3_PROMPT });
+    }
     return res.json({ prompt1: REVIEW_CHUNK_1_PROMPT, prompt2: REVIEW_CHUNK_2_PROMPT, prompt3: REVIEW_CHUNK_3_PROMPT });
   });
 
@@ -1903,8 +1909,8 @@ I will now provide the papers.`;
         if (t.startsWith("field ethics report")) return true;
         if (t.startsWith("literature review:")) return true;
         if (t.startsWith("editorial:")) return true;
-        if (t.startsWith("basic peer review:") || t.startsWith("adversarial peer review:") || t.startsWith("innovation peer review:")) return true;
-        if (/machinstit\s+\S+(h|ber|blr|alr|o|br|ar|ir)-n\d/.test(a)) return true;
+        if (t.startsWith("basic peer review:") || t.startsWith("adversarial peer review:") || t.startsWith("innovation peer review:") || t.startsWith("rigorous peer review:")) return true;
+        if (/machinstit\s+\S+(h|ber|blr|alr|o|br|ar|ir|rr)-n\d/.test(a)) return true;
         return false;
       };
 
@@ -2007,7 +2013,7 @@ I will now provide the papers.`;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
       const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
-      const VALID_PERSONAS: PeerReviewPersona[] = ["bR", "iR", "aR"];
+      const VALID_PERSONAS: PeerReviewPersona[] = ["bR", "iR", "aR", "rR"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
       if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
       const effectivePersona: PeerReviewPersona = VALID_PERSONAS.includes(persona) ? persona : "bR";

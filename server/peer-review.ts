@@ -131,7 +131,7 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
 
   const reviewText = `${chunk1}\n\n${chunk2}\n\n${chunk3}`;
   const recommendationParsed = extractRecommendation(chunk3) || "Major Revision";
-  const personaLabel = persona === "bR" ? "Basic" : persona === "aR" ? "Adversarial" : "Innovation";
+  const personaLabel = persona === "bR" ? "Basic" : persona === "aR" ? "Adversarial" : persona === "iR" ? "Innovation" : "Rigorous";
   const reviewTitle = `${personaLabel} Peer Review: "${title}"`;
 
   const reviewAbstract = `This document is a structured peer review of "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The review was produced by a ${personaLabel} peer-review agent (${persona}) and follows a 9-section format: paper summary, readability, methodology, interpretation, comparison with prior literature, strengths, weaknesses, required revisions, and a final recommendation. ${hadFullText ? "Full paper text was retrieved and used as the primary evidentiary basis." : "Full paper text could not be retrieved; the review proceeds on the abstract only."} ${ethicsResult ? `An ethics co-author (H-persona Ethicist) ran in parallel and contributed findings (clearance: ${ethicsResult.clearanceStatus.replace(/_/g, " ")}). ` : ""}Final recommendation: ${recommendationParsed}.`;

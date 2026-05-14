@@ -195,6 +195,7 @@ function deriveModelInitials(modelName: string): string {
   if (m.includes("claude-sonnet-4") || m.includes("sonnet-4")) return "CS4";
   if (m.includes("claude-opus")) return "CO";
   if (m.includes("claude-haiku")) return "CH";
+  if (m.includes("gpt-5")) return "G5";
   if (m.includes("gpt-4o")) return "G4O";
   if (m.includes("gpt-4")) return "G4";
   return "ML";
@@ -237,7 +238,7 @@ export default function GenerationDashboard() {
   const [selectedPaperDocId, setSelectedPaperDocId] = useState<string>("");
   const [selectedPaperTitle, setSelectedPaperTitle] = useState<string>("");
   const [paperPickerQuery, setPaperPickerQuery] = useState<string>("");
-  const [peerPersona, setPeerPersona] = useState<"bR" | "iR" | "aR">("bR");
+  const [peerPersona, setPeerPersona] = useState<"bR" | "iR" | "aR" | "rR">("bR");
   const [peerIncludeEthics, setPeerIncludeEthics] = useState<boolean>(true);
   const [peerSelectedDocId, setPeerSelectedDocId] = useState<string>("");
   const [peerSelectedTitle, setPeerSelectedTitle] = useState<string>("");
@@ -289,6 +290,7 @@ export default function GenerationDashboard() {
     bR: "Basic Peer Reviewer agent producing a structured 9-section peer review of a single submitted paper.",
     iR: "Innovation-focused Peer Reviewer agent emphasising originality, novelty, and positioning of a single submitted paper.",
     aR: "Adversarial Peer Reviewer agent stress-testing every claim, assumption and methodology of a single submitted paper.",
+    rR: "Rigorous Peer Reviewer agent applying strict methodological scrutiny — statistical correctness, experimental design validity, reproducibility — to a single submitted paper.",
   };
 
   const activeRoleCode =
@@ -1071,11 +1073,12 @@ export default function GenerationDashboard() {
                         <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
                           2. Reviewer Persona
                         </label>
-                        <div className="grid grid-cols-3 gap-3 mb-3">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                           {([
-                            { code: "bR" as const, label: "Basic", desc: "Balanced 9-section review", locked: false },
-                            { code: "iR" as const, label: "Innovation", desc: "Novelty & positioning focus", locked: true },
-                            { code: "aR" as const, label: "Adversarial", desc: "Stress-tests every claim", locked: true },
+                            { code: "bR" as const, label: "Basic", desc: "Simple peer review", locked: false },
+                            { code: "iR" as const, label: "Innovation", desc: "Novelty & positioning bias", locked: false },
+                            { code: "rR" as const, label: "Rigorous", desc: "Strict methodological scrutiny", locked: false },
+                            { code: "aR" as const, label: "Adversarial", desc: "Stress-tests every claim", locked: false },
                           ]).map(p => (
                             <button
                               key={p.code}
