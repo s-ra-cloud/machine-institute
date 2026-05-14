@@ -315,15 +315,15 @@ export async function runEthicsReport(opts: RunOptions): Promise<EthicsReviewOut
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);
 
   const reportDateLabel = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  const reportTitle = `Field Ethics Report on ${journalDisplayName}: ${reportDateLabel}`;
+  const reportTitle = `Publication Audit Field Report on ${journalDisplayName}: ${reportDateLabel}`;
 
   const critCount = flagsList.filter(f => f.severity === "CRITICAL").length;
   const majorCount = flagsList.filter(f => f.severity === "MAJOR").length;
   const minorCount = flagsList.filter(f => f.severity === "MINOR").length;
   const comparisonNote = prevReport
     ? ` This report compares findings against a previous assessment dated ${prevReport.date.toISOString().slice(0, 10)} to evaluate whether ethical standards have improved, worsened, or remained stable.`
-    : " This is the inaugural field ethics assessment for this journal.";
-  const reportAbstract = `This report presents a systematic field-level research-ethics audit of ${journalDisplayName}. A total of ${sampled.length} studies (covering ${coveragePeriod}) were audited across eight ethics categories: citation fraud, data fabrication, selective reporting, plagiarism, undisclosed conflicts of interest or AI involvement, replication-blocking non-disclosure, scope misrepresentation, and irresponsible safety disclosure.${comparisonNote} The audit identified ${flagsList.length} ethics concern(s): ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall field clearance status: ${clearanceStatus.replace(/_/g, " ")}.`;
+    : " This is the inaugural field publication audit for this journal.";
+  const reportAbstract = `This report presents a systematic field-level publication audit of ${journalDisplayName}, performed by the Research Standards Verification Agent. A total of ${sampled.length} studies (covering ${coveragePeriod}) were audited across eight research-standards categories: citation fraud, data fabrication, selective reporting, plagiarism, undisclosed conflicts of interest or AI involvement, replication-blocking non-disclosure, scope misrepresentation, and irresponsible safety disclosure.${comparisonNote} The audit identified ${flagsList.length} concern(s): ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall field clearance status: ${clearanceStatus.replace(/_/g, " ")}.`;
 
   // Stable identifiers for global deduplication on the next run. We store both the documentId (when available) and a normalised title key as a fallback so project-log papers without a FS link are also tracked.
   const auditedPaperIds: string[] = [];
@@ -395,7 +395,7 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
 
   if (!documentId) throw new Error("documentId is required for single-paper audit");
 
-  await emitEvent("ethics-init", `Starting single-paper ethics audit on "${paperTitle || documentId}" in ${journalDisplayName}.`);
+  await emitEvent("ethics-init", `Starting publication audit on "${paperTitle || documentId}" in ${journalDisplayName}.`);
 
   const ctx = await loadPaperContext({ projectId, documentId, initiativeDocId, initiativeSlug, paperTitle, emitEvent });
   const { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts } = ctx;
@@ -456,12 +456,12 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
   const clearanceStatus = extractClearanceStatus(ethicsText);
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);
 
-  const reportTitle = `Single-Paper Ethics Audit: "${title}"`;
+  const reportTitle = `Publication Audit: "${title}"`;
 
   const critCount = flagsList.filter(f => f.severity === "CRITICAL").length;
   const majorCount = flagsList.filter(f => f.severity === "MAJOR").length;
   const minorCount = flagsList.filter(f => f.severity === "MINOR").length;
-  const reportAbstract = `This report presents a focused research-ethics audit of the paper "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The audit covers eight ethics categories plus a dedicated link-integrity check, and is grounded in automated verification of every citation (against Future Science and OpenAlex) and every URL (reachability + arXiv-ID validity) extracted from the paper's full text. ${hadFullText ? "Full text was retrieved by the auditor and used as the evidentiary basis for the categories that depend on it (A, D, F, I)." : "Full text could not be retrieved by the auditor; abstract-only assessment was performed for the categories that allow it, and Sections A and D were marked as auditor tool limitations rather than ethics findings."} ${flagsList.length} ethics concern(s) were identified: ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall paper clearance: ${clearanceStatus.replace(/_/g, " ")}.`;
+  const reportAbstract = `This report presents a focused publication audit of the paper "${title}" by ${authors} (${date}), published in ${journalDisplayName}, performed by the Research Standards Verification Agent. The audit covers eight research-standards categories plus a dedicated link-integrity check, and is grounded in automated verification of every citation (against Future Science and OpenAlex) and every URL (reachability + arXiv-ID validity) extracted from the paper's full text. ${hadFullText ? "Full text was retrieved by the auditor and used as the evidentiary basis for the categories that depend on it (A, D, F, I)." : "Full text could not be retrieved by the auditor; abstract-only assessment was performed for the categories that allow it, and Sections A and D were marked as auditor tool limitations rather than research-standards findings."} ${flagsList.length} concern(s) were identified: ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall paper clearance: ${clearanceStatus.replace(/_/g, " ")}.`;
 
   const auditedPaperIds = [`doc:${documentId}`, `title:${title.toLowerCase().trim()}`];
 

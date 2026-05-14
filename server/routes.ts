@@ -1720,14 +1720,15 @@ I will now provide the papers.`;
       const lockedSet = new Set(lockedIds);
 
       // Filter out our own published outputs from the audit-target list:
-      // single-paper ethics audits, field ethics reports, literature reviews, and
+      // publication audits, field-level audits, literature reviews, and
       // editorials. These were published to the same FS initiative and would
-      // otherwise show up here as "papers" to audit.
+      // otherwise show up here as "papers" to audit. Both old (ethics-audit)
+      // and new (publication-audit) title prefixes are matched for back-compat.
       const isOwnPublication = (title: string, authors: string): boolean => {
         const t = (title || "").toLowerCase().trim();
         const a = (authors || "").toLowerCase();
-        if (t.startsWith("single-paper ethics audit")) return true;
-        if (t.startsWith("field ethics report")) return true;
+        if (t.startsWith("single-paper ethics audit") || t.startsWith("publication audit")) return true;
+        if (t.startsWith("field ethics report") || t.startsWith("publication audit field report")) return true;
         if (t.startsWith("literature review:")) return true;
         if (t.startsWith("editorial:")) return true;
         // Author-based fallback for MachInstit ethics / lit-review / editorialist agents.
@@ -1899,8 +1900,8 @@ I will now provide the papers.`;
       const isOwnPublication = (title: string, authors: string): boolean => {
         const t = (title || "").toLowerCase().trim();
         const a = (authors || "").toLowerCase();
-        if (t.startsWith("single-paper ethics audit")) return true;
-        if (t.startsWith("field ethics report")) return true;
+        if (t.startsWith("single-paper ethics audit") || t.startsWith("publication audit")) return true;
+        if (t.startsWith("field ethics report") || t.startsWith("publication audit field report")) return true;
         if (t.startsWith("literature review:")) return true;
         if (t.startsWith("editorial:")) return true;
         if (t.startsWith("basic peer review:") || t.startsWith("adversarial peer review:") || t.startsWith("innovation peer review:") || t.startsWith("rigorous peer review:")) return true;
@@ -2157,7 +2158,7 @@ I will now provide the papers.`;
             agentId: "H",
             journalId: data.journalId,
             keywords: [],
-            researchQuestion: `Single-paper ethics audit (peer-review co-author) of "${data.paperTitle || data.documentId}" in ${getJournalDisplayName(data.journalId)}`,
+            researchQuestion: `Publication audit (peer-review co-author) of "${data.paperTitle || data.documentId}" in ${getJournalDisplayName(data.journalId)}`,
             documentId: data.documentId,
             paperTitle: data.paperTitle || null,
             prompt1: H_SINGLE_PAPER_PROMPT,
@@ -2512,8 +2513,8 @@ I will now provide the papers.`;
       }
 
       const researchQuestion = effectiveDocumentId
-        ? `Single-paper ethics audit of "${effectivePaperTitle || effectiveDocumentId}" in ${getJournalDisplayName(effectiveJournalId)}`
-        : `Field-level ethics audit of ${getJournalDisplayName(effectiveJournalId)}${effectiveTopic ? ` — topic: ${effectiveTopic}` : ""}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
+        ? `Publication audit of "${effectivePaperTitle || effectiveDocumentId}" in ${getJournalDisplayName(effectiveJournalId)}`
+        : `Field-level publication audit of ${getJournalDisplayName(effectiveJournalId)}${effectiveTopic ? ` — topic: ${effectiveTopic}` : ""}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
 
       const modelConfig: ModelProviderConfig = {
         providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
