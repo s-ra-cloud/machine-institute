@@ -27,6 +27,7 @@ const ROLE_CODES: Record<string, string> = {
   "bR": "Basic Reviewer",
   "aR": "Adversarial Reviewer",
   "iR": "Innovation Reviewer",
+  "rR": "Rigorous Reviewer",
   "bLR": "Basic Literature Reviewer",
   "aLR": "Adversarial Literature Reviewer",
   "H": "Research Standards Verification Agent",
@@ -71,17 +72,29 @@ function parseAgentName(name: string) {
 function enrichMember(m: AgentMemberDisplay): AgentMemberDisplay {
   const parsed = parseAgentName(m.name);
   const hasUnknown = !m.model || m.model === "Unknown" || m.model === "X" || !m.memory || m.memory === "Unknown";
-  if (!hasUnknown) return m;
-  const roleArticle = /^[AEIOU]/i.test(parsed.roleLabel) ? "an" : "a";
+  const canonicalRole = parsed.roleCode && ROLE_CODES[parsed.roleCode] ? ROLE_CODES[parsed.roleCode] : null;
+  if (!hasUnknown && !canonicalRole) return m;
+  const effectiveRole = canonicalRole || (m.role && m.role !== "Researcher" ? m.role : parsed.roleLabel);
+  if (!hasUnknown && canonicalRole) {
+    const roleArticle = /^[AEIOU]/i.test(effectiveRole) ? "an" : "a";
+    const fwArticle = /^[AEIOU]/i.test(parsed.framework) ? "An" : "A";
+    const modelDescription = m.model && m.model !== "Unknown" && m.model !== "X" ? m.model : parsed.modelLabel;
+    return {
+      ...m,
+      role: effectiveRole,
+      plainDescription: `${fwArticle} ${parsed.framework} agent running on ${modelDescription} as ${roleArticle} ${effectiveRole}, with ${(m.memory || parsed.memoryLabel).toLowerCase()}.`,
+    };
+  }
+  const roleArticle = /^[AEIOU]/i.test(effectiveRole) ? "an" : "a";
   const fwArticle = /^[AEIOU]/i.test(parsed.framework) ? "An" : "A";
   const modelDescription = parsed.modelLabel === "Unknown" ? "an unknown model" : parsed.modelLabel;
   return {
     ...m,
     framework: parsed.framework,
     model: m.model && m.model !== "Unknown" && m.model !== "X" ? m.model : parsed.modelLabel,
-    role: m.role && m.role !== "Researcher" ? m.role : parsed.roleLabel,
+    role: effectiveRole,
     memory: m.memory && m.memory !== "Unknown" ? m.memory : parsed.memoryLabel,
-    plainDescription: `${fwArticle} ${parsed.framework} agent running on ${modelDescription} as ${roleArticle} ${parsed.roleLabel}, with ${parsed.memoryLabel.toLowerCase()}.`,
+    plainDescription: `${fwArticle} ${parsed.framework} agent running on ${modelDescription} as ${roleArticle} ${effectiveRole}, with ${parsed.memoryLabel.toLowerCase()}.`,
   };
 }
 
