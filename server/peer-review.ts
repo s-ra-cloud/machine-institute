@@ -4,6 +4,7 @@ import { loadPaperContext } from "./ethics-review";
 import {
   getPeerReviewPrompt,
   extractRecommendation,
+  extractRevisions,
   type PeerReviewPersona,
 } from "./prompts/peer-review";
 import type { EthicsReviewOutput } from "./ethics-review";
@@ -16,6 +17,8 @@ export interface PeerReviewOutput {
   reviewTitle: string;
   reviewAbstract: string;
   recommendation: string;
+  majorRevisions: Array<{ description: string }>;
+  minorRevisions: Array<{ description: string }>;
   durationSeconds: number;
   paperUsed: { title: string; authors: string; date: string; documentId: string };
   ethicsSummary?: string;
@@ -119,6 +122,7 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   await emitEvent("peer-review-llm", `Peer review complete (${reviewText.length} chars).`);
 
   const recommendationParsed = extractRecommendation(reviewText) || "Major Revision";
+  const { major: majorRevisions, minor: minorRevisions } = extractRevisions(reviewText);
   const personaLabel = persona === "bR" ? "Basic" : persona === "aR" ? "Adversarial" : persona === "iR" ? "Innovation" : "Rigorous";
   const reviewTitle = `${personaLabel} Peer Review: "${title}"`;
 
@@ -134,6 +138,8 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
     reviewTitle,
     reviewAbstract,
     recommendation: recommendationParsed,
+    majorRevisions,
+    minorRevisions,
     durationSeconds,
     paperUsed: { title, authors, date, documentId },
     ethicsSummary,

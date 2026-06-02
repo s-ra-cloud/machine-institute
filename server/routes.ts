@@ -3,10 +3,10 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, insertPeerReviewSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport, type PeerReview, type InsertEthicsReport } from "@shared/schema";
 import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPORT_CHUNK_3_PROMPT, H_SINGLE_PAPER_PROMPT, applyJournalName } from "./prompts/h-solo";
-import { runEthicsReport, type EthicsReviewOutput } from "./ethics-review";
+import { runEthicsReport, extractFlags, type EthicsReviewOutput, type EthicsFlag } from "./ethics-review";
 import { fetchFsPaperContent } from "./citation-verifier";
 import { runPeerReview } from "./peer-review";
-import { getPeerReviewPrompt, BR_PROMPT, IR_PROMPT, AR_PROMPT, RR_PROMPT, type PeerReviewPersona } from "./prompts/peer-review";
+import { getPeerReviewPrompt, BR_PROMPT, IR_PROMPT, AR_PROMPT, RR_PROMPT, extractRevisions, type PeerReviewPersona } from "./prompts/peer-review";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -33,6 +33,27 @@ function buildConventionName(modelName: string, agentId: string): string {
   else if (m.includes("gpt-4")) initials = "G4";
   else initials = "ML";
   return `MachInstit ${initials}${agentId}-N1`;
+}
+
+// Map publication-audit flags to Future Science revision arrays:
+// CRITICAL + MAJOR flags become majorRevisions, MINOR flags become
+// minorRevisions. Each flag summary is the revision description.
+function flagsToRevisions(flags: EthicsFlag[]): {
+  major: Array<{ description: string }>;
+  minor: Array<{ description: string }>;
+} {
+  const major: Array<{ description: string }> = [];
+  const minor: Array<{ description: string }> = [];
+  for (const f of flags || []) {
+    const description = (f?.summary || "").trim();
+    if (!description) continue;
+    if (f.severity === "CRITICAL" || f.severity === "MAJOR") {
+      major.push({ description });
+    } else if (f.severity === "MINOR") {
+      minor.push({ description });
+    }
+  }
+  return { major, minor };
 }
 
 function generateSlug(title: string): string {
@@ -1816,6 +1837,14 @@ I will now provide the papers.`;
       const linkOriginalContribution = report.documentId
         ? `https://future-science.org/${report.journalId}/${report.documentId}`
         : undefined;
+      let republishFlags: EthicsFlag[] = [];
+      try {
+        republishFlags = JSON.parse(report.flagsJson || "[]");
+      } catch {}
+      if (!republishFlags.length) {
+        republishFlags = extractFlags(report.contentMarkdown);
+      }
+      const { major: ethicsMajor, minor: ethicsMinor } = flagsToRevisions(republishFlags);
 
       const subResult = await submitEthicsReportToFutureScience({
         title: report.reportTitle,
@@ -1828,6 +1857,8 @@ I will now provide the papers.`;
         orchestratorName: humanOrchestratorName,
         agentDescription: report.agentDescription || undefined,
         linkOriginalContribution,
+        majorRevisions: ethicsMajor,
+        minorRevisions: ethicsMinor,
       });
 
       if (!subResult) {
@@ -2304,6 +2335,8 @@ I will now provide the papers.`;
             agentDescription: data.agentDescription || undefined,
             linkOriginalContribution,
             ethicsCoauthorName: includeEthicsCoauthor && result.ethicsUsed ? ethicsAgentName : undefined,
+            majorRevisions: result.majorRevisions,
+            minorRevisions: result.minorRevisions,
           });
           if (subResult) {
             updates.publishedDocumentId = subResult.documentId;
@@ -2352,6 +2385,7 @@ I will now provide the papers.`;
         ? buildConventionName(review.modelName || "", "H")
         : undefined;
       const linkOriginalContribution = `https://future-science.org/${review.journalId}/${review.documentId}`;
+      const { major: republishMajor, minor: republishMinor } = extractRevisions(review.contentMarkdown);
 
       const subResult = await submitPeerReviewToFutureScience({
         title: review.reviewTitle,
@@ -2365,6 +2399,8 @@ I will now provide the papers.`;
         agentDescription: review.agentDescription || undefined,
         linkOriginalContribution,
         ethicsCoauthorName: ethicsAgentName,
+        majorRevisions: republishMajor,
+        minorRevisions: republishMinor,
       });
       if (!subResult) return res.status(502).json({ error: "Future Science rejected all fallback types." });
       await storage.updatePeerReview(reviewId, { publishedDocumentId: subResult.documentId });
@@ -2660,6 +2696,7 @@ I will now provide the papers.`;
           const linkOriginalContribution = data.documentId
             ? `https://future-science.org/${data.journalId}/${data.documentId}`
             : undefined;
+          const { major: ethicsMajor, minor: ethicsMinor } = flagsToRevisions(result.flagsList);
           const subResult = await submitEthicsReportToFutureScience({
             title: result.reportTitle,
             markdownContent: result.ethicsText,
@@ -2671,6 +2708,8 @@ I will now provide the papers.`;
             orchestratorName: humanOrchestratorName,
             agentDescription: data.agentDescription || undefined,
             linkOriginalContribution,
+            majorRevisions: ethicsMajor,
+            minorRevisions: ethicsMinor,
           });
           if (subResult) {
             updates.publishedDocumentId = subResult.documentId;

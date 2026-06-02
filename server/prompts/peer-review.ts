@@ -3,21 +3,21 @@
 // reviewer's role, the optional H Research Standards Verification Agent
 // co-author, and what content the model will receive. No section outline.
 
-export const BR_PROMPT = `You are a peer reviewer (bR — basic) for a scientific journal. Write one structured peer review of the submitted paper and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
+export const BR_PROMPT = `You are a peer reviewer (bR — basic) for a scientific journal. Write one structured peer review of the submitted paper. Add "## Major Revisions" and "## Minor Revisions" lists of specific changes, and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
 
-Your input contains: (1) the submitted paper's title, authors, abstract, and full text; (2) a Publications block of prior work from the same journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from a parallel audit by the H Research Standards Verification Agent — if present, integrate its findings into your review and final recommendation.`;
+Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
 
-export const IR_PROMPT = `You are an INNOVATION-focused peer reviewer (iR) for a scientific journal. Foreground novelty and positioning relative to prior work. Write one structured peer review of the submitted paper and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
+export const IR_PROMPT = `You are an INNOVATION-focused peer reviewer (iR) for a scientific journal. Foreground novelty and positioning relative to prior work. Write one structured peer review of the submitted paper. Add "## Major Revisions" and "## Minor Revisions" lists of specific changes, and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
 
-Your input contains: (1) the submitted paper's title, authors, abstract, and full text; (2) a Publications block of prior work from the same journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from a parallel audit by the H Research Standards Verification Agent — if present, integrate its findings.`;
+Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
 
-export const AR_PROMPT = `You are an ADVERSARIAL peer reviewer (aR) for a scientific journal. Probe every weakness, challenge every claim, and apply the highest possible bar. Write one structured peer review of the submitted paper and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
+export const AR_PROMPT = `You are an ADVERSARIAL peer reviewer (aR) for a scientific journal. Probe every weakness and challenge every claim at the highest bar. Write one structured peer review of the submitted paper. Add "## Major Revisions" and "## Minor Revisions" lists of specific changes, and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
 
-Your input contains: (1) the submitted paper's title, authors, abstract, and full text; (2) a Publications block of prior work from the same journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from a parallel audit by the H Research Standards Verification Agent — if present, integrate its findings.`;
+Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
 
-export const RR_PROMPT = `You are a RIGOROUS peer reviewer (rR) for a scientific journal. Apply strict methodological scrutiny — statistical correctness, experimental design validity, reproducibility — without an adversarial framing. Write one structured peer review of the submitted paper and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
+export const RR_PROMPT = `You are a RIGOROUS peer reviewer (rR) for a scientific journal. Apply strict methodological scrutiny — statistical correctness, design validity, reproducibility — without adversarial framing. Write one structured peer review of the submitted paper. Add "## Major Revisions" and "## Minor Revisions" lists of specific changes, and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
 
-Your input contains: (1) the submitted paper's title, authors, abstract, and full text; (2) a Publications block of prior work from the same journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from a parallel audit by the H Research Standards Verification Agent — if present, integrate its findings.`;
+Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
 
 export type PeerReviewPersona = "bR" | "iR" | "aR" | "rR";
 
@@ -62,4 +62,53 @@ export function extractRecommendation(reviewText: string): string | null {
     }
   }
   return best ? best.label : null;
+}
+
+export interface ExtractedRevisions {
+  major: Array<{ description: string }>;
+  minor: Array<{ description: string }>;
+}
+
+// Pull individual list items (bullets or numbered) out of a markdown section,
+// joining continuation lines and dropping trivially short fragments.
+function extractListItems(section: string): string[] {
+  const items: string[] = [];
+  let current = "";
+  const flush = () => {
+    const cleaned = current.replace(/\s+/g, " ").trim();
+    if (cleaned.length >= 4) items.push(cleaned);
+    current = "";
+  };
+  for (const raw of section.split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    const bullet = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
+    if (bullet) {
+      flush();
+      current = bullet[1];
+    } else if (line.trim().length === 0) {
+      flush();
+    } else if (current) {
+      current += " " + line.trim();
+    }
+  }
+  flush();
+  return items;
+}
+
+// Parse "Major Revisions" / "Minor Revisions" markdown sections out of a peer
+// review and return them as FS revision items (capped at 10 each).
+export function extractRevisions(reviewText: string): ExtractedRevisions {
+  const text = reviewText || "";
+  const grab = (label: string): string[] => {
+    const re = new RegExp(
+      `(?:^|\\n)\\s*#{1,6}\\s*(?:\\*\\*)?\\s*${label}[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*#{1,6}\\s|$)`,
+      "i",
+    );
+    const m = text.match(re);
+    return m ? extractListItems(m[1]) : [];
+  };
+  return {
+    major: grab("major\\s+revisions?").slice(0, 10).map((d) => ({ description: d })),
+    minor: grab("minor\\s+revisions?").slice(0, 10).map((d) => ({ description: d })),
+  };
 }

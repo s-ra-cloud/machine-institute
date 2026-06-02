@@ -6,7 +6,9 @@ import {
   AR_PROMPT,
   RR_PROMPT,
   extractRecommendation,
+  extractRevisions,
 } from "../prompts/peer-review";
+import { normalizeRevisions } from "../future-science";
 
 function wordCount(s: string): number {
   return s.trim().split(/\s+/).filter(Boolean).length;
@@ -76,6 +78,155 @@ describe("Peer review — extractRecommendation", () => {
   it("prefers the LAST recommendation token in the text (final verdict)", () => {
     const text = "Earlier we considered Accept, but ultimately the recommendation is Reject.";
     expect(extractRecommendation(text)).toBe("Reject");
+  });
+});
+
+describe("Peer review — extractRevisions", () => {
+  const review = `# Review
+
+## Summary
+Good paper overall.
+
+## Major Revisions
+- The statistical analysis lacks a power calculation.
+- Claim in Section 3 is unsupported by the data presented.
+1. Add a control condition to experiment 2.
+
+## Minor Revisions
+- Fix the typo in Table 1.
+* Clarify the units in Figure 4.
+
+## Recommendation
+Major Revision`;
+
+  it("parses Major and Minor revision sections into separate arrays", () => {
+    const { major, minor } = extractRevisions(review);
+    expect(major).toHaveLength(3);
+    expect(minor).toHaveLength(2);
+    expect(major[0].description).toMatch(/power calculation/);
+    expect(minor[0].description).toMatch(/typo in Table 1/);
+  });
+
+  it("supports both bullet and numbered list markers", () => {
+    const { major } = extractRevisions(review);
+    expect(major.some((m) => /control condition/.test(m.description))).toBe(true);
+  });
+
+  it("returns empty arrays when no revision sections are present", () => {
+    const { major, minor } = extractRevisions("Just prose, no headings, recommendation: Accept.");
+    expect(major).toEqual([]);
+    expect(minor).toEqual([]);
+  });
+
+  it("joins continuation lines into a single revision item", () => {
+    const text = `## Major Revisions\n- The methodology section\n  needs substantial rework\n  to be reproducible.\n`;
+    const { major } = extractRevisions(text);
+    expect(major).toHaveLength(1);
+    expect(major[0].description).toBe("The methodology section needs substantial rework to be reproducible.");
+  });
+
+  it("caps each section at 10 items", () => {
+    const items = Array.from({ length: 15 }, (_, i) => `- Item ${i + 1} requires attention`).join("\n");
+    const { major } = extractRevisions(`## Major Revisions\n${items}\n`);
+    expect(major).toHaveLength(10);
+  });
+
+  it("matches headings at any markdown depth and singular 'Revision'", () => {
+    const text = `### Major Revision\n- One issue to address here\n#### Minor Revision\n- A small nit to fix\n`;
+    const { major, minor } = extractRevisions(text);
+    expect(major).toHaveLength(1);
+    expect(minor).toHaveLength(1);
+  });
+});
+
+describe("Future Science — normalizeRevisions", () => {
+  it("returns undefined for empty or all-blank input", () => {
+    expect(normalizeRevisions(undefined)).toBeUndefined();
+    expect(normalizeRevisions([])).toBeUndefined();
+    expect(normalizeRevisions([{ description: "   " }, { description: "" }])).toBeUndefined();
+  });
+
+  it("trims, collapses whitespace, and drops blanks", () => {
+    const out = normalizeRevisions([
+      { description: "  needs   work \n here " },
+      { description: "" },
+    ]);
+    expect(out).toEqual([{ description: "needs work here" }]);
+  });
+
+  it("caps at 10 entries", () => {
+    const input = Array.from({ length: 14 }, (_, i) => ({ description: `item ${i}` }));
+    expect(normalizeRevisions(input)).toHaveLength(10);
+  });
+
+  it("truncates descriptions longer than 1500 chars with an ellipsis", () => {
+    const long = "x".repeat(2000);
+    const out = normalizeRevisions([{ description: long }])!;
+    expect(out[0].description.length).toBe(1500);
+    expect(out[0].description.endsWith("…")).toBe(true);
+  });
+});
+
+describe("Future Science — revision arrays gated to response-style types", () => {
+  // Mirrors the per-type stripping in submit{PeerReview,EthicsReport}ToFutureScience:
+  // revisions ride alongside linkOriginalContribution and must be removed for
+  // any fallback type that does not accept linkOriginalContribution.
+  function assemble(
+    candidateType: string,
+    allowed: string[],
+    withLink: boolean,
+  ): Record<string, unknown> {
+    const base: Record<string, unknown> = { title: "t" };
+    if (withLink) {
+      base.linkOriginalContribution = "https://fs/x";
+      base.majorRevisions = [{ description: "major" }];
+      base.minorRevisions = [{ description: "minor" }];
+    }
+    const metadata: Record<string, unknown> = { ...base, type: candidateType };
+    if (!allowed.includes(candidateType)) {
+      delete metadata.linkOriginalContribution;
+      delete metadata.majorRevisions;
+      delete metadata.minorRevisions;
+    }
+    return metadata;
+  }
+
+  const PEER_ALLOWED = ["Peer-review", "Response to a contribution"];
+  const ETHICS_ALLOWED = ["Audit", "Response to a contribution"];
+
+  it("keeps revisions on allowed peer-review types", () => {
+    for (const t of PEER_ALLOWED) {
+      const m = assemble(t, PEER_ALLOWED, true);
+      expect(m.majorRevisions).toBeDefined();
+      expect(m.minorRevisions).toBeDefined();
+      expect(m.linkOriginalContribution).toBeDefined();
+    }
+  });
+
+  it("strips revisions on non-accepting peer-review fallback types", () => {
+    for (const t of ["Unreviewed manuscript", "Other", "Article"]) {
+      const m = assemble(t, PEER_ALLOWED, true);
+      expect(m.majorRevisions).toBeUndefined();
+      expect(m.minorRevisions).toBeUndefined();
+      expect(m.linkOriginalContribution).toBeUndefined();
+    }
+  });
+
+  it("strips revisions on non-accepting ethics fallback types", () => {
+    for (const t of ["Unreviewed manuscript", "Other", "Article"]) {
+      const m = assemble(t, ETHICS_ALLOWED, true);
+      expect(m.majorRevisions).toBeUndefined();
+      expect(m.minorRevisions).toBeUndefined();
+    }
+    const audit = assemble("Audit", ETHICS_ALLOWED, true);
+    expect(audit.majorRevisions).toBeDefined();
+  });
+
+  it("never includes revisions when there is no linkOriginalContribution", () => {
+    const m = assemble("Audit", ETHICS_ALLOWED, false);
+    expect(m.majorRevisions).toBeUndefined();
+    expect(m.minorRevisions).toBeUndefined();
+    expect(m.linkOriginalContribution).toBeUndefined();
   });
 });
 

@@ -154,6 +154,36 @@ export async function submitLiteratureReviewToFutureScience(
   }
 }
 
+// Future Science accepts up to 10 revision objects per array, each with a
+// `description` of at most 1500 characters. These are only valid on
+// response-style contributions (where `linkOriginalContribution` is set).
+export interface RevisionItem {
+  description: string;
+}
+
+const MAX_REVISIONS = 10;
+const MAX_REVISION_DESC = 1500;
+
+// Trim, drop blanks, cap to 10 entries, and truncate each description to the
+// FS 1500-char limit. Returns undefined when there is nothing to send so the
+// field is simply omitted from the payload.
+export function normalizeRevisions(
+  items?: Array<{ description: string }>,
+): Array<{ description: string }> | undefined {
+  if (!items || items.length === 0) return undefined;
+  const cleaned = items
+    .map((r) => (r?.description || "").replace(/\s+/g, " ").trim())
+    .filter((d) => d.length > 0)
+    .slice(0, MAX_REVISIONS)
+    .map((d) => ({
+      description:
+        d.length > MAX_REVISION_DESC
+          ? d.slice(0, MAX_REVISION_DESC - 1).trimEnd() + "…"
+          : d,
+    }));
+  return cleaned.length ? cleaned : undefined;
+}
+
 interface EthicsReportSubmitOptions {
   title: string;
   markdownContent: string;
@@ -168,6 +198,10 @@ interface EthicsReportSubmitOptions {
   // When present, the report is submitted as "Response to a contribution"
   // with linkOriginalContribution pointing to this URL.
   linkOriginalContribution?: string;
+  // Up to 10 major / minor revision items derived from the audit findings.
+  // Only sent when linkOriginalContribution is present (FS requirement).
+  majorRevisions?: RevisionItem[];
+  minorRevisions?: RevisionItem[];
 }
 
 const ETHICS_TYPE_FALLBACKS_FIELD = ["Audit", "Unreviewed manuscript", "Other", "Article"];
@@ -187,6 +221,10 @@ export interface PeerReviewSubmitOptions {
   linkOriginalContribution?: string;
   // Optional second author (the ethics co-author when enabled).
   ethicsCoauthorName?: string;
+  // Up to 10 major / minor revision items derived from the review findings.
+  // Only sent when linkOriginalContribution is present (FS requirement).
+  majorRevisions?: RevisionItem[];
+  minorRevisions?: RevisionItem[];
 }
 
 export async function submitPeerReviewToFutureScience(
@@ -239,15 +277,22 @@ export async function submitPeerReviewToFutureScience(
   }
   if (options.linkOriginalContribution) {
     baseMetadata.linkOriginalContribution = options.linkOriginalContribution;
+    // Revision arrays are only valid alongside linkOriginalContribution.
+    const major = normalizeRevisions(options.majorRevisions);
+    const minor = normalizeRevisions(options.minorRevisions);
+    if (major) baseMetadata.majorRevisions = major;
+    if (minor) baseMetadata.minorRevisions = minor;
   }
 
   let lastErr: string = "";
   for (const candidateType of PEER_REVIEW_TYPE_FALLBACKS) {
     try {
       const metadata: Record<string, unknown> = { ...baseMetadata, type: candidateType };
-      // linkOriginalContribution is only valid for response-style types
+      // linkOriginalContribution + revisions are only valid for response-style types
       if (candidateType !== "Peer-review" && candidateType !== "Response to a contribution") {
         delete metadata.linkOriginalContribution;
+        delete metadata.majorRevisions;
+        delete metadata.minorRevisions;
       }
       const formData = new FormData();
       formData.append("data", JSON.stringify({ data: metadata }));
@@ -320,6 +365,8 @@ export async function submitPeerReviewToFutureScience(
         const metadata: Record<string, unknown> = { ...fallbackBase, type: candidateType };
         if (candidateType !== "Peer-review" && candidateType !== "Response to a contribution") {
           delete metadata.linkOriginalContribution;
+          delete metadata.majorRevisions;
+          delete metadata.minorRevisions;
         }
         const formData = new FormData();
         formData.append("data", JSON.stringify({ data: metadata }));
@@ -398,6 +445,12 @@ export async function submitEthicsReportToFutureScience(
   }
   if (options.linkOriginalContribution) {
     baseMetadata.linkOriginalContribution = options.linkOriginalContribution;
+    // Revision arrays are only valid alongside linkOriginalContribution
+    // (i.e. single-paper audits, not field-level reports).
+    const major = normalizeRevisions(options.majorRevisions);
+    const minor = normalizeRevisions(options.minorRevisions);
+    if (major) baseMetadata.majorRevisions = major;
+    if (minor) baseMetadata.minorRevisions = minor;
   }
 
   const typeFallbacks = options.linkOriginalContribution
@@ -414,6 +467,8 @@ export async function submitEthicsReportToFutureScience(
       const metadata: Record<string, unknown> = { ...baseMetadata, type: candidateType };
       if (candidateType !== "Audit" && candidateType !== "Response to a contribution") {
         delete metadata.linkOriginalContribution;
+        delete metadata.majorRevisions;
+        delete metadata.minorRevisions;
       }
       const formData = new FormData();
       formData.append("data", JSON.stringify({ data: metadata }));

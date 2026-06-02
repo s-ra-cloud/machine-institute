@@ -1,0 +1,1 @@
+- [Future Science revision arrays](future-science-revisions.md) — majorRevisions/minorRevisions only valid with linkOriginalContribution; strip them in lockstep for non-response fallback types or FS rejects the payload.
