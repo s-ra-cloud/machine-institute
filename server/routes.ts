@@ -7,6 +7,8 @@ import { runEthicsReport, extractFlags, type EthicsReviewOutput, type EthicsFlag
 import { fetchFsPaperContent } from "./citation-verifier";
 import { runPeerReview } from "./peer-review";
 import { getPeerReviewPrompt, BR_PROMPT, IR_PROMPT, AR_PROMPT, RR_PROMPT, extractRevisions, extractReviewSummary, buildPeerReviewAbstract, buildVerificationSection, hasVerificationSection, derivePeerReviewKeywords, type PeerReviewPersona } from "./prompts/peer-review";
+import { buildLiteratureReviewFallbackAbstract } from "./prompts/literature-review";
+import { EDITORIAL_SUMMARY_INSTRUCTION, extractEditorialSummary, stripEditorialSummarySection, buildEditorialAbstract, deriveEditorialKeywords } from "./prompts/editorial";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -1638,9 +1640,12 @@ I will now provide the papers.`;
       } else {
         await emitLREvent(
           "validation-warning",
-          "Generated review did not contain a parseable Abstract section; submitting a generic summary fallback instead of intro text.",
+          "Generated review did not contain a parseable Abstract section; composing a substantive abstract from the review's own conclusion/findings instead.",
         );
-        extractedAbstract = `Summary unavailable: this literature review on "${data.researchQuestion}" was generated without a parseable abstract section. See the full review for scope, findings, and conclusions.`;
+        extractedAbstract = buildLiteratureReviewFallbackAbstract({
+          researchQuestion: data.researchQuestion,
+          contentMarkdown: cleanReviewText,
+        });
         // Keep the locally-stored review consistent with what was submitted: prepend the
         // fallback abstract to the body so the UI shows the same text as the FS metadata.
         cleanReviewText = `## Abstract\n\n${extractedAbstract}\n\n${cleanReviewText}`;
@@ -3324,7 +3329,7 @@ List every cited paper in Chicago author-date bibliography format:
       const model = resolveModelName(config);
 
       const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability";
-      const effectiveSystemPrompt = editablePrompt || DEFAULT_EDITORIAL_PROMPT;
+      const effectiveSystemPrompt = `${editablePrompt || DEFAULT_EDITORIAL_PROMPT}\n\n${EDITORIAL_SUMMARY_INSTRUCTION}`;
 
       const userMessage = `Topic: ${effectiveTopic} — based on the institute's current publication corpus.
 ${userPrompt ? `\nAdditional user instructions: ${userPrompt}` : ""}
@@ -3387,6 +3392,14 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
       await emitEDEvent(edAgentId, "llm-response", `LLM response received. Processing and extracting editorial content.`);
 
       let editorialText = generationResult.content;
+
+      // Lift the leading "## In Brief" summary into the published abstract, then
+      // strip that section so the displayed editorial keeps its flowing-prose
+      // style. extractEditorialSummary returns null if the model omitted it
+      // (e.g. when a custom prompt is used), in which case the abstract falls
+      // back deterministically to the editorial's own opening prose.
+      const parsedEditorialSummary = extractEditorialSummary(editorialText);
+      editorialText = stripEditorialSummarySection(editorialText);
 
       const titleMatch = editorialText.match(/^#+\s*\*{0,2}(?:Title:\s*)?(.+?)\*{0,2}\s*$/m)
         || editorialText.match(/^\*{2}(?:Title:\s*)?(.+?)\*{2}\s*$/m)
@@ -3451,9 +3464,24 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
       const rawHtml = markdownToHtml(editorialText);
       const safeHtml = sanitizeHtml(rawHtml);
 
+      // Build one substantive abstract from the parsed "## In Brief" summary
+      // (or a deterministic fallback from the editorial's opening prose) and use
+      // it for BOTH the stored excerpt and the Future Science submission, so a
+      // reader scanning either learns the editorial's actual thesis rather than
+      // a hook fragment. excerptText is retained only as a last-resort signal.
+      const editorialAbstract = buildEditorialAbstract({
+        title: extractedTitle,
+        summary: parsedEditorialSummary || excerptText,
+        bodyText: editorialText,
+      });
+      const editorialKeywords = deriveEditorialKeywords({
+        title: extractedTitle,
+        bodyText: editorialText,
+      });
+
       const updates: Partial<EditorialRecord> = {
         title: extractedTitle,
-        excerpt: excerptText || "A synthesized editorial on current research trends.",
+        excerpt: editorialAbstract,
         contentHtml: safeHtml,
         status: "completed",
         completedAt: new Date(),
@@ -3465,12 +3493,12 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
           const pubResult = await publishToFutureScience({
             title: extractedTitle,
             contentHtml: safeHtml,
-            abstract: excerptText || `An editorial on ${effectiveTopic || "current research trends"}.`,
+            abstract: editorialAbstract,
             authorFirstName: (editorial?.orchestratorName || "Machine").split(" ")[0] || "Machine",
             authorLastName: (editorial?.orchestratorName || "Institute").split(" ").slice(1).join(" ") || "Institute",
             authorInstitution: "Machine Institute",
             authorEmail: "research@machine-institute.org",
-            keywords: ["editorial", "AI research", "automated science"],
+            keywords: editorialKeywords,
             type: "article",
             accessToken,
             initiativeSlug: "mirror",
