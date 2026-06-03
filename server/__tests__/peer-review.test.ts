@@ -453,6 +453,41 @@ describe("Peer review — derivePeerReviewKeywords", () => {
     expect(kws).toContain("peer review");
   });
 
+  it("republish reuses the keywords persisted at generation (parity), falling back only when absent", () => {
+    // Mirrors the route logic: generation stores result.keywords in
+    // sourceTrace; republish reuses them verbatim for parity, and only
+    // re-derives from paperTitle for legacy reviews lacking them.
+    function republishKeywords(sourceTrace: string | null, paperTitle: string | null, persona: "bR" | "iR" | "aR" | "rR"): string[] {
+      let chosen: string[] | undefined;
+      try {
+        const parsed = sourceTrace ? JSON.parse(sourceTrace) : null;
+        if (parsed && Array.isArray(parsed.keywords) && parsed.keywords.length >= 3) {
+          chosen = parsed.keywords.filter((k: unknown): k is string => typeof k === "string");
+        }
+      } catch {}
+      if (!chosen || chosen.length < 3) {
+        chosen = derivePeerReviewKeywords({ paperTitle, persona });
+      }
+      return chosen;
+    }
+
+    // Fresh generation derived keywords from the paper's FS keywords + title.
+    const generated = derivePeerReviewKeywords({
+      paperKeywords: ["sparse autoencoders", "interpretability", "feature steering"],
+      paperTitle: "A Study of Sparse Autoencoders",
+      persona: "bR",
+    });
+    const sourceTrace = JSON.stringify({ documentId: "doc1", keywords: generated });
+
+    // Republish must reproduce the EXACT same keywords (parity).
+    expect(republishKeywords(sourceTrace, "A Study of Sparse Autoencoders", "bR")).toEqual(generated);
+
+    // Legacy review without persisted keywords falls back to title derivation.
+    const legacy = republishKeywords(JSON.stringify({ documentId: "doc1" }), "Mechanistic Interpretability", "aR");
+    expect(legacy.length).toBeGreaterThanOrEqual(3);
+    expect(legacy).toContain("peer review");
+  });
+
   it("dedupes case-insensitively and caps at 8 keywords", () => {
     const kws = derivePeerReviewKeywords({
       paperKeywords: ["Alpha", "alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"],

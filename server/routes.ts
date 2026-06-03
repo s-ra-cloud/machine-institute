@@ -2299,6 +2299,10 @@ I will now provide the papers.`;
         ethicsRequested: includeEthicsCoauthor,
         ethicsUsed: result.ethicsUsed,
         ethicsSummary: result.ethicsSummary || null,
+        // Persist the derived keywords (sourced from the audited paper's FS
+        // keywords + title) so the admin republish path can reproduce the exact
+        // same keywords without refetching from Future Science.
+        keywords: result.keywords,
       });
 
       const updates: Partial<PeerReview> = {
@@ -2408,11 +2412,23 @@ I will now provide the papers.`;
         }
       }
 
-      // Re-derive meaningful keywords from stored paper data (no FS refetch).
-      const republishKeywords = derivePeerReviewKeywords({
-        paperTitle: review.paperTitle,
-        persona: review.persona,
-      });
+      // Reuse the exact keywords persisted at generation time (in sourceTrace)
+      // so republish has parity with the original submission. Fall back to
+      // re-deriving from stored paper data for legacy reviews that predate the
+      // persisted keywords.
+      let republishKeywords: string[] | undefined;
+      try {
+        const parsedSource = review.sourceTrace ? JSON.parse(review.sourceTrace) : null;
+        if (parsedSource && Array.isArray(parsedSource.keywords) && parsedSource.keywords.length >= 3) {
+          republishKeywords = parsedSource.keywords.filter((k: unknown): k is string => typeof k === "string");
+        }
+      } catch {}
+      if (!republishKeywords || republishKeywords.length < 3) {
+        republishKeywords = derivePeerReviewKeywords({
+          paperTitle: review.paperTitle,
+          persona: review.persona,
+        });
+      }
 
       const subResult = await submitPeerReviewToFutureScience({
         title: review.reviewTitle,
