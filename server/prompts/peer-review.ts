@@ -3,21 +3,34 @@
 // reviewer's role, the optional H Research Standards Verification Agent
 // co-author, and what content the model will receive. No section outline.
 
-export const BR_PROMPT = `You are a peer reviewer (bR — basic) for a scientific journal. Write one structured peer review of the submitted paper. Add "## Major Revisions" and "## Minor Revisions" lists of specific changes, and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
+// Shared closing instruction for every persona. It pins down (a) the revision
+// lists, (b) a single, clearly-delimited final recommendation line in a fixed
+// format, and (c) the rule that the verdict must be logically consistent with
+// the severity of the requested revisions — a non-empty Major Revisions list
+// rules out "Accept" and "Minor Revision".
+export const RECOMMENDATION_INSTRUCTION = `Add "## Major Revisions" and "## Minor Revisions" lists of specific changes. Then finish with a single final line, on its own, in exactly this format:
 
-Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
+Recommendation: <verdict>
 
-export const IR_PROMPT = `You are an INNOVATION-focused peer reviewer (iR) for a scientific journal. Foreground novelty and positioning relative to prior work. Write one structured peer review of the submitted paper. Add "## Major Revisions" and "## Minor Revisions" lists of specific changes, and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
+where <verdict> is one of: Accept, Minor Revision, Major Revision, or Reject. Emit this line exactly once, as the very last line of your review. The verdict must be logically consistent with your revision lists: if your Major Revisions list has one or more items, the verdict must be "Major Revision" or "Reject" — never "Accept" or "Minor Revision".`;
 
-Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
+const INPUT_DESCRIPTION = `Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
 
-export const AR_PROMPT = `You are an ADVERSARIAL peer reviewer (aR) for a scientific journal. Probe every weakness and challenge every claim at the highest bar. Write one structured peer review of the submitted paper. Add "## Major Revisions" and "## Minor Revisions" lists of specific changes, and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
+export const BR_PROMPT = `You are a peer reviewer (bR — basic) for a scientific journal. Write one structured peer review of the submitted paper. ${RECOMMENDATION_INSTRUCTION}
 
-Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
+${INPUT_DESCRIPTION}`;
 
-export const RR_PROMPT = `You are a RIGOROUS peer reviewer (rR) for a scientific journal. Apply strict methodological scrutiny — statistical correctness, design validity, reproducibility — without adversarial framing. Write one structured peer review of the submitted paper. Add "## Major Revisions" and "## Minor Revisions" lists of specific changes, and end with exactly one recommendation: Accept, Minor Revision, Major Revision, or Reject.
+export const IR_PROMPT = `You are an INNOVATION-focused peer reviewer (iR) for a scientific journal. Foreground novelty and positioning relative to prior work. Write one structured peer review of the submitted paper. ${RECOMMENDATION_INSTRUCTION}
 
-Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
+${INPUT_DESCRIPTION}`;
+
+export const AR_PROMPT = `You are an ADVERSARIAL peer reviewer (aR) for a scientific journal. Probe every weakness and challenge every claim at the highest bar. Write one structured peer review of the submitted paper. ${RECOMMENDATION_INSTRUCTION}
+
+${INPUT_DESCRIPTION}`;
+
+export const RR_PROMPT = `You are a RIGOROUS peer reviewer (rR) for a scientific journal. Apply strict methodological scrutiny — statistical correctness, design validity, reproducibility — without adversarial framing. Write one structured peer review of the submitted paper. ${RECOMMENDATION_INSTRUCTION}
+
+${INPUT_DESCRIPTION}`;
 
 export type PeerReviewPersona = "bR" | "iR" | "aR" | "rR";
 
@@ -37,19 +50,50 @@ export function getPeerReviewPrompt(persona: PeerReviewPersona): string {
   }
 }
 
+const VERDICT_PATTERNS: Array<{ re: RegExp; label: string }> = [
+  // Order matters — match longer strings first so "Major Revision" doesn't get
+  // caught by a bare "Major".
+  { re: /\bmajor\s+revision\b/i, label: "Major Revision" },
+  { re: /\bminor\s+revision\b/i, label: "Minor Revision" },
+  { re: /\breject\b/i,           label: "Reject" },
+  { re: /\baccept\b/i,           label: "Accept" },
+];
+
+// Resolve a verdict label from a short fragment (e.g. the text after
+// "Recommendation:"), matching the first known verdict keyword it contains.
+function verdictFromFragment(fragment: string): string | null {
+  const text = fragment || "";
+  let best: { idx: number; label: string } | null = null;
+  for (const p of VERDICT_PATTERNS) {
+    const m = text.match(p.re);
+    if (m && m.index !== undefined && (!best || m.index < best.idx)) {
+      best = { idx: m.index, label: p.label };
+    }
+  }
+  return best ? best.label : null;
+}
+
 export function extractRecommendation(reviewText: string): string | null {
   const text = reviewText || "";
-  // Look for the final recommendation token. Order matters — match longer
-  // strings first so "Major Revision" doesn't get caught by a bare "Major".
-  const patterns: Array<{ re: RegExp; label: string }> = [
-    { re: /\bmajor\s+revision\b/i, label: "Major Revision" },
-    { re: /\bminor\s+revision\b/i, label: "Minor Revision" },
-    { re: /\breject\b/i,           label: "Reject" },
-    { re: /\baccept\b/i,           label: "Accept" },
-  ];
-  // Prefer the last occurrence (the final recommendation line).
+
+  // 1. Prefer the explicit, clearly-delimited final recommendation line the
+  //    persona prompts instruct the model to emit, e.g.
+  //    "Recommendation: Major Revision". Use the LAST such line so a stray
+  //    earlier mention can't win. Strip markdown emphasis/brackets first.
+  const lineRe = /^[\s>*_#-]*recommendation\s*[:\-—]\s*(.+?)\s*$/gim;
+  let lineMatch: RegExpExecArray | null;
+  let lastFromLine: string | null = null;
+  while ((lineMatch = lineRe.exec(text)) !== null) {
+    const fragment = lineMatch[1].replace(/[*_`>\[\]]/g, " ");
+    const verdict = verdictFromFragment(fragment);
+    if (verdict) lastFromLine = verdict;
+  }
+  if (lastFromLine) return lastFromLine;
+
+  // 2. Fall back to the last-occurrence heuristic over the whole text when no
+  //    explicit recommendation line is present.
   let best: { idx: number; label: string } | null = null;
-  for (const p of patterns) {
+  for (const p of VERDICT_PATTERNS) {
     const re = new RegExp(p.re.source, "gi");
     let m: RegExpExecArray | null;
     let lastIdx = -1;
@@ -62,6 +106,23 @@ export function extractRecommendation(reviewText: string): string | null {
     }
   }
   return best ? best.label : null;
+}
+
+// Reconcile a parsed verdict with the severity of the requested revisions so
+// the conclusion can never contradict the body: if there is one or more Major
+// Revision, the verdict cannot be "Accept" or "Minor Revision" — upgrade it to
+// "Major Revision". "Reject" is left untouched (it is already at least as
+// severe), as is any verdict when there are no major revisions.
+export function reconcileRecommendation(
+  recommendation: string,
+  majorRevisionsCount: number,
+): string {
+  if (majorRevisionsCount <= 0) return recommendation;
+  const normalized = (recommendation || "").trim().toLowerCase();
+  if (normalized === "accept" || normalized === "minor revision") {
+    return "Major Revision";
+  }
+  return recommendation;
 }
 
 export interface ExtractedRevisions {

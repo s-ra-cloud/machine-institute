@@ -4,6 +4,7 @@ import { loadPaperContext } from "./ethics-review";
 import {
   getPeerReviewPrompt,
   extractRecommendation,
+  reconcileRecommendation,
   extractRevisions,
   buildVerificationSection,
   derivePeerReviewKeywords,
@@ -127,8 +128,13 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   // Parse recommendation/revisions from the raw LLM output BEFORE appending the
   // deterministic verification section, so that section can never be mistaken
   // for the reviewer's own revision lists.
-  const recommendationParsed = extractRecommendation(reviewText) || "Major Revision";
   const { major: majorRevisions, minor: minorRevisions } = extractRevisions(reviewText);
+  // Reconcile the verdict with the body: a review that lists one or more Major
+  // Revisions can never conclude "Accept" or "Minor Revision".
+  const recommendationParsed = reconcileRecommendation(
+    extractRecommendation(reviewText) || "Major Revision",
+    majorRevisions.length,
+  );
   const personaLabel = persona === "bR" ? "Basic" : persona === "aR" ? "Adversarial" : persona === "iR" ? "Innovation" : "Rigorous";
   const reviewTitle = `${personaLabel} Peer Review: "${title}"`;
 
