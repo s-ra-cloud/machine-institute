@@ -7,6 +7,10 @@ import {
   RR_PROMPT,
   extractRecommendation,
   extractRevisions,
+  buildVerificationSection,
+  hasVerificationSection,
+  derivePeerReviewKeywords,
+  VERIFICATION_SECTION_HEADING,
 } from "../prompts/peer-review";
 import { normalizeRevisions } from "../future-science";
 
@@ -336,5 +340,127 @@ describe("Peer review — loadPaperContext shape (skips ethics-only verifiers)",
     expect(Object.keys(probe).sort()).toEqual([
       "abstract", "authors", "date", "fsAbstracts", "fullText", "hadFullText", "title", "url",
     ]);
+  });
+});
+
+describe("Peer review — buildVerificationSection (H co-author audit)", () => {
+  it("documents scope/methodology and a clean result when no flags are present", () => {
+    const md = buildVerificationSection({
+      clearanceStatus: "CLEARED",
+      clearanceStatement: "No issues found in the audit.",
+      flags: [],
+      recommendations: [],
+    });
+    expect(md).toContain(`## ${VERIFICATION_SECTION_HEADING}`);
+    // Scope/methodology must always be present, even when "cleared".
+    expect(md).toMatch(/Scope & methodology/);
+    expect(md).toMatch(/eight research-standards categories/);
+    expect(md).toMatch(/OpenAlex/);
+    expect(md).toContain("**Clearance status:** Cleared");
+    expect(md).toContain("No issues found in the audit.");
+    expect(md).toMatch(/No research-standards concerns were identified/);
+  });
+
+  it("groups findings by severity and lists recommendations when flagged", () => {
+    const md = buildVerificationSection({
+      clearanceStatus: "NOT_CLEARED",
+      clearanceStatement: "Serious concerns.",
+      flags: [
+        { severity: "CRITICAL", summary: "Fabricated citation to nonexistent paper." },
+        { severity: "MAJOR", summary: "Selective reporting of negative results." },
+        { severity: "MINOR", summary: "Minor formatting issue in references." },
+      ],
+      recommendations: ["Retract and resubmit with verified citations."],
+    });
+    expect(md).toContain("**Clearance status:** Not cleared");
+    expect(md).toMatch(/\*Critical concerns:\*/);
+    expect(md).toContain("Fabricated citation to nonexistent paper.");
+    expect(md).toMatch(/\*Major concerns:\*/);
+    expect(md).toMatch(/\*Minor concerns:\*/);
+    expect(md).toMatch(/Verification agent recommendations/);
+    expect(md).toContain("Retract and resubmit with verified citations.");
+    // Should NOT advertise the clean-result line when there are flags.
+    expect(md).not.toMatch(/No research-standards concerns were identified/);
+  });
+
+  it("pretty-prints CLEARED_WITH_CONDITIONS and handles a missing statement", () => {
+    const md = buildVerificationSection({
+      clearanceStatus: "CLEARED_WITH_CONDITIONS",
+      clearanceStatement: "",
+      flags: [{ severity: "MINOR", summary: "One small nit." }],
+      recommendations: [],
+    });
+    expect(md).toContain("**Clearance status:** Cleared with conditions");
+    expect(md).toMatch(/No clearance statement was recorded/);
+  });
+
+  it("produces a section that extractRevisions does NOT mistake for revision lists", () => {
+    const md = buildVerificationSection({
+      clearanceStatus: "NOT_CLEARED",
+      clearanceStatement: "x",
+      flags: [{ severity: "MAJOR", summary: "A major concern here." }],
+      recommendations: ["Do the thing."],
+    });
+    const { major, minor } = extractRevisions(md);
+    expect(major).toEqual([]);
+    expect(minor).toEqual([]);
+  });
+});
+
+describe("Peer review — hasVerificationSection", () => {
+  it("detects the section heading regardless of leading text", () => {
+    expect(hasVerificationSection(`Some review body\n\n## ${VERIFICATION_SECTION_HEADING}\n\nbody`)).toBe(true);
+    expect(hasVerificationSection("### Research Standards Verification (audit)")).toBe(true);
+  });
+  it("returns false when absent or empty", () => {
+    expect(hasVerificationSection("Just a normal review with no audit section.")).toBe(false);
+    expect(hasVerificationSection("")).toBe(false);
+  });
+});
+
+describe("Peer review — derivePeerReviewKeywords", () => {
+  it("prefers the audited paper's own Future Science keywords", () => {
+    const kws = derivePeerReviewKeywords({
+      paperKeywords: ["sparse autoencoders", "interpretability", "feature steering"],
+      paperTitle: "A Study of Sparse Autoencoders",
+      persona: "bR",
+    });
+    expect(kws.slice(0, 3)).toEqual(["sparse autoencoders", "interpretability", "feature steering"]);
+    expect(kws).toContain("peer review");
+  });
+
+  it("falls back to salient title terms when paper keywords are missing", () => {
+    const kws = derivePeerReviewKeywords({
+      paperKeywords: [],
+      paperTitle: "Mechanistic Interpretability of Transformer Circuits",
+      persona: "aR",
+    });
+    expect(kws).toEqual(expect.arrayContaining(["mechanistic", "interpretability", "transformer", "circuits"]));
+    expect(kws).toContain("peer review");
+    // Stopwords like "of" must not appear.
+    expect(kws).not.toContain("of");
+  });
+
+  it("satisfies the FS 3-keyword minimum even with no usable input", () => {
+    const kws = derivePeerReviewKeywords({ paperKeywords: [], paperTitle: "", persona: "iR" });
+    expect(kws.length).toBeGreaterThanOrEqual(3);
+    expect(kws).toContain("peer review");
+  });
+
+  it("still returns >=3 keywords when paperTitle is null (legacy republish edge case)", () => {
+    const kws = derivePeerReviewKeywords({ paperTitle: null, persona: "bR" });
+    expect(kws.length).toBeGreaterThanOrEqual(3);
+    expect(kws).toContain("peer review");
+  });
+
+  it("dedupes case-insensitively and caps at 8 keywords", () => {
+    const kws = derivePeerReviewKeywords({
+      paperKeywords: ["Alpha", "alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"],
+      paperTitle: "Greek Letters Study",
+      persona: "rR",
+    });
+    expect(kws.length).toBeLessThanOrEqual(8);
+    const lower = kws.map((k) => k.toLowerCase());
+    expect(new Set(lower).size).toBe(lower.length);
   });
 });

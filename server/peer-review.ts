@@ -5,6 +5,8 @@ import {
   getPeerReviewPrompt,
   extractRecommendation,
   extractRevisions,
+  buildVerificationSection,
+  derivePeerReviewKeywords,
   type PeerReviewPersona,
 } from "./prompts/peer-review";
 import type { EthicsReviewOutput } from "./ethics-review";
@@ -21,6 +23,7 @@ export interface PeerReviewOutput {
   minorRevisions: Array<{ description: string }>;
   durationSeconds: number;
   paperUsed: { title: string; authors: string; date: string; documentId: string };
+  keywords: string[];
   ethicsSummary?: string;
   ethicsUsed: boolean;
 }
@@ -121,18 +124,39 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   const reviewText = result.content;
   await emitEvent("peer-review-llm", `Peer review complete (${reviewText.length} chars).`);
 
+  // Parse recommendation/revisions from the raw LLM output BEFORE appending the
+  // deterministic verification section, so that section can never be mistaken
+  // for the reviewer's own revision lists.
   const recommendationParsed = extractRecommendation(reviewText) || "Major Revision";
   const { major: majorRevisions, minor: minorRevisions } = extractRevisions(reviewText);
   const personaLabel = persona === "bR" ? "Basic" : persona === "aR" ? "Adversarial" : persona === "iR" ? "Innovation" : "Rigorous";
   const reviewTitle = `${personaLabel} Peer Review: "${title}"`;
 
-  const reviewAbstract = `This document is a peer review of "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The review was produced by a ${personaLabel} peer-review agent (${persona}). ${hadFullText ? "Full paper text was retrieved and used as the primary evidentiary basis." : "Full paper text could not be retrieved; the review proceeds on the abstract only."} ${ethicsResult ? `A Research Standards Verification Agent co-author (H-persona) ran in parallel and contributed findings (clearance: ${ethicsResult.clearanceStatus.replace(/_/g, " ")}). ` : ""}Final recommendation: ${recommendationParsed}.`;
+  // When an H co-author audit ran, always append a dedicated, deterministic
+  // "Research Standards Verification" section documenting its scope, method, and
+  // findings — regardless of what the LLM chose to write about it.
+  let finalReviewText = reviewText;
+  if (ethicsResult) {
+    const verificationSection = buildVerificationSection({
+      clearanceStatus: ethicsResult.clearanceStatus,
+      clearanceStatement: ethicsResult.clearanceStatement,
+      flags: ethicsResult.flagsList,
+      recommendations: ethicsResult.recommendations,
+    });
+    finalReviewText = `${reviewText.trimEnd()}\n\n---\n\n${verificationSection}\n`;
+  }
+
+  const reviewAbstract = `This document is a peer review of "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The review was produced by a ${personaLabel} peer-review agent (${persona}). ${hadFullText ? "Full paper text was retrieved and used as the primary evidentiary basis." : "Full paper text could not be retrieved; the review proceeds on the abstract only."} ${ethicsResult ? `A Research Standards Verification Agent co-author (H-persona) ran a parallel publication audit (clearance: ${ethicsResult.clearanceStatus.replace(/_/g, " ")}); see the Research Standards Verification section for its scope, methodology, and findings. ` : ""}Final recommendation: ${recommendationParsed}.`;
+
+  // Derive meaningful Future Science keywords from the audited paper itself.
+  const paperKeywords = fsAbstracts.find((a) => a.documentId === documentId)?.keywords ?? [];
+  const keywords = derivePeerReviewKeywords({ paperKeywords, paperTitle: title, persona });
 
   const durationSeconds = Math.round((Date.now() - startTime) / 1000);
 
   return {
-    reviewText,
-    chunk1: reviewText,
+    reviewText: finalReviewText,
+    chunk1: finalReviewText,
     chunk2: "",
     chunk3: "",
     reviewTitle,
@@ -142,6 +166,7 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
     minorRevisions,
     durationSeconds,
     paperUsed: { title, authors, date, documentId },
+    keywords,
     ethicsSummary,
     ethicsUsed: !!ethicsResult,
   };

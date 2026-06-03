@@ -1,1 +1,2 @@
 - [Future Science revision arrays](future-science-revisions.md) — majorRevisions/minorRevisions only valid with linkOriginalContribution; strip them in lockstep for non-response fallback types or FS rejects the payload.
+- [Peer-review H verification section](peer-review-h-section.md) — H audit is only LLM input; deterministically append the verification section to the published doc, the LLM won't.

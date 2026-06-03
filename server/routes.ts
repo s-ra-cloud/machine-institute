@@ -6,7 +6,7 @@ import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPO
 import { runEthicsReport, extractFlags, type EthicsReviewOutput, type EthicsFlag } from "./ethics-review";
 import { fetchFsPaperContent } from "./citation-verifier";
 import { runPeerReview } from "./peer-review";
-import { getPeerReviewPrompt, BR_PROMPT, IR_PROMPT, AR_PROMPT, RR_PROMPT, extractRevisions, type PeerReviewPersona } from "./prompts/peer-review";
+import { getPeerReviewPrompt, BR_PROMPT, IR_PROMPT, AR_PROMPT, RR_PROMPT, extractRevisions, buildVerificationSection, hasVerificationSection, derivePeerReviewKeywords, type PeerReviewPersona } from "./prompts/peer-review";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -2327,7 +2327,7 @@ I will now provide the papers.`;
             title: result.reviewTitle,
             markdownContent: result.reviewText,
             abstract: result.reviewAbstract,
-            keywords: ["peer review", "ai research", persona],
+            keywords: result.keywords,
             agentName: robotAgentName,
             initiativeDocId,
             initiativeSlug: data.journalId,
@@ -2387,11 +2387,38 @@ I will now provide the papers.`;
       const linkOriginalContribution = `https://future-science.org/${review.journalId}/${review.documentId}`;
       const { major: republishMajor, minor: republishMinor } = extractRevisions(review.contentMarkdown);
 
+      // Ensure the Research Standards Verification section is present. Reviews
+      // generated before this feature won't have it embedded in their markdown,
+      // so rebuild it from the linked ethics report (stored data) when possible.
+      let republishMarkdown = review.contentMarkdown;
+      if (ethicsAgentName && review.ethicsReportId && !hasVerificationSection(republishMarkdown)) {
+        const report = await storage.getEthicsReportById(review.ethicsReportId);
+        if (report && report.clearanceStatus) {
+          let flags: EthicsFlag[] = [];
+          let recommendations: string[] = [];
+          try { flags = JSON.parse(report.flagsJson || "[]"); } catch {}
+          try { recommendations = JSON.parse(report.recommendationsJson || "[]"); } catch {}
+          const verificationSection = buildVerificationSection({
+            clearanceStatus: report.clearanceStatus,
+            clearanceStatement: report.clearanceStatement || "",
+            flags,
+            recommendations,
+          });
+          republishMarkdown = `${republishMarkdown.trimEnd()}\n\n---\n\n${verificationSection}\n`;
+        }
+      }
+
+      // Re-derive meaningful keywords from stored paper data (no FS refetch).
+      const republishKeywords = derivePeerReviewKeywords({
+        paperTitle: review.paperTitle,
+        persona: review.persona,
+      });
+
       const subResult = await submitPeerReviewToFutureScience({
         title: review.reviewTitle,
-        markdownContent: review.contentMarkdown,
+        markdownContent: republishMarkdown,
         abstract: review.reviewAbstract,
-        keywords: ["peer review", "ai research", review.persona],
+        keywords: republishKeywords,
         agentName: robotAgentName,
         initiativeDocId,
         initiativeSlug: review.journalId,
