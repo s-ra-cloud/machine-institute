@@ -6,7 +6,7 @@ import { H_SOLO_REPORT_CHUNK_1_PROMPT, H_SOLO_REPORT_CHUNK_2_PROMPT, H_SOLO_REPO
 import { runEthicsReport, extractFlags, type EthicsReviewOutput, type EthicsFlag } from "./ethics-review";
 import { fetchFsPaperContent } from "./citation-verifier";
 import { runPeerReview } from "./peer-review";
-import { getPeerReviewPrompt, BR_PROMPT, IR_PROMPT, AR_PROMPT, RR_PROMPT, extractRevisions, buildVerificationSection, hasVerificationSection, derivePeerReviewKeywords, type PeerReviewPersona } from "./prompts/peer-review";
+import { getPeerReviewPrompt, BR_PROMPT, IR_PROMPT, AR_PROMPT, RR_PROMPT, extractRevisions, extractReviewSummary, buildPeerReviewAbstract, buildVerificationSection, hasVerificationSection, derivePeerReviewKeywords, type PeerReviewPersona } from "./prompts/peer-review";
 import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
@@ -2430,10 +2430,32 @@ I will now provide the papers.`;
         });
       }
 
+      // Re-derive the substantive abstract from stored data so republished
+      // reviews (including legacy reviews whose stored abstract is the old
+      // boilerplate) get the same informative abstract as freshly generated
+      // ones. No new columns: the summary is parsed from contentMarkdown, the
+      // revisions are extracted, and the ethics note comes from sourceTrace.
+      let republishEthicsSummary: string | null = null;
+      try {
+        const parsedSource = review.sourceTrace ? JSON.parse(review.sourceTrace) : null;
+        if (parsedSource && typeof parsedSource.ethicsSummary === "string") {
+          republishEthicsSummary = parsedSource.ethicsSummary;
+        }
+      } catch {}
+      const republishAbstract = buildPeerReviewAbstract({
+        title: review.paperTitle || review.reviewTitle,
+        persona: review.persona,
+        recommendation: review.recommendation,
+        summary: extractReviewSummary(review.contentMarkdown),
+        majorRevisions: republishMajor,
+        minorRevisions: republishMinor,
+        ethicsSummary: republishEthicsSummary,
+      });
+
       const subResult = await submitPeerReviewToFutureScience({
         title: review.reviewTitle,
         markdownContent: republishMarkdown,
-        abstract: review.reviewAbstract,
+        abstract: republishAbstract,
         keywords: republishKeywords,
         agentName: robotAgentName,
         initiativeDocId,
@@ -2446,7 +2468,7 @@ I will now provide the papers.`;
         minorRevisions: republishMinor,
       });
       if (!subResult) return res.status(502).json({ error: "Future Science rejected all fallback types." });
-      await storage.updatePeerReview(reviewId, { publishedDocumentId: subResult.documentId });
+      await storage.updatePeerReview(reviewId, { publishedDocumentId: subResult.documentId, reviewAbstract: republishAbstract });
       res.json({ success: true, documentId: subResult.documentId, url: subResult.url });
     } catch (err: any) {
       console.error("Error republishing peer review:", err);

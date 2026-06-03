@@ -1,7 +1,8 @@
 // Peer-review persona prompts (bR / iR / aR / rR).
-// One short prompt per persona (≤100 words). Each prompt explains the
-// reviewer's role, the optional H Research Standards Verification Agent
-// co-author, and what content the model will receive. No section outline.
+// One short prompt per persona. Each prompt explains the reviewer's role, the
+// optional H Research Standards Verification Agent co-author, what content the
+// model will receive, and asks for a leading "## Review Summary" section that we
+// parse out to build a substantive published abstract. No section outline.
 
 // Shared closing instruction for every persona. It pins down (a) the revision
 // lists, (b) a single, clearly-delimited final recommendation line in a fixed
@@ -14,21 +15,25 @@ Recommendation: <verdict>
 
 where <verdict> is one of: Accept, Minor Revision, Major Revision, or Reject. Emit this line exactly once, as the very last line of your review. The verdict must be logically consistent with your revision lists: if your Major Revisions list has one or more items, the verdict must be "Major Revision" or "Reject" — never "Accept" or "Minor Revision".`;
 
+// Shared opening instruction. Asks for a leading "## Review Summary" section that
+// we parse out (see extractReviewSummary) to build a substantive published abstract.
+export const SUMMARY_INSTRUCTION = `Begin with a "## Review Summary" of 3–4 sentences covering your core assessment, the main strengths, the main weaknesses/concerns, and why you reached your recommendation.`;
+
 const INPUT_DESCRIPTION = `Your input has (1) the paper's title, authors, abstract, and full text; (2) prior work from the journal; and (3) optionally an ETHICS CO-AUTHOR BLOCK from the H Research Standards Verification Agent — integrate its findings if present.`;
 
-export const BR_PROMPT = `You are a peer reviewer (bR — basic) for a scientific journal. Write one structured peer review of the submitted paper. ${RECOMMENDATION_INSTRUCTION}
+export const BR_PROMPT = `You are a peer reviewer (bR — basic) for a scientific journal. Write one structured peer review of the submitted paper. ${SUMMARY_INSTRUCTION} ${RECOMMENDATION_INSTRUCTION}
 
 ${INPUT_DESCRIPTION}`;
 
-export const IR_PROMPT = `You are an INNOVATION-focused peer reviewer (iR) for a scientific journal. Foreground novelty and positioning relative to prior work. Write one structured peer review of the submitted paper. ${RECOMMENDATION_INSTRUCTION}
+export const IR_PROMPT = `You are an INNOVATION-focused peer reviewer (iR) for a scientific journal. Foreground novelty and positioning relative to prior work. Write one structured peer review of the submitted paper. ${SUMMARY_INSTRUCTION} ${RECOMMENDATION_INSTRUCTION}
 
 ${INPUT_DESCRIPTION}`;
 
-export const AR_PROMPT = `You are an ADVERSARIAL peer reviewer (aR) for a scientific journal. Probe every weakness and challenge every claim at the highest bar. Write one structured peer review of the submitted paper. ${RECOMMENDATION_INSTRUCTION}
+export const AR_PROMPT = `You are an ADVERSARIAL peer reviewer (aR) for a scientific journal. Probe every weakness and challenge every claim at the highest bar. Write one structured peer review of the submitted paper. ${SUMMARY_INSTRUCTION} ${RECOMMENDATION_INSTRUCTION}
 
 ${INPUT_DESCRIPTION}`;
 
-export const RR_PROMPT = `You are a RIGOROUS peer reviewer (rR) for a scientific journal. Apply strict methodological scrutiny — statistical correctness, design validity, reproducibility — without adversarial framing. Write one structured peer review of the submitted paper. ${RECOMMENDATION_INSTRUCTION}
+export const RR_PROMPT = `You are a RIGOROUS peer reviewer (rR) for a scientific journal. Apply strict methodological scrutiny — statistical correctness, design validity, reproducibility — without adversarial framing. Write one structured peer review of the submitted paper. ${SUMMARY_INSTRUCTION} ${RECOMMENDATION_INSTRUCTION}
 
 ${INPUT_DESCRIPTION}`;
 
@@ -338,4 +343,128 @@ export function extractRevisions(reviewText: string): ExtractedRevisions {
     major: grab("major\\s+revisions?").slice(0, 10).map((d) => ({ description: d })),
     minor: grab("minor\\s+revisions?").slice(0, 10).map((d) => ({ description: d })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Substantive published abstract
+// ---------------------------------------------------------------------------
+// The published abstract used to be pure metadata boilerplate ("this is a peer
+// review of X by Y, recommendation Z"). We now build an abstract that actually
+// conveys the review's findings by parsing the reviewer's leading
+// "## Review Summary" section out of the generated review text, and fall back to
+// a deterministic summary composed from the recommendation + extracted revision
+// items + ethics note when no usable summary section is present.
+
+// Collapse a markdown section into a single line of prose: drop list markers and
+// heading hashes, strip bold markers, join lines, and collapse whitespace.
+function sectionToProse(section: string): string {
+  return (section || "")
+    .split("\n")
+    .map((l) => l.replace(/^\s*#{1,6}\s+/, "").replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim())
+    .filter((l) => l.length > 0)
+    .join(" ")
+    .replace(/\*\*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Headings (in priority order) that a reviewer may use for the leading summary.
+const SUMMARY_HEADINGS = [
+  "review\\s+summary",
+  "summary",
+  "overall\\s+assessment",
+  "overview",
+  "assessment",
+];
+
+// Pull the reviewer's substantive summary out of the review text. Returns null
+// when no recognisable, non-trivial summary section is found.
+export function extractReviewSummary(reviewText: string): string | null {
+  const text = reviewText || "";
+  for (const heading of SUMMARY_HEADINGS) {
+    const re = new RegExp(
+      `(?:^|\\n)\\s*#{1,6}\\s*(?:\\*\\*)?\\s*${heading}[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*#{1,6}\\s|$)`,
+      "i",
+    );
+    const m = text.match(re);
+    if (m) {
+      const prose = sectionToProse(m[1]);
+      if (prose.length >= 40) return prose;
+    }
+  }
+  return null;
+}
+
+const PERSONA_ADJECTIVE: Record<PeerReviewPersona, string> = {
+  bR: "Basic",
+  iR: "Innovation",
+  aR: "Adversarial",
+  rR: "Rigorous",
+};
+
+const ABSTRACT_MAX = 1200;
+const ABSTRACT_SUMMARY_MAX = 900;
+
+export interface PeerReviewAbstractInput {
+  title?: string | null;
+  persona: PeerReviewPersona;
+  recommendation?: string | null;
+  // Substantive summary parsed from the review's "## Review Summary" section.
+  summary?: string | null;
+  // Extracted revision items, used for the deterministic fallback only.
+  majorRevisions?: Array<{ description: string }>;
+  minorRevisions?: Array<{ description: string }>;
+  // Short ethics co-author note (already summarised), e.g.
+  // "Ethics co-author (H): CLEARED — 0 critical, 0 major, 0 minor flags."
+  ethicsSummary?: string | null;
+}
+
+// Build the published abstract: a self-describing opener (paper, persona,
+// recommendation) + the substantive takeaways (parsed summary, or a
+// deterministic fallback from the extracted revisions) + a short H-verification
+// note when an ethics co-author ran. Always concise and non-empty.
+export function buildPeerReviewAbstract(input: PeerReviewAbstractInput): string {
+  const clean = (s: string) => (s || "").replace(/\s+/g, " ").trim();
+  const adjective = PERSONA_ADJECTIVE[input.persona] ?? "Peer";
+  const title = clean(input.title || "") || "the submitted paper";
+  const recommendation = clean(input.recommendation || "") || "Major Revision";
+
+  const parts: string[] = [
+    `${adjective} peer review of "${title}" — recommendation: ${recommendation}.`,
+  ];
+
+  let summary = clean(input.summary || "");
+  if (summary.length > ABSTRACT_SUMMARY_MAX) {
+    summary = summary.slice(0, ABSTRACT_SUMMARY_MAX - 1).trimEnd() + "…";
+  }
+
+  if (summary) {
+    parts.push(summary);
+  } else {
+    // Deterministic fallback from data already on hand.
+    const major = (input.majorRevisions || []).map((r) => clean(r.description)).filter(Boolean);
+    const minor = (input.minorRevisions || []).map((r) => clean(r.description)).filter(Boolean);
+    if (major.length > 0) {
+      parts.push(`Key concerns requiring major revision: ${major.slice(0, 3).join("; ")}.`);
+    }
+    if (minor.length > 0) {
+      parts.push(`Minor points raised: ${minor.slice(0, 2).join("; ")}.`);
+    }
+    if (major.length === 0 && minor.length === 0) {
+      parts.push(
+        "The reviewer raised no major or minor revision items and assessed the paper on its overall merits.",
+      );
+    }
+  }
+
+  const ethics = clean(input.ethicsSummary || "");
+  if (ethics) {
+    parts.push(`Research Standards Verification co-author — ${ethics}`);
+  }
+
+  let abstract = parts.join(" ").replace(/\s+/g, " ").trim();
+  if (abstract.length > ABSTRACT_MAX) {
+    abstract = abstract.slice(0, ABSTRACT_MAX - 1).trimEnd() + "…";
+  }
+  return abstract;
 }

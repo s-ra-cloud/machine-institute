@@ -7,6 +7,8 @@ import {
   RR_PROMPT,
   extractRecommendation,
   extractRevisions,
+  extractReviewSummary,
+  buildPeerReviewAbstract,
   buildVerificationSection,
   hasVerificationSection,
   derivePeerReviewKeywords,
@@ -43,8 +45,11 @@ describe("Peer review — single-prompt contract", () => {
   const all = { bR: BR_PROMPT, iR: IR_PROMPT, aR: AR_PROMPT, rR: RR_PROMPT };
 
   for (const [persona, prompt] of Object.entries(all)) {
-    it(`${persona} prompt is ≤100 words`, () => {
-      expect(wordCount(prompt)).toBeLessThanOrEqual(100);
+    it(`${persona} prompt is ≤200 words`, () => {
+      expect(wordCount(prompt)).toBeLessThanOrEqual(200);
+    });
+    it(`${persona} prompt asks for a leading Review Summary section`, () => {
+      expect(prompt).toMatch(/Review Summary/i);
     });
     it(`${persona} prompt mentions the H Research Standards Verification Agent`, () => {
       expect(prompt).toMatch(/Research Standards Verification Agent|ETHICS CO-AUTHOR/i);
@@ -140,6 +145,147 @@ Major Revision`;
     const { major, minor } = extractRevisions(text);
     expect(major).toHaveLength(1);
     expect(minor).toHaveLength(1);
+  });
+});
+
+describe("Peer review — extractReviewSummary", () => {
+  it("pulls the leading Review Summary section as a single line of prose", () => {
+    const review = `# Review
+
+## Review Summary
+The paper presents a solid contribution to interpretability.
+Its main strength is a well-designed evaluation.
+The chief weakness is the absence of a power analysis, which is why a Major Revision is recommended.
+
+## Major Revisions
+- Add a power analysis.`;
+    const summary = extractReviewSummary(review);
+    expect(summary).toContain("solid contribution to interpretability");
+    expect(summary).toContain("well-designed evaluation");
+    expect(summary).toContain("power analysis");
+    // It must be flattened to one line and not bleed into later sections.
+    expect(summary).not.toMatch(/\n/);
+    expect(summary).not.toContain("Add a power analysis");
+  });
+
+  it("strips list markers and bold markers from the summary", () => {
+    const review = `## Review Summary
+- **Strength:** clear methodology and reproducible code.
+- **Weakness:** limited sample size undermines the conclusions.`;
+    const summary = extractReviewSummary(review)!;
+    expect(summary).not.toContain("**");
+    expect(summary).not.toMatch(/^-/);
+    expect(summary).toContain("clear methodology");
+    expect(summary).toContain("limited sample size");
+  });
+
+  it("falls back to alternative summary headings", () => {
+    const review = `## Overall Assessment
+This is a thorough study with strong empirical grounding and minor presentation issues.`;
+    expect(extractReviewSummary(review)).toContain("thorough study");
+  });
+
+  it("returns null when there is no usable summary section", () => {
+    expect(extractReviewSummary("## Major Revisions\n- Fix something specific here.")).toBeNull();
+    expect(extractReviewSummary("Just loose prose, no headings at all.")).toBeNull();
+  });
+
+  it("returns null for a too-short summary section", () => {
+    expect(extractReviewSummary("## Review Summary\nGood.")).toBeNull();
+  });
+});
+
+describe("Peer review — buildPeerReviewAbstract", () => {
+  it("builds a self-describing opener plus the substantive parsed summary", () => {
+    const abstract = buildPeerReviewAbstract({
+      title: "A Study of Sparse Autoencoders",
+      persona: "bR",
+      recommendation: "Major Revision",
+      summary: "The work is methodologically sound but lacks a power analysis, motivating a major revision.",
+    });
+    expect(abstract).toContain('Basic peer review of "A Study of Sparse Autoencoders"');
+    expect(abstract).toContain("recommendation: Major Revision");
+    expect(abstract).toContain("methodologically sound");
+    expect(abstract).toContain("power analysis");
+  });
+
+  it("uses the persona adjective for each persona", () => {
+    expect(buildPeerReviewAbstract({ title: "T", persona: "aR", recommendation: "Reject", summary: "A long enough substantive summary of the review findings here." })).toMatch(/^Adversarial peer review/);
+    expect(buildPeerReviewAbstract({ title: "T", persona: "iR", recommendation: "Accept", summary: "A long enough substantive summary of the review findings here." })).toMatch(/^Innovation peer review/);
+    expect(buildPeerReviewAbstract({ title: "T", persona: "rR", recommendation: "Accept", summary: "A long enough substantive summary of the review findings here." })).toMatch(/^Rigorous peer review/);
+  });
+
+  it("appends an H-verification note when an ethics co-author ran", () => {
+    const abstract = buildPeerReviewAbstract({
+      title: "T",
+      persona: "bR",
+      recommendation: "Minor Revision",
+      summary: "Solid contribution overall with a few clarity issues to address.",
+      ethicsSummary: "Ethics co-author (H): CLEARED — 0 critical, 0 major, 0 minor flags.",
+    });
+    expect(abstract).toContain("Research Standards Verification co-author");
+    expect(abstract).toContain("CLEARED");
+  });
+
+  it("omits the H note when no ethics co-author ran", () => {
+    const abstract = buildPeerReviewAbstract({
+      title: "T",
+      persona: "bR",
+      recommendation: "Accept",
+      summary: "Solid contribution overall, clearly written and well evidenced throughout.",
+    });
+    expect(abstract).not.toContain("Research Standards Verification co-author");
+  });
+
+  it("falls back to extracted revisions when no summary is available", () => {
+    const abstract = buildPeerReviewAbstract({
+      title: "T",
+      persona: "bR",
+      recommendation: "Major Revision",
+      summary: null,
+      majorRevisions: [
+        { description: "The statistical analysis lacks a power calculation." },
+        { description: "Claim in Section 3 is unsupported." },
+      ],
+      minorRevisions: [{ description: "Fix the typo in Table 1." }],
+    });
+    expect(abstract).toContain("Key concerns requiring major revision");
+    expect(abstract).toContain("power calculation");
+    expect(abstract).toContain("Minor points raised");
+    expect(abstract).toContain("typo in Table 1");
+  });
+
+  it("produces a sensible fallback even with no summary and no revisions", () => {
+    const abstract = buildPeerReviewAbstract({
+      title: "T",
+      persona: "bR",
+      recommendation: "Accept",
+      summary: null,
+      majorRevisions: [],
+      minorRevisions: [],
+    });
+    expect(abstract).toContain('Basic peer review of "T"');
+    expect(abstract).toContain("no major or minor revision items");
+    expect(abstract.length).toBeGreaterThan(0);
+  });
+
+  it("is never empty and stays concise even with a very long summary", () => {
+    const longSummary = "This sentence repeats. ".repeat(200);
+    const abstract = buildPeerReviewAbstract({
+      title: "T",
+      persona: "bR",
+      recommendation: "Reject",
+      summary: longSummary,
+      ethicsSummary: "Ethics co-author (H): NOT CLEARED — 1 critical flag.",
+    });
+    expect(abstract.length).toBeLessThanOrEqual(1200);
+    expect(abstract).toMatch(/^Reject? ?|^Rigorous|^Basic peer review/);
+  });
+
+  it("defaults the recommendation and title when missing", () => {
+    const abstract = buildPeerReviewAbstract({ persona: "bR", summary: "A substantive summary of the review with enough length to be kept." });
+    expect(abstract).toContain("the submitted paper");
+    expect(abstract).toContain("recommendation: Major Revision");
   });
 });
 

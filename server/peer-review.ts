@@ -6,6 +6,8 @@ import {
   extractRecommendation,
   reconcileRecommendation,
   extractRevisions,
+  extractReviewSummary,
+  buildPeerReviewAbstract,
   buildVerificationSection,
   derivePeerReviewKeywords,
   type PeerReviewPersona,
@@ -152,7 +154,20 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
     finalReviewText = `${reviewText.trimEnd()}\n\n---\n\n${verificationSection}\n`;
   }
 
-  const reviewAbstract = `This document is a peer review of "${title}" by ${authors} (${date}), published in ${journalDisplayName}. The review was produced by a ${personaLabel} peer-review agent (${persona}). ${hadFullText ? "Full paper text was retrieved and used as the primary evidentiary basis." : "Full paper text could not be retrieved; the review proceeds on the abstract only."} ${ethicsResult ? `A Research Standards Verification Agent co-author (H-persona) ran a parallel publication audit (clearance: ${ethicsResult.clearanceStatus.replace(/_/g, " ")}); see the Research Standards Verification section for its scope, methodology, and findings. ` : ""}Final recommendation: ${recommendationParsed}.`;
+  // Build a substantive abstract that summarises the review's actual findings.
+  // The reviewer is instructed to emit a leading "## Review Summary" section; we
+  // parse it out (no extra model call) and fall back to a deterministic summary
+  // composed from the recommendation + extracted revisions when it is absent.
+  const reviewSummary = extractReviewSummary(reviewText);
+  const reviewAbstract = buildPeerReviewAbstract({
+    title,
+    persona,
+    recommendation: recommendationParsed,
+    summary: reviewSummary,
+    majorRevisions,
+    minorRevisions,
+    ethicsSummary,
+  });
 
   // Derive meaningful Future Science keywords from the audited paper itself.
   const paperKeywords = fsAbstracts.find((a) => a.documentId === documentId)?.keywords ?? [];
