@@ -700,6 +700,52 @@ export default function GenerationDashboard() {
     peerSelectedDocId.length > 0 && peerPrompt.trim().length > 0 &&
     (modelConfig.providerMode === "byoc" || peerStatus?.remaining === null || (peerStatus?.remaining ?? 1) > 0);
 
+  const modelSelectorEl = (
+    <ModelSelector
+      value={modelConfig}
+      onChange={setModelConfig}
+      rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : activeType === "peer-review" ? peerStatus : reviewStatus}
+      limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "publication audit generations" : activeType === "peer-review" ? "peer review generations" : "review generations"}
+      hasPlatformAccess={hasPlatformAccess}
+      activeType={activeType as "editorial" | "literature-review" | "ethics-report" | "peer-review"}
+      costMultiplier={activeType === "peer-review" && peerIncludeEthics ? 2 : 1}
+    />
+  );
+
+  const promptEditorEl = (
+    <div>
+      <button
+        onClick={() => setPromptExpanded(!promptExpanded)}
+        className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest hover:text-muted-foreground transition-colors mb-2"
+        data-testid="button-toggle-prompt"
+      >
+        {promptExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        Custom system prompt (optional)
+      </button>
+      {promptExpanded && (
+        <div className="space-y-2">
+          <textarea
+            value={prompt}
+            onChange={(e) => { setPrompt(e.target.value); setPromptManuallyEdited(true); }}
+            className="w-full h-64 bg-background border border-border/50 px-4 py-3 text-xs text-foreground/70 resize-none focus:outline-none focus:border-primary/50 font-mono"
+            data-testid="input-system-prompt"
+          />
+          <button
+            onClick={() => {
+              setPromptManuallyEdited(false);
+              const defaultP = activeType === "editorial" ? defaultEditorialPrompt?.prompt : defaultReviewPrompt?.prompt;
+              if (defaultP) setPrompt(defaultP);
+            }}
+            className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+            data-testid="button-reset-prompt"
+          >
+            <RotateCcw className="w-3 h-3" /> Reset to default
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Navigation />
@@ -925,20 +971,14 @@ export default function GenerationDashboard() {
                   </div>
                 </div>
 
+                {activeType !== "literature-review" && (
                 <div>
                   <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3 block">
                     2. Model Selection
                   </label>
-                  <ModelSelector
-                    value={modelConfig}
-                    onChange={setModelConfig}
-                    rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : activeType === "peer-review" ? peerStatus : reviewStatus}
-                    limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "publication audit generations" : activeType === "peer-review" ? "peer review generations" : "review generations"}
-                    hasPlatformAccess={hasPlatformAccess}
-                    activeType={activeType as "editorial" | "literature-review" | "ethics-report" | "peer-review"}
-                    costMultiplier={activeType === "peer-review" && peerIncludeEthics ? 2 : 1}
-                  />
+                  {modelSelectorEl}
                 </div>
+                )}
 
                 {activeType === "ethics-report" && (() => {
                   const papers = availablePapersData?.papers || [];
@@ -1239,7 +1279,7 @@ export default function GenerationDashboard() {
                   );
                 })()}
 
-                {activeType !== "ethics-report" && activeType !== "peer-review" && (
+                {activeType === "editorial" && (
                   <div>
                     <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
                       4. Topic
@@ -1249,9 +1289,7 @@ export default function GenerationDashboard() {
                       value={topic}
                       onChange={(e) => setTopic(e.target.value)}
                       className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm focus:outline-none focus:border-primary/50"
-                      placeholder={activeType === "editorial"
-                        ? "Recent developments in AI agent-driven scientific research..."
-                        : "Enter a topic focus (optional)"}
+                      placeholder="Recent developments in AI agent-driven scientific research..."
                       data-testid="input-topic"
                     />
                   </div>
@@ -1297,79 +1335,91 @@ export default function GenerationDashboard() {
                 )}
 
                 {activeType === "literature-review" && (
-                  <>
-                  <div>
-                    <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
-                      Review Mode
-                    </label>
-                    <div className="flex gap-2 mb-4">
-                      <button
-                        onClick={() => { setReviewMode("basic"); setPromptManuallyEdited(false); }}
-                        className={`px-4 py-2 text-xs font-mono border transition-all ${
-                          reviewMode === "basic"
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border/50 text-muted-foreground hover:border-primary/30"
-                        }`}
-                        data-testid="button-review-mode-basic"
-                      >
-                        Basic Review
-                      </button>
-                      <button
-                        onClick={() => { setReviewMode("adversarial"); setPromptManuallyEdited(false); }}
-                        className={`px-4 py-2 text-xs font-mono border transition-all ${
-                          reviewMode === "adversarial"
-                            ? "border-red-500 bg-red-500/10 text-red-400"
-                            : "border-border/50 text-muted-foreground hover:border-red-500/30"
-                        }`}
-                        data-testid="button-review-mode-adversarial"
-                      >
-                        Adversarial Review
-                      </button>
-                    </div>
-                    <p className="text-[10px] font-mono text-muted-foreground/50 mb-4">
-                      {reviewMode === "basic"
-                        ? "Synthesizes literature constructively with balanced analysis."
-                        : "Critically examines literature for weaknesses, flaws, and contradictions."}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
-                      Research Question <span className="text-red-400">*</span>
-                    </label>
-                    <textarea
-                      value={researchQuestion}
-                      onChange={(e) => setResearchQuestion(e.target.value)}
-                      className="w-full h-28 bg-background border border-border/50 px-4 py-3 text-sm focus:outline-none focus:border-primary/50 resize-none font-mono"
-                      placeholder="e.g. How do LLMs exhibit moral reasoning biases across different experimental paradigms?"
-                      data-testid="input-research-question"
-                    />
-                    {researchQuestion.length > 0 && researchQuestion.length < 10 && (
-                      <p className="text-[10px] font-mono text-red-400 mt-1">Research question must be at least 10 characters.</p>
-                    )}
-                  </div>
-
                   <div className="border border-border/40 bg-muted/5 p-5" data-testid="lr-pipeline">
                     <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
                       How this review is produced
                     </p>
-                    <p className="text-[11px] font-mono text-muted-foreground/50 mb-5">
-                      Each step runs automatically. Adjust the controls below to change what the agent does.
+                    <p className="text-[11px] font-mono text-muted-foreground/50 mb-6">
+                      The agent runs these six steps in order. The controls inside each step change what that step does.
                     </p>
 
-                    <ol className="space-y-5">
-                      <li className="flex gap-3" data-testid="lr-stage-gather">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">1</span>
-                        <div className="text-sm text-foreground/80">
-                          <span className="font-medium">Gather the papers.</span>{" "}
-                          <span className="text-muted-foreground/70">Collects this journal's publications from the project log and Future Science.</span>
+                    <ol className="space-y-7">
+                      <li className="flex gap-3" data-testid="lr-stage-define">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">1</span>
+                        <div className="flex-1 space-y-3">
+                          <div className="text-sm text-foreground/80">
+                            <span className="font-medium">Define the request.</span>{" "}
+                            <span className="text-muted-foreground/70">Set the research question the review must answer and the style of analysis.</span>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                              Research Question <span className="text-red-400">*</span>
+                            </label>
+                            <textarea
+                              value={researchQuestion}
+                              onChange={(e) => setResearchQuestion(e.target.value)}
+                              className="w-full h-24 bg-background border border-border/50 px-4 py-3 text-sm focus:outline-none focus:border-primary/50 resize-none font-mono"
+                              placeholder="e.g. How do LLMs exhibit moral reasoning biases across different experimental paradigms?"
+                              data-testid="input-research-question"
+                            />
+                            {researchQuestion.length > 0 && researchQuestion.length < 10 && (
+                              <p className="text-[10px] font-mono text-red-400 mt-1">Research question must be at least 10 characters.</p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                              Reviewer Style
+                            </label>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => { setReviewMode("basic"); setPromptManuallyEdited(false); }}
+                                className={`px-4 py-2 text-xs font-mono border transition-all ${
+                                  reviewMode === "basic"
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border/50 text-muted-foreground hover:border-primary/30"
+                                }`}
+                                data-testid="button-review-mode-basic"
+                              >
+                                Basic Review
+                              </button>
+                              <button
+                                onClick={() => { setReviewMode("adversarial"); setPromptManuallyEdited(false); }}
+                                className={`px-4 py-2 text-xs font-mono border transition-all ${
+                                  reviewMode === "adversarial"
+                                    ? "border-red-500 bg-red-500/10 text-red-400"
+                                    : "border-border/50 text-muted-foreground hover:border-red-500/30"
+                                }`}
+                                data-testid="button-review-mode-adversarial"
+                              >
+                                Adversarial Review
+                              </button>
+                            </div>
+                            <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
+                              {reviewMode === "basic"
+                                ? "Synthesizes literature constructively with balanced analysis."
+                                : "Critically examines literature for weaknesses, flaws, and contradictions."}
+                            </p>
+                          </div>
                         </div>
                       </li>
 
-                      <li className="flex gap-3" data-testid="lr-stage-rank">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">2</span>
-                        <div className="text-sm text-foreground/80">
-                          <span className="font-medium">Rank by relevance.</span>{" "}
-                          <span className="text-muted-foreground/70">Scores every paper against your research question to find the closest matches.</span>
+                      <li className="flex gap-3" data-testid="lr-stage-collect">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">2</span>
+                        <div className="flex-1">
+                          <div className="text-sm text-foreground/80 mb-2">
+                            <span className="font-medium">Collect the source material.</span>{" "}
+                            <span className="text-muted-foreground/70">Gathers this journal's publications from the project log and Future Science, plus optional recent arXiv preprints (abstracts only) for broader context.</span>
+                          </div>
+                          <label className="flex items-center gap-2 cursor-pointer text-xs font-mono text-muted-foreground/80">
+                            <input
+                              type="checkbox"
+                              checked={includeArxiv}
+                              onChange={(e) => setIncludeArxiv(e.target.checked)}
+                              className="accent-primary"
+                              data-testid="checkbox-include-arxiv"
+                            />
+                            <span>{includeArxiv ? "Including recent arXiv context" : "Skipping arXiv — journal corpus only"}</span>
+                          </label>
                         </div>
                       </li>
 
@@ -1377,8 +1427,8 @@ export default function GenerationDashboard() {
                         <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">3</span>
                         <div className="flex-1">
                           <div className="text-sm text-foreground/80 mb-2">
-                            <span className="font-medium">Read full text of the top papers.</span>{" "}
-                            <span className="text-muted-foreground/70">The most relevant papers are read in full; the rest are summarized from their abstracts.</span>
+                            <span className="font-medium">Read the full text of the top relevant papers.</span>{" "}
+                            <span className="text-muted-foreground/70">The most relevant papers are read in full; the rest are analyzed from their abstracts.</span>
                           </div>
                           <div className="flex items-center gap-3">
                             <input
@@ -1400,49 +1450,45 @@ export default function GenerationDashboard() {
                         </div>
                       </li>
 
-                      <li className="flex gap-3" data-testid="lr-stage-arxiv">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">4</span>
-                        <div className="flex-1">
-                          <div className="text-sm text-foreground/80 mb-2">
-                            <span className="font-medium">Add recent arXiv context.</span>{" "}
-                            <span className="text-muted-foreground/70">Pulls related recent preprints from arXiv (abstracts only) to frame the broader field.</span>
-                          </div>
-                          <label className="flex items-center gap-2 cursor-pointer text-xs font-mono text-muted-foreground/80">
-                            <input
-                              type="checkbox"
-                              checked={includeArxiv}
-                              onChange={(e) => setIncludeArxiv(e.target.checked)}
-                              className="accent-primary"
-                              data-testid="checkbox-include-arxiv"
-                            />
-                            <span>{includeArxiv ? "Including arXiv context" : "Skipping arXiv — journal corpus only"}</span>
-                          </label>
-                        </div>
-                      </li>
-
-                      <li className="flex gap-3" data-testid="lr-stage-cluster">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">5</span>
+                      <li className="flex gap-3" data-testid="lr-stage-organize">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">4</span>
                         <div className="text-sm text-foreground/80">
-                          <span className="font-medium">Cluster topics &amp; find gaps.</span>{" "}
-                          <span className="text-muted-foreground/70">Groups the corpus into themes and surfaces trends and open research gaps.</span>
+                          <span className="font-medium">Organize by theme, trend &amp; relevance.</span>{" "}
+                          <span className="text-muted-foreground/70">Groups the corpus into topic clusters and surfaces trends and open research gaps.</span>
                         </div>
                       </li>
 
                       <li className="flex gap-3" data-testid="lr-stage-write">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">5</span>
+                        <div className="flex-1 space-y-3">
+                          <div className="text-sm text-foreground/80">
+                            <span className="font-medium">Write the review.</span>{" "}
+                            <span className="text-muted-foreground/70">
+                              Synthesizes everything into a {reviewMode === "adversarial" ? "critical, adversarial" : "balanced, constructive"} review using the model and (optionally) the custom prompt you choose here.
+                            </span>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                              Model
+                            </label>
+                            {modelSelectorEl}
+                          </div>
+                          {promptEditorEl}
+                        </div>
+                      </li>
+
+                      <li className="flex gap-3" data-testid="lr-stage-publish">
                         <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">6</span>
                         <div className="text-sm text-foreground/80">
-                          <span className="font-medium">Write the review.</span>{" "}
-                          <span className="text-muted-foreground/70">
-                            Synthesizes everything into a {reviewMode === "adversarial" ? "critical, adversarial" : "balanced, constructive"} review using your chosen model. Adjust the style above, the model below, and the system prompt to fine-tune the output.
-                          </span>
+                          <span className="font-medium">Save &amp; publish to Future Science.</span>{" "}
+                          <span className="text-muted-foreground/70">Stores the finished review and, when you're signed in, publishes it to Future Science under your orchestrator name.</span>
                         </div>
                       </li>
                     </ol>
                   </div>
-                  </>
                 )}
 
-                {activeType !== "ethics-report" && activeType !== "peer-review" && (
+                {activeType === "editorial" && (
                 <div>
                   <button
                     onClick={() => setPromptExpanded(!promptExpanded)}

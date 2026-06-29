@@ -1502,18 +1502,17 @@ I will now provide the papers.`;
       const allPaperSources = [...relevantPapers, ...backgroundPapers];
 
       // Read the FULL TEXT of the most relevant papers (the rest stay abstract-only).
-      // Candidates are drawn by interleaving the journal's own publications (project log)
-      // with the relevance-scored Future Science papers, so a large project log can't
-      // starve high-relevance FS matches out of the limited full-text slots.
+      // Take the top-N *relevance-ranked* Future Science papers first (they are scored
+      // against the research question); only if the ranked list is shorter than the
+      // target do we fall back to the journal's own project-log papers to fill slots.
       const FULL_TEXT_TARGET = Math.min(15, Math.max(1, data.fullTextCount ?? 15));
       const FULL_TEXT_PER_PAPER_CHARS = 4000;
+      const rankedFsCandidates = relevantFsCorpus.filter(p => p.documentId);
       const projectFsCandidates = projectCorpus.filter(p => p.documentId);
-      const relevantFsCandidates = relevantFsCorpus.filter(p => p.documentId);
-      const fullTextCandidates: CorpusPaper[] = [];
-      for (let i = 0; fullTextCandidates.length < FULL_TEXT_TARGET && (i < projectFsCandidates.length || i < relevantFsCandidates.length); i++) {
-        if (i < relevantFsCandidates.length && fullTextCandidates.length < FULL_TEXT_TARGET) fullTextCandidates.push(relevantFsCandidates[i]);
-        if (i < projectFsCandidates.length && fullTextCandidates.length < FULL_TEXT_TARGET) fullTextCandidates.push(projectFsCandidates[i]);
-      }
+      const fullTextCandidates: CorpusPaper[] = [
+        ...rankedFsCandidates,
+        ...projectFsCandidates,
+      ].slice(0, FULL_TEXT_TARGET);
       const fullTextLog: Array<{ title: string; documentId: string; readFullText: boolean }> = [];
       if (fullTextCandidates.length > 0) {
         await emitLREvent("full-text-read", `Reading the full text of the ${fullTextCandidates.length} most relevant paper(s); the remaining papers are analyzed from their abstracts.`);
