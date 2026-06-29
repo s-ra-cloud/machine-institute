@@ -1097,7 +1097,18 @@ I will now provide the papers.`;
 
   app.post("/api/literature-reviews", requireAuth, async (req, res) => {
     try {
-      const { projectId, agentId, researchQuestion, prompt, topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, journalId } = req.body;
+      const { projectId, agentId, researchQuestion, prompt, topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, journalId, fullTextCount, includeArxiv } = req.body;
+
+      // Number of top-relevance papers to read in FULL TEXT (rest use abstracts).
+      // Clamp to 1–15; default 15. Anything non-numeric falls back to the default.
+      const FULL_TEXT_MAX = 15;
+      const parsedFullText = Number(fullTextCount);
+      // Only honor a real positive number; null/""/non-numeric all fall back to the default (15).
+      const effectiveFullTextCount = (fullTextCount !== undefined && fullTextCount !== null && fullTextCount !== "" && Number.isFinite(parsedFullText) && parsedFullText >= 1)
+        ? Math.min(FULL_TEXT_MAX, Math.max(1, Math.round(parsedFullText)))
+        : FULL_TEXT_MAX;
+      // arXiv external context is on by default; only an explicit `false` disables it.
+      const effectiveIncludeArxiv = includeArxiv !== false;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
       const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
@@ -1187,7 +1198,7 @@ I will now provide the papers.`;
       const accessToken = await getAccessTokenForUser(req);
 
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
-      generateLiteratureReview(review.id, { ...result.data, topic: effectiveTopic, userId: user.id, journalId: effectiveJournalId }, modelConfig, accessToken).catch(err => {
+      generateLiteratureReview(review.id, { ...result.data, topic: effectiveTopic, userId: user.id, journalId: effectiveJournalId, fullTextCount: effectiveFullTextCount, includeArxiv: effectiveIncludeArxiv }, modelConfig, accessToken).catch(err => {
         console.error("Background review generation failed:", err);
       });
     } catch (err: any) {
@@ -1416,7 +1427,7 @@ I will now provide the papers.`;
 
   async function generateLiteratureReview(
     reviewId: string,
-    data: { projectId: string; agentId: string; researchQuestion: string; prompt: string; topic?: string; orchestratorName?: string | null; agentDescription?: string | null; userId?: string; journalId?: string },
+    data: { projectId: string; agentId: string; researchQuestion: string; prompt: string; topic?: string; orchestratorName?: string | null; agentDescription?: string | null; userId?: string; journalId?: string; fullTextCount?: number; includeArxiv?: boolean },
     modelConfig?: ModelProviderConfig,
     accessToken?: string | null,
   ) {
@@ -1479,16 +1490,54 @@ I will now provide the papers.`;
       const lrInitiativeSlug = INITIATIVE_SLUGS[lrJournalId] || "papers";
       const fsPaperUrl = (docId: string | undefined) => docId ? `https://future-science.org/${lrInitiativeSlug}/${docId}` : "";
       const existingTitles = new Set(projectPapersData.map(p => p.title));
-      let relevantPapers = [
-        ...projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url: p.sourceDocumentId ? fsPaperUrl(p.sourceDocumentId) : "" })),
-        ...relevantFS.filter(a => !existingTitles.has(a.title)).slice(0, MAX_RELEVANT_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId) })),
-      ];
-      let backgroundPapers = otherFS
+      type CorpusPaper = { title: string; authors: string; date: string; abstract: string; url: string; documentId: string; fullText?: string };
+      const projectCorpus: CorpusPaper[] = projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url: p.sourceDocumentId ? fsPaperUrl(p.sourceDocumentId) : "", documentId: p.sourceDocumentId || "" }));
+      const relevantFsCorpus: CorpusPaper[] = relevantFS.filter(a => !existingTitles.has(a.title)).slice(0, MAX_RELEVANT_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId || "" }));
+      let relevantPapers: CorpusPaper[] = [...projectCorpus, ...relevantFsCorpus];
+      let backgroundPapers: CorpusPaper[] = otherFS
         .filter(a => !existingTitles.has(a.title))
         .slice(0, MAX_BACKGROUND_PAPERS)
-        .map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId) }));
+        .map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId || "" }));
 
       const allPaperSources = [...relevantPapers, ...backgroundPapers];
+
+      // Read the FULL TEXT of the most relevant papers (the rest stay abstract-only).
+      // Candidates are drawn by interleaving the journal's own publications (project log)
+      // with the relevance-scored Future Science papers, so a large project log can't
+      // starve high-relevance FS matches out of the limited full-text slots.
+      const FULL_TEXT_TARGET = Math.min(15, Math.max(1, data.fullTextCount ?? 15));
+      const FULL_TEXT_PER_PAPER_CHARS = 4000;
+      const projectFsCandidates = projectCorpus.filter(p => p.documentId);
+      const relevantFsCandidates = relevantFsCorpus.filter(p => p.documentId);
+      const fullTextCandidates: CorpusPaper[] = [];
+      for (let i = 0; fullTextCandidates.length < FULL_TEXT_TARGET && (i < projectFsCandidates.length || i < relevantFsCandidates.length); i++) {
+        if (i < relevantFsCandidates.length && fullTextCandidates.length < FULL_TEXT_TARGET) fullTextCandidates.push(relevantFsCandidates[i]);
+        if (i < projectFsCandidates.length && fullTextCandidates.length < FULL_TEXT_TARGET) fullTextCandidates.push(projectFsCandidates[i]);
+      }
+      const fullTextLog: Array<{ title: string; documentId: string; readFullText: boolean }> = [];
+      if (fullTextCandidates.length > 0) {
+        await emitLREvent("full-text-read", `Reading the full text of the ${fullTextCandidates.length} most relevant paper(s); the remaining papers are analyzed from their abstracts.`);
+        await Promise.all(fullTextCandidates.map(async (p) => {
+          try {
+            const text = await fetchFsPaperContent(p.documentId, lrInitiativeSlug);
+            const cleaned = (text || "").trim();
+            if (cleaned.length > 0) {
+              p.fullText = cleaned.length > FULL_TEXT_PER_PAPER_CHARS
+                ? cleaned.slice(0, FULL_TEXT_PER_PAPER_CHARS - 1).trimEnd() + "…"
+                : cleaned;
+            }
+          } catch (e) {
+            console.error(`[LR ${reviewId}] Full-text fetch failed for "${p.title}" (${p.documentId}):`, e);
+          }
+          fullTextLog.push({ title: p.title, documentId: p.documentId, readFullText: Boolean(p.fullText) });
+        }));
+        const readCount = fullTextLog.filter(f => f.readFullText).length;
+        await emitLREvent("full-text-read", `Full text retrieved for ${readCount}/${fullTextCandidates.length} paper(s); any that could not be fetched fall back to their abstract.`);
+      }
+
+      // Render one corpus entry, preferring full text when available, else the abstract.
+      const formatPaperEntry = (p: CorpusPaper, i: number) =>
+        `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}${p.url ? `\nURL: ${p.url}` : ""}\n${p.fullText ? `Full Text (excerpt):\n${p.fullText}` : `Abstract/Summary: ${p.abstract}`}`;
 
       const clusters = clusterByKeywords(filteredAbstracts);
       let clusterText = "";
@@ -1502,11 +1551,17 @@ I will now provide the papers.`;
       const trendsAnalysis = extractTrendsAndGaps(filteredAbstracts);
       await emitLREvent("trend-analysis", `Clustered corpus into ${clusters.size} topic cluster(s) and extracted trend/gap analysis.`);
 
+      const includeArxiv = data.includeArxiv !== false;
       const searchTerms = data.researchQuestion.trim().length > 0 ? data.researchQuestion.trim() : data.researchQuestion.split(/\s+/).filter(w => w.length > 4).slice(0, 6).join(" ");
-      console.log(`Literature review ${reviewId}: arXiv retrieval for "${searchTerms}"`);
-      await emitLREvent("arxiv-search", `Searching arXiv for recent papers matching: "${searchTerms}"`);
-      const arxivResults = await searchArxiv(searchTerms);
-      await emitLREvent("arxiv-search", `arXiv search returned ${arxivResults.length} result(s).`);
+      let arxivResults: Awaited<ReturnType<typeof searchArxiv>> = [];
+      if (includeArxiv) {
+        console.log(`Literature review ${reviewId}: arXiv retrieval for "${searchTerms}"`);
+        await emitLREvent("arxiv-search", `Searching arXiv for recent papers matching: "${searchTerms}"`);
+        arxivResults = await searchArxiv(searchTerms);
+        await emitLREvent("arxiv-search", `arXiv search returned ${arxivResults.length} result(s).`);
+      } else {
+        await emitLREvent("arxiv-search", "arXiv external context disabled for this run; using the journal corpus only.");
+      }
       const arxivTexts = arxivResults.length > 0
         ? arxivResults.map((r, i) =>
             `External arXiv Paper ${i + 1}:\narXiv ID: ${r.arxivId}\nTitle: ${r.title}\nAuthors: ${r.authors}\nDate: ${r.published}\nSummary: ${r.summary}`
@@ -1533,9 +1588,7 @@ I will now provide the papers.`;
       const allFSPapers = [...relevantPapers, ...backgroundPapers];
       let papersSection = "";
       if (allFSPapers.length > 0) {
-        const allPaperTexts = allFSPapers.map((p, i) =>
-          `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}${p.url ? `\nURL: ${p.url}` : ""}\nAbstract/Summary: ${p.abstract}`
-        );
+        const allPaperTexts = allFSPapers.map((p, i) => formatPaperEntry(p, i));
         papersSection += `\n\nJOURNAL CORPUS — ${allFSPapers.length} PAPERS (you MUST cite and discuss EVERY one of these):\n\n${allPaperTexts.join("\n\n---\n\n")}`;
       }
 
@@ -1554,9 +1607,7 @@ I will now provide the papers.`;
           relevantPapers = relevantPapers.slice(0, -1);
         }
         const trimmedAllPapers = [...relevantPapers, ...backgroundPapers];
-        const trimmedPaperTexts = trimmedAllPapers.map((p, i) =>
-          `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}${p.url ? `\nURL: ${p.url}` : ""}\nAbstract/Summary: ${p.abstract}`
-        );
+        const trimmedPaperTexts = trimmedAllPapers.map((p, i) => formatPaperEntry(p, i));
         let trimmedPapers = "";
         if (trimmedPaperTexts.length > 0) {
           trimmedPapers += `\n\nJOURNAL CORPUS — ${trimmedAllPapers.length} PAPERS (you MUST cite and discuss EVERY one of these):\n\n${trimmedPaperTexts.join("\n\n---\n\n")}`;
@@ -1587,6 +1638,11 @@ I will now provide the papers.`;
         futureScienceKeywords: fsKeywords,
         clusters: Array.from(clusters.entries()).map(([keyword, papers]) => ({ keyword, paperTitles: papers.map(p => p.title) })),
         arxivResults: arxivResults.map(r => ({ arxivId: r.arxivId, title: r.title, authors: r.authors })),
+        fullTextSettings: { requested: FULL_TEXT_TARGET, includeArxiv },
+        fullTextPapers: fullTextLog,
+        abstractOnlyPapers: [...relevantPapers, ...backgroundPapers]
+          .filter(p => !p.fullText)
+          .map(p => ({ title: p.title, documentId: p.documentId })),
       });
 
       await storage.updateLiteratureReview(reviewId, { promptTrace, sourceTrace });

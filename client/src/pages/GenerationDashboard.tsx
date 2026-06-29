@@ -225,6 +225,8 @@ export default function GenerationDashboard() {
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [showMetadata, setShowMetadata] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"basic" | "adversarial">("basic");
+  const [fullTextCount, setFullTextCount] = useState<number>(15);
+  const [includeArxiv, setIncludeArxiv] = useState<boolean>(true);
   const [selectedJournal, setSelectedJournal] = useState<string>("mirror");
   const ethicsProjectId = selectedJournal;
   const [ethicsKeywords, setEthicsKeywords] = useState<string>("");
@@ -554,6 +556,8 @@ export default function GenerationDashboard() {
           modelName: modelConfig.modelName,
           byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
           journalId: selectedJournal,
+          fullTextCount,
+          includeArxiv,
         }),
       });
       if (!res.ok) {
@@ -1342,6 +1346,98 @@ export default function GenerationDashboard() {
                     {researchQuestion.length > 0 && researchQuestion.length < 10 && (
                       <p className="text-[10px] font-mono text-red-400 mt-1">Research question must be at least 10 characters.</p>
                     )}
+                  </div>
+
+                  <div className="border border-border/40 bg-muted/5 p-5" data-testid="lr-pipeline">
+                    <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+                      How this review is produced
+                    </p>
+                    <p className="text-[11px] font-mono text-muted-foreground/50 mb-5">
+                      Each step runs automatically. Adjust the controls below to change what the agent does.
+                    </p>
+
+                    <ol className="space-y-5">
+                      <li className="flex gap-3" data-testid="lr-stage-gather">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">1</span>
+                        <div className="text-sm text-foreground/80">
+                          <span className="font-medium">Gather the papers.</span>{" "}
+                          <span className="text-muted-foreground/70">Collects this journal's publications from the project log and Future Science.</span>
+                        </div>
+                      </li>
+
+                      <li className="flex gap-3" data-testid="lr-stage-rank">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">2</span>
+                        <div className="text-sm text-foreground/80">
+                          <span className="font-medium">Rank by relevance.</span>{" "}
+                          <span className="text-muted-foreground/70">Scores every paper against your research question to find the closest matches.</span>
+                        </div>
+                      </li>
+
+                      <li className="flex gap-3" data-testid="lr-stage-fulltext">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">3</span>
+                        <div className="flex-1">
+                          <div className="text-sm text-foreground/80 mb-2">
+                            <span className="font-medium">Read full text of the top papers.</span>{" "}
+                            <span className="text-muted-foreground/70">The most relevant papers are read in full; the rest are summarized from their abstracts.</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="range"
+                              min={1}
+                              max={15}
+                              value={fullTextCount}
+                              onChange={(e) => setFullTextCount(Number(e.target.value))}
+                              className="flex-1 accent-primary"
+                              data-testid="input-full-text-count"
+                            />
+                            <span className="text-xs font-mono text-primary w-24 text-right" data-testid="text-full-text-count">
+                              {fullTextCount} paper{fullTextCount === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                          <p className="text-[10px] font-mono text-muted-foreground/40 mt-1">
+                            Reading more papers in full gives a deeper review but costs more and takes longer (max 15).
+                          </p>
+                        </div>
+                      </li>
+
+                      <li className="flex gap-3" data-testid="lr-stage-arxiv">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">4</span>
+                        <div className="flex-1">
+                          <div className="text-sm text-foreground/80 mb-2">
+                            <span className="font-medium">Add recent arXiv context.</span>{" "}
+                            <span className="text-muted-foreground/70">Pulls related recent preprints from arXiv (abstracts only) to frame the broader field.</span>
+                          </div>
+                          <label className="flex items-center gap-2 cursor-pointer text-xs font-mono text-muted-foreground/80">
+                            <input
+                              type="checkbox"
+                              checked={includeArxiv}
+                              onChange={(e) => setIncludeArxiv(e.target.checked)}
+                              className="accent-primary"
+                              data-testid="checkbox-include-arxiv"
+                            />
+                            <span>{includeArxiv ? "Including arXiv context" : "Skipping arXiv — journal corpus only"}</span>
+                          </label>
+                        </div>
+                      </li>
+
+                      <li className="flex gap-3" data-testid="lr-stage-cluster">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">5</span>
+                        <div className="text-sm text-foreground/80">
+                          <span className="font-medium">Cluster topics &amp; find gaps.</span>{" "}
+                          <span className="text-muted-foreground/70">Groups the corpus into themes and surfaces trends and open research gaps.</span>
+                        </div>
+                      </li>
+
+                      <li className="flex gap-3" data-testid="lr-stage-write">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">6</span>
+                        <div className="text-sm text-foreground/80">
+                          <span className="font-medium">Write the review.</span>{" "}
+                          <span className="text-muted-foreground/70">
+                            Synthesizes everything into a {reviewMode === "adversarial" ? "critical, adversarial" : "balanced, constructive"} review using your chosen model. Adjust the style above, the model below, and the system prompt to fine-tune the output.
+                          </span>
+                        </div>
+                      </li>
+                    </ol>
                   </div>
                   </>
                 )}
