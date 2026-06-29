@@ -1368,6 +1368,22 @@ export default function GenerationDashboard() {
                           </div>
                           <div>
                             <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                              Custom Focus (optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={topic}
+                              onChange={(e) => setTopic(e.target.value)}
+                              className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm focus:outline-none focus:border-primary/50 font-mono"
+                              placeholder="Narrow the review to a specific angle (optional)"
+                              data-testid="input-topic"
+                            />
+                            <p className="text-[10px] font-mono text-muted-foreground/40 mt-1">
+                              Leave blank to use the journal's default research focus.
+                            </p>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
                               Reviewer Style
                             </label>
                             <div className="flex gap-2">
