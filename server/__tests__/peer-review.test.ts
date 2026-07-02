@@ -6,6 +6,7 @@ import {
   AR_PROMPT,
   RR_PROMPT,
   extractRecommendation,
+  reconcileRecommendation,
   extractRevisions,
   extractReviewSummary,
   buildPeerReviewAbstract,
@@ -87,6 +88,74 @@ describe("Peer review — extractRecommendation", () => {
   it("prefers the LAST recommendation token in the text (final verdict)", () => {
     const text = "Earlier we considered Accept, but ultimately the recommendation is Reject.";
     expect(extractRecommendation(text)).toBe("Reject");
+  });
+
+  it("lets the explicit 'Recommendation:' line win over stray earlier keywords", () => {
+    // The body mentions "accept" and "reject" in prose, but the explicit final
+    // recommendation line is the source of truth.
+    const text = [
+      "We could accept this after edits, and some reviewers would reject it outright.",
+      "There are several major concerns to resolve first.",
+      "",
+      "Recommendation: Major Revision",
+    ].join("\n");
+    expect(extractRecommendation(text)).toBe("Major Revision");
+  });
+
+  it("uses the LAST explicit recommendation line when several are present", () => {
+    const text = [
+      "Recommendation: Accept",
+      "On reflection, the concerns are more serious.",
+      "Recommendation: Major Revision",
+    ].join("\n");
+    expect(extractRecommendation(text)).toBe("Major Revision");
+  });
+
+  it("parses markdown-bold recommendation line variants", () => {
+    expect(extractRecommendation("**Recommendation:** Major Revision")).toBe("Major Revision");
+    expect(extractRecommendation("__Recommendation:__ Reject")).toBe("Reject");
+    expect(extractRecommendation("## Recommendation: Minor Revision")).toBe("Minor Revision");
+    expect(extractRecommendation("> **Recommendation**: Accept")).toBe("Accept");
+  });
+
+  it("falls back to the last-occurrence heuristic when no explicit line exists", () => {
+    // No "Recommendation:" line at all — the last verdict keyword in the prose wins.
+    const text = "The paper is strong. A minor revision would suffice. On balance, major revision is warranted.";
+    expect(extractRecommendation(text)).toBe("Major Revision");
+  });
+
+  it("does not mistake 'Major Revision' for a bare 'Major' via longer-match ordering", () => {
+    expect(extractRecommendation("Recommendation: Major Revision")).toBe("Major Revision");
+  });
+});
+
+describe("Peer review — reconcileRecommendation", () => {
+  it("upgrades 'Accept' to 'Major Revision' when major revisions exist", () => {
+    expect(reconcileRecommendation("Accept", 2)).toBe("Major Revision");
+  });
+
+  it("upgrades 'Minor Revision' to 'Major Revision' when major revisions exist", () => {
+    expect(reconcileRecommendation("Minor Revision", 1)).toBe("Major Revision");
+  });
+
+  it("is case-insensitive and tolerant of surrounding whitespace", () => {
+    expect(reconcileRecommendation("  accept  ", 3)).toBe("Major Revision");
+    expect(reconcileRecommendation("MINOR REVISION", 1)).toBe("Major Revision");
+  });
+
+  it("leaves 'Reject' untouched (already at least as severe)", () => {
+    expect(reconcileRecommendation("Reject", 5)).toBe("Reject");
+  });
+
+  it("leaves an existing 'Major Revision' untouched", () => {
+    expect(reconcileRecommendation("Major Revision", 4)).toBe("Major Revision");
+  });
+
+  it("leaves every verdict untouched when there are no major revisions", () => {
+    expect(reconcileRecommendation("Accept", 0)).toBe("Accept");
+    expect(reconcileRecommendation("Minor Revision", 0)).toBe("Minor Revision");
+    expect(reconcileRecommendation("Reject", 0)).toBe("Reject");
+    expect(reconcileRecommendation("Accept", -1)).toBe("Accept");
   });
 });
 
