@@ -1470,7 +1470,7 @@ export default function GenerationDashboard() {
                         <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">4</span>
                         <div className="flex-1">
                           <div className="text-sm text-foreground/80 mb-2">
-                            <span className="font-medium">Organize by theme, trend &amp; relevance.</span>{" "}
+                            <span className="font-medium">Organize by theme &amp; trend.</span>{" "}
                             <span className="text-muted-foreground/70">
                               The <span className="text-foreground/70">Machine Institute server does this in plain code, not the AI model</span>. It runs two fixed
                               functions over the collected papers before the model is called, so the same corpus always yields the same clusters and counts.
