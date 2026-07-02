@@ -1468,9 +1468,25 @@ export default function GenerationDashboard() {
 
                       <li className="flex gap-3" data-testid="lr-stage-organize">
                         <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">4</span>
-                        <div className="text-sm text-foreground/80">
-                          <span className="font-medium">Organize by theme, trend &amp; relevance.</span>{" "}
-                          <span className="text-muted-foreground/70">Groups the corpus into topic clusters and surfaces trends and open research gaps.</span>
+                        <div className="flex-1">
+                          <div className="text-sm text-foreground/80 mb-2">
+                            <span className="font-medium">Organize by theme, trend &amp; relevance.</span>{" "}
+                            <span className="text-muted-foreground/70">A fixed, deterministic pass over the collected papers — same corpus in, same structure out — that the writing step uses as its scaffold:</span>
+                          </div>
+                          <ul className="space-y-1.5 text-[11px] font-mono text-muted-foreground/70">
+                            <li className="flex gap-2">
+                              <span className="text-primary/60">·</span>
+                              <span><span className="text-foreground/70">Topic clusters:</span> papers are grouped by the keywords they were tagged with on Future Science; the 10 largest keyword groups (by paper count) are kept as themes.</span>
+                            </li>
+                            <li className="flex gap-2">
+                              <span className="text-primary/60">·</span>
+                              <span><span className="text-foreground/70">Trends:</span> keywords are counted across all papers (top 20 shown with counts), and words longer than 5 letters in titles and abstracts are counted (top 15 kept) to surface recurring terms.</span>
+                            </li>
+                            <li className="flex gap-2">
+                              <span className="text-primary/60">·</span>
+                              <span><span className="text-foreground/70">Gaps:</span> the clusters, keyword/term counts, and total paper count are handed to the model, which reads them to point out under-studied themes and open questions.</span>
+                            </li>
+                          </ul>
                         </div>
                       </li>
 
