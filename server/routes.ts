@@ -1480,7 +1480,7 @@ I will now provide the papers.`;
       } else if (filteredAbstracts.length === 0) {
         await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} paper(s) from Future Science but all were existing literature reviews and were filtered out. Using ${projectPapersData.length} paper(s) from project log.`);
       } else {
-        await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} unique paper(s) from Future Science (filtered to ${filteredAbstracts.length} after removing existing LRs; ${relevantFS.length} topic-relevant, ${otherFS.length} other) and ${projectPapersData.length} from project log.`);
+        await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} unique paper(s) from Future Science (filtered to ${filteredAbstracts.length} after removing existing LRs). Ranked by relevance to your research question: ${relevantFS.length} topic-relevant, ${otherFS.length} background. Using Future Science as the sole source (the synced project log is skipped).`);
       }
 
       const MAX_RELEVANT_PAPERS = 25;
@@ -1489,30 +1489,30 @@ I will now provide the papers.`;
 
       const lrInitiativeSlug = INITIATIVE_SLUGS[lrJournalId] || "papers";
       const fsPaperUrl = (docId: string | undefined) => docId ? `https://future-science.org/${lrInitiativeSlug}/${docId}` : "";
-      const existingTitles = new Set(projectPapersData.map(p => p.title));
       type CorpusPaper = { title: string; authors: string; date: string; abstract: string; url: string; documentId: string; fullText?: string };
+      // The Mirror project log is just a synced copy of Future Science contributions, so
+      // when Future Science returns papers we treat it as the sole source (no project-log
+      // merge, and no title-dedup against the project log). The project log is kept purely
+      // as a resilience fallback for when the Future Science fetch fails or is empty.
+      const fsHasPapers = filteredAbstracts.length > 0;
       const projectCorpus: CorpusPaper[] = projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url: p.sourceDocumentId ? fsPaperUrl(p.sourceDocumentId) : "", documentId: p.sourceDocumentId || "" }));
-      const relevantFsCorpus: CorpusPaper[] = relevantFS.filter(a => !existingTitles.has(a.title)).slice(0, MAX_RELEVANT_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId || "" }));
-      let relevantPapers: CorpusPaper[] = [...projectCorpus, ...relevantFsCorpus];
-      let backgroundPapers: CorpusPaper[] = otherFS
-        .filter(a => !existingTitles.has(a.title))
-        .slice(0, MAX_BACKGROUND_PAPERS)
-        .map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId || "" }));
+      const relevantFsCorpus: CorpusPaper[] = relevantFS.slice(0, MAX_RELEVANT_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId || "" }));
+      const backgroundFsCorpus: CorpusPaper[] = otherFS.slice(0, MAX_BACKGROUND_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId || "" }));
+      const corpusSource: "future-science" | "project-log-fallback" = fsHasPapers ? "future-science" : "project-log-fallback";
+      let relevantPapers: CorpusPaper[] = fsHasPapers ? [...relevantFsCorpus] : [...projectCorpus];
+      let backgroundPapers: CorpusPaper[] = fsHasPapers ? [...backgroundFsCorpus] : [];
 
       const allPaperSources = [...relevantPapers, ...backgroundPapers];
 
       // Read the FULL TEXT of the most relevant papers (the rest stay abstract-only).
-      // Take the top-N *relevance-ranked* Future Science papers first (they are scored
-      // against the research question); only if the ranked list is shorter than the
-      // target do we fall back to the journal's own project-log papers to fill slots.
       const FULL_TEXT_TARGET = Math.min(15, Math.max(1, data.fullTextCount ?? 15));
       const FULL_TEXT_PER_PAPER_CHARS = 4000;
-      const rankedFsCandidates = relevantFsCorpus.filter(p => p.documentId);
-      const projectFsCandidates = projectCorpus.filter(p => p.documentId);
-      const fullTextCandidates: CorpusPaper[] = [
-        ...rankedFsCandidates,
-        ...projectFsCandidates,
-      ].slice(0, FULL_TEXT_TARGET);
+      // Read the top-N relevance-ranked papers in full. relevantPapers is already the
+      // relevance-sorted Future Science set (or the project-log fallback), so we simply
+      // take the highest-ranked ones that have a Future Science documentId to fetch.
+      const fullTextCandidates: CorpusPaper[] = relevantPapers
+        .filter(p => p.documentId)
+        .slice(0, FULL_TEXT_TARGET);
       const fullTextLog: Array<{ title: string; documentId: string; readFullText: boolean }> = [];
       if (fullTextCandidates.length > 0) {
         await emitLREvent("full-text-read", `Reading the full text of the ${fullTextCandidates.length} most relevant paper(s); the remaining papers are analyzed from their abstracts.`);
@@ -1637,6 +1637,7 @@ I will now provide the papers.`;
         futureScienceKeywords: fsKeywords,
         clusters: Array.from(clusters.entries()).map(([keyword, papers]) => ({ keyword, paperTitles: papers.map(p => p.title) })),
         arxivResults: arxivResults.map(r => ({ arxivId: r.arxivId, title: r.title, authors: r.authors })),
+        corpusSource,
         fullTextSettings: { requested: FULL_TEXT_TARGET, includeArxiv },
         fullTextPapers: fullTextLog,
         abstractOnlyPapers: [...relevantPapers, ...backgroundPapers]

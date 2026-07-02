@@ -1424,7 +1424,7 @@ export default function GenerationDashboard() {
                         <div className="flex-1">
                           <div className="text-sm text-foreground/80 mb-2">
                             <span className="font-medium">Collect the source material.</span>{" "}
-                            <span className="text-muted-foreground/70">Gathers this journal's publications from the project log and Future Science, plus optional recent arXiv preprints (abstracts only) for broader context.</span>
+                            <span className="text-muted-foreground/70">Pulls this journal's publications directly from Future Science, plus optional recent arXiv preprints (abstracts only) for broader context.</span>
                           </div>
                           <label className="flex items-center gap-2 cursor-pointer text-xs font-mono text-muted-foreground/80">
                             <input
@@ -1444,7 +1444,7 @@ export default function GenerationDashboard() {
                         <div className="flex-1">
                           <div className="text-sm text-foreground/80 mb-2">
                             <span className="font-medium">Read the full text of the top relevant papers.</span>{" "}
-                            <span className="text-muted-foreground/70">The most relevant papers are read in full; the rest are analyzed from their abstracts.</span>
+                            <span className="text-muted-foreground/70">Each paper is scored by how well its title, abstract, and keywords match your research question. The highest-scoring papers are read in full (up to the count below); the rest are analyzed from their abstracts.</span>
                           </div>
                           <div className="flex items-center gap-3">
                             <input
