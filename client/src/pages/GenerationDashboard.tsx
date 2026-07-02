@@ -1471,22 +1471,62 @@ export default function GenerationDashboard() {
                         <div className="flex-1">
                           <div className="text-sm text-foreground/80 mb-2">
                             <span className="font-medium">Organize by theme, trend &amp; relevance.</span>{" "}
-                            <span className="text-muted-foreground/70">A fixed, deterministic pass over the collected papers — same corpus in, same structure out — that the writing step uses as its scaffold:</span>
+                            <span className="text-muted-foreground/70">
+                              The <span className="text-foreground/70">Machine Institute server does this in plain code, not the AI model</span>. It runs two fixed
+                              functions over the collected papers before the model is called, so the same corpus always yields the same clusters and counts.
+                              The model only receives the results and uses them to structure the review and name gaps.
+                            </span>
                           </div>
-                          <ul className="space-y-1.5 text-[11px] font-mono text-muted-foreground/70">
+                          <ul className="space-y-1.5 text-[11px] font-mono text-muted-foreground/70 mb-2">
                             <li className="flex gap-2">
                               <span className="text-primary/60">·</span>
-                              <span><span className="text-foreground/70">Topic clusters:</span> papers are grouped by the keywords they were tagged with on Future Science; the 10 largest keyword groups (by paper count) are kept as themes.</span>
+                              <span><span className="text-foreground/70">Topic clusters:</span> papers grouped by the keyword tags they carry on Future Science; the 10 largest groups (by paper count) are kept.</span>
                             </li>
                             <li className="flex gap-2">
                               <span className="text-primary/60">·</span>
-                              <span><span className="text-foreground/70">Trends:</span> keywords are counted across all papers (top 20 shown with counts), and words longer than 5 letters in titles and abstracts are counted (top 15 kept) to surface recurring terms.</span>
+                              <span><span className="text-foreground/70">Trends:</span> the top 20 most-used keywords (with paper counts) and the top 15 most-frequent words longer than 5 letters across titles + abstracts.</span>
                             </li>
                             <li className="flex gap-2">
                               <span className="text-primary/60">·</span>
-                              <span><span className="text-foreground/70">Gaps:</span> the clusters, keyword/term counts, and total paper count are handed to the model, which reads them to point out under-studied themes and open questions.</span>
+                              <span><span className="text-foreground/70">Gaps:</span> not computed in code — the model reads the clusters and counts above and names the under-studied themes and open questions.</span>
                             </li>
                           </ul>
+                          <details className="group" data-testid="details-organize-algorithm">
+                            <summary className="cursor-pointer text-[10px] font-mono uppercase tracking-widest text-primary/70 hover:text-primary select-none">
+                              Exact algorithm (for reproduction)
+                            </summary>
+                            <div className="mt-2 border-l border-border/40 pl-3 space-y-3 text-[10px] font-mono text-muted-foreground/60 leading-relaxed">
+                              <div>
+                                <span className="text-foreground/60">Input.</span> Every paper fetched from this journal on Future Science, excluding any whose title
+                                starts with "literature review:". Each paper is (title, abstract, keywords[]), where keywords are the tags set on Future Science.
+                                The exact same list feeds both steps below.
+                              </div>
+                              <div>
+                                <span className="text-foreground/60">A · Topic clusters (clusterByKeywords):</span>
+                                <ol className="list-decimal ml-4 mt-1 space-y-0.5">
+                                  <li>Start an empty map of keyword → papers.</li>
+                                  <li>For each paper, for each of its keywords: lowercase the keyword and append the paper to that keyword's list. A paper with N keywords lands in N lists, so clusters overlap.</li>
+                                  <li>Sort the keywords by list length, largest first. Ties keep the order the papers arrived from Future Science.</li>
+                                  <li>Keep the top 10 keywords. Each kept keyword plus its papers is one cluster; its member titles are listed to the model.</li>
+                                </ol>
+                              </div>
+                              <div>
+                                <span className="text-foreground/60">B · Trends (extractTrendsAndGaps):</span>
+                                <ol className="list-decimal ml-4 mt-1 space-y-0.5">
+                                  <li>Trending keywords: count how many papers carry each lowercased keyword, sort by count descending, keep the top 20, render as "keyword (N papers)".</li>
+                                  <li>Frequent terms: for each paper join title + " " + abstract, lowercase, split on whitespace, count every token longer than 5 characters, sort by count descending, keep the top 15 words.</li>
+                                  <li>Output one text block: Trending keywords, Frequent terms, and Total papers analyzed = the input count.</li>
+                                </ol>
+                              </div>
+                              <div>
+                                <span className="text-foreground/60">C · Handoff.</span> The cluster list (each keyword with its member titles) and the trends text block are
+                                inserted verbatim into the model prompt. The model then writes the review and identifies gaps from them.
+                              </div>
+                              <div className="text-muted-foreground/40">
+                                Source: server/future-science.ts → clusterByKeywords() and extractTrendsAndGaps(), wired in server/routes.ts.
+                              </div>
+                            </div>
+                          </details>
                         </div>
                       </li>
 
