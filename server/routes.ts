@@ -18,7 +18,7 @@ import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
 import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
-import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, clusterByKeywords, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
+import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
 function buildConventionName(modelName: string, agentId: string): string {
@@ -766,201 +766,83 @@ export async function registerRoutes(
     }
   });
 
-  const DEFAULT_BLR_PROMPT = `You are a senior academic researcher writing a literature review. Your job is NOT to summarize papers — it is to SYNTHESIZE them: to identify what we collectively learn when these works are read together, what bigger picture emerges, and what new questions they open.
+  const DEFAULT_BLR_PROMPT = `You are a senior researcher writing a literature review. SYNTHESIZE the provided papers — say what we learn from reading them together — rather than summarizing them one by one.
 
-I will provide a set of academic papers. Your task is to produce a deeply analytical literature review that treats these papers as pieces of a larger puzzle.
+Rules:
+- Cite ONLY papers provided to you. Never invent references, authors, dates, titles, or URLs.
+- Cite every provided paper at least once in the body, and list every one in References.
+- Inline citations use Chicago author-date as a markdown link to the paper's URL: [(Author, Date)](URL). Use letters for same-author/same-year papers: 2026a, 2026b. If a paper has no URL, keep the text but drop the link.
+- Use arXiv papers (under "EXTERNAL CONTEXT FROM ARXIV") only for broader context in the Introduction; the analysis focuses on the journal corpus.
 
-CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
+Write in clear academic English, ~3000–5000 words (References excluded). Use these sections in order:
 
-1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
-2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format the citation as a markdown link to the paper's URL: [(Author, Date)](URL). Example: [(MachinePsyKw DS32E-N1, 2026)](https://future-science.org/mirror/abc123). When the same author has multiple papers from the same year, distinguish them with letters: [(MachinePsyKw DS32E-N1, 2026a)](URL1), [(MachinePsyKw DS32E-N1, 2026b)](URL2), etc.
-4. BIBLIOGRAPHY: In the References section, use full Chicago style with the title as a markdown link to the paper's URL. Format:
-   Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-   Example: MachinePsyKw DS32E-N1. 2026a. "[Dark Triad Emergence in DeepSeek Chat](https://future-science.org/mirror/abc123)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-5. ALWAYS use the URL provided with each paper (in the URL field). Do NOT invent URLs. If a paper has no URL provided, omit the markdown link wrapper but keep the citation text.
-6. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
-7. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
-
-SYNTHESIS INSTRUCTIONS — THIS IS THE MOST IMPORTANT PART:
-
-Your primary intellectual task is to answer: "What do we learn when we read all of these papers together that we would not learn from reading any one of them alone?"
-
-Before you begin writing, think through:
-1. What common threads, shared assumptions, or recurring phenomena appear across multiple papers?
-2. Where do different papers' findings reinforce, extend, contradict, or qualify each other?
-3. What trajectory or progression of understanding is visible across the body of work?
-4. What specific mechanistic or theoretical picture emerges from combining these results?
-5. What concrete open questions does this body of work motivate — not generic "more research is needed" but specific, falsifiable questions that follow from the combined findings?
-
-ANTI-PATTERNS TO AVOID — your review will be rejected if it does any of these:
-- DO NOT write an introduction that merely says "X is an important topic" or "X has attracted growing interest." Instead, state a specific thesis: what the reviewed papers collectively reveal about the topic.
-- DO NOT write paper-by-paper summaries disguised as thematic sections. A thematic section that says "Paper A found X. Paper B found Y. Paper C found Z." is a summary, not synthesis. Instead, make a claim about the theme, then weave evidence from multiple papers together to support it.
-- DO NOT write a conclusion that merely restates that the topic is important or that "challenges remain." Instead, state what the field has concretely learned and what specific next steps the evidence points toward.
-- DO NOT treat each paper as an island. Every paragraph in the Thematic Review should reference at least 2–3 papers, showing how their findings relate to each other.
-
-Write the review in clear academic English suitable for a research paper.
-
-CRITICAL: The Thematic Review and Comparative Discussion sections should make up at least 70% of the total word count. The References section should be a compact list at the end.
-
-Structure the output as follows:
-
-**Keywords:** [list 6–8 specific technical keywords separated by commas — choose terms that precisely describe the subject matter of this review, not generic phrases like "AI research" or "machine learning"]
+**Keywords:** [6–8 specific technical keywords, comma-separated]
 
 ## Abstract
-Write a single self-contained paragraph of approximately 150–250 words that summarizes the entire review. The abstract MUST cover, in this order:
-1. The scope of the review (the research question and the body of work surveyed).
-2. The synthetic thesis — what these papers, taken together, reveal.
-3. The key thematic findings and the most important points of convergence or tension across the corpus.
-4. The principal research gaps identified.
-5. The main conclusion and the most important direction(s) for future work.
-This is a true abstract — a standalone summary of the whole review — NOT an opening paragraph of the Introduction. Do not include citations or markdown links in the abstract. Do not begin with phrases like "This review introduces…"; instead, state findings directly.
+One self-contained paragraph (~150–250 words) covering scope, the synthetic thesis, key findings/tensions, gaps, and the main direction for future work. No citations or links.
 
 ## Introduction
-The introduction MUST do two things:
-1. **Establish the broader research context** by drawing on the arXiv papers provided under "EXTERNAL CONTEXT FROM ARXIV." Summarize the state of the field — what problems researchers are working on, what recent progress looks like, and what open questions remain — using these external arXiv sources as evidence. Cite them inline as (Author et al., Date) or (arXiv: ID).
-2. **State a concrete thesis** about what the journal corpus papers (from Mirror) collectively reveal within that broader context. Tell the reader what the big takeaway is when these works are considered together.
+Ground the reader in the field using the arXiv context, then state a concrete thesis about what the corpus papers collectively reveal.
 
-The introduction should be 2–4 paragraphs: first grounding the reader in the wider field (via arXiv), then pivoting to the specific contributions of the reviewed corpus. Do NOT merely say "X is an important topic." Instead, show what the field is doing (arXiv context) and then state what these specific papers add to it.
-
-## Inclusion Criteria
-Briefly state which papers were included and why. Do NOT list every single paper here — just describe the selection criteria and mention a few representative examples.
-
-## Thematic Review of the Literature
-This is the core of the review. Organize into 3–5 thematic subsections, each built around a specific claim or finding that emerges from multiple papers. Each subsection should:
-- Open with a synthetic claim (e.g., "Several studies converge on the finding that...")
-- Weave evidence from multiple papers to support, qualify, or complicate that claim
-- Note where papers disagree or reveal tensions
-- End with what that theme contributes to the bigger picture
-Do NOT summarize papers one at a time. Cite inline throughout using markdown-linked citations: [(Author, Date)](URL).
+## Thematic Review
+The core of the review. Organize into 3–5 thematic subsections, each opening with a synthetic claim and weaving evidence from multiple papers to support, qualify, or complicate it. Cite inline as [(Author, Date)](URL). Do not summarize papers one at a time.
 
 ## Comparative Discussion
-Go beyond listing agreements and disagreements. Identify:
-- Converging evidence: where independent approaches reach the same conclusion
-- Productive tensions: where disagreements point toward deeper unresolved questions
-- Methodological complementarity: how different methods illuminate different facets of the same phenomenon
-- The overall trajectory: how the body of work, taken together, advances understanding
+Where papers converge, where they conflict, and how the body of work advances understanding overall.
 
 ## Research Gaps
-Identify specific, concrete open questions motivated by the reviewed work — not generic gaps. Each gap should follow logically from the findings discussed above. Frame them as questions a researcher could actually investigate.
+Specific, concrete open questions that follow from the findings above.
 
 ## Conclusion
-Answer these questions in 2–3 substantive paragraphs:
-- What have we collectively learned from this body of work? What picture emerges?
-- What is the single most important insight or shift in understanding these papers provide?
-- What are the 2–3 most promising or urgent directions for future work, and why do they follow from the evidence reviewed?
-Do NOT merely restate that the topic is important. Do NOT end with "more research is needed." End with substance.
+What we have collectively learned, the single most important insight, and the 2–3 most promising directions for future work.
 
 ## References
-List every cited paper in Chicago author-date bibliography format with the title as a markdown link to the paper's URL:
-Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+List every cited paper, journal papers and arXiv papers separately:
+- Journal: Author. Date. "[Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+- arXiv: Author(s). Date. "[Title](https://arxiv.org/abs/ID)." arXiv: ID.
 
-Additional requirements:
-
-- Base the analysis ONLY on the provided papers (journal corpus + arXiv). Do not reference any work not explicitly given to you.
-- Use arXiv papers primarily in the Introduction to establish broader context. They may also appear in the Comparative Discussion or Research Gaps sections when relevant.
-- The Thematic Review must focus on the journal corpus papers (from Mirror).
-- Cite every claim or finding with an inline reference.
-- Avoid long quotations. Prefer synthesis over sequential summaries.
-- Length: about 3000–5000 words of analytical content. The References section does not count toward this target.
-- After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
-- In the References section, list journal corpus papers and arXiv papers separately:
-  - Journal papers: Author. Date. "[Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-  - arXiv papers: Author(s). Date. "[Title](https://arxiv.org/abs/ID)." arXiv: ID.
+Before finishing, re-read and remove any citation that does not match a provided paper.
 
 I will now provide the papers.`;
 
-  const DEFAULT_ALR_PROMPT = `You are an adversarial literature reviewer. Your job is NOT to summarize or synthesize charitably. Your job is to tear the literature apart.
+  const DEFAULT_ALR_PROMPT = `You are an adversarial literature reviewer. Do not summarize or synthesize charitably — tear the literature apart. Expose weaknesses, overinterpretations, methodological flaws, unsupported claims, logical gaps, and contradictions within and across the provided papers. Do not give the benefit of the doubt; if something is wrong, say so plainly and without hedging.
 
-I will provide a set of academic papers. Your task is to produce a critical, adversarial literature review that ruthlessly exposes weaknesses, overinterpretations, methodological flaws, unsupported claims, logical gaps, and contradictions in and across these papers.
+Rules:
+- Cite ONLY papers provided to you. Never invent references, authors, dates, titles, or URLs.
+- Criticize every provided paper at least once in the body, and list every one in References.
+- Inline citations use Chicago author-date as a markdown link to the paper's URL: [(Author, Date)](URL). Use letters for same-author/same-year papers: 2026a, 2026b. If a paper has no URL, keep the text but drop the link.
+- Use arXiv papers (under "EXTERNAL CONTEXT FROM ARXIV") only for broader context in the Introduction; the critique focuses on the journal corpus.
 
-You are not agreeable. You do not give the benefit of the doubt. If a claim is weakly supported, say so. If a methodology is flawed, explain why. If conclusions overreach the data, call it out. If papers contradict each other, highlight the contradiction and explain why at least one must be wrong. If the entire body of work rests on questionable assumptions, dismantle those assumptions.
+Look for, per paper: unsupported/overreaching claims, methodological weaknesses (sample size, design, confounds, missing controls/baselines), logical leaps, cherry-picked results, conclusions that overreach the data. Across papers: unacknowledged contradictions, shared blind spots, circular reasoning, over-reliance on one method, false novelty.
 
-CRITICAL RULES ON REFERENCES (Chicago Author-Date Style):
+Write in direct, incisive academic English, ~2500–4000 words (References excluded). Use these sections in order:
 
-1. You may ONLY cite papers that are explicitly provided to you. Do NOT invent, fabricate, or hallucinate any reference, author name, date, or paper title under any circumstances.
-2. Every paper you cite in the text MUST appear in the References section. Every paper listed in the References section MUST be cited at least once in the text.
-3. INLINE CITATIONS: Use Chicago author-date style with the actual author/agent name from the paper. Format the citation as a markdown link to the paper's URL: [(Author, Date)](URL). Example: [(MachinePsyKw DS32E-N1, 2026)](https://future-science.org/mirror/abc123). When the same author has multiple papers from the same year, distinguish them with letters: [(MachinePsyKw DS32E-N1, 2026a)](URL1), [(MachinePsyKw DS32E-N1, 2026b)](URL2), etc.
-4. BIBLIOGRAPHY: In the References section, use full Chicago style with the title as a markdown link to the paper's URL. Format:
-   Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-   Example: MachinePsyKw DS32E-N1. 2026a. "[Dark Triad Emergence in DeepSeek Chat](https://future-science.org/mirror/abc123)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-5. ALWAYS use the URL provided with each paper (in the URL field). Do NOT invent URLs. If a paper has no URL provided, omit the markdown link wrapper but keep the citation text.
-6. After writing the review, perform a SELF-CHECK: verify that every inline citation matches a real provided paper and that no reference was invented. Remove any citation that cannot be traced to a provided paper.
-7. You MUST cite and discuss every paper provided to you. Every provided paper MUST appear in the References section. Do not omit any paper.
-
-Instructions:
-
-Read all the provided papers carefully — but read them as a skeptic, not as a supporter. Your review must engage with ALL provided papers, not just a selected few. Every paper given to you must be criticized in the body of the review and listed in the References section.
-
-For each paper, identify:
-- Unsupported or overreaching claims
-- Methodological weaknesses (sample size, experimental design, confounds, lack of controls)
-- Logical leaps or non-sequiturs in the argumentation
-- Cherry-picked results or selective reporting
-- Conclusions that do not follow from the evidence presented
-- Missing baselines, missing comparisons, or missing alternative explanations
-- Internal contradictions
-
-Across the papers, identify:
-- Contradictions between papers that the authors fail to acknowledge
-- Shared blind spots or systematic biases across the body of work
-- Circular reasoning or mutual citation without independent validation
-- Overreliance on the same methodology without cross-validation
-- Claims of novelty that are not actually novel
-
-Write the review in direct, incisive academic English. Do not soften your critique with qualifiers like "perhaps" or "it could be argued." State your criticisms plainly.
-
-CRITICAL: The bulk of the review must be analytical critique — the Critical Analysis and Cross-Paper Contradictions sections should make up at least 70% of the total word count. The References section should be a compact list at the end, NOT the main body of the review.
-
-Structure the output as follows:
-
-**Keywords:** [list 6–8 specific technical keywords separated by commas — choose terms that precisely describe the subject matter of this review, not generic phrases like "AI research" or "machine learning"]
+**Keywords:** [6–8 specific technical keywords, comma-separated]
 
 ## Abstract
-Write a single self-contained paragraph of approximately 150–250 words that summarizes the entire adversarial review. The abstract MUST cover, in this order:
-1. The scope of the review (the research question and the body of work scrutinized).
-2. The central critical thesis — the most damning weakness or pattern of weaknesses identified across the corpus.
-3. The principal categories of methodological, evidential, or interpretive flaws found.
-4. The most consequential cross-paper contradictions or shared blind spots.
-5. The blunt verdict on whether this literature is building reliable knowledge, and what would be needed to fix it.
-This is a true abstract — a standalone summary of the whole review — NOT an opening paragraph of the Introduction. Do not include citations or markdown links in the abstract. State the critique directly and without hedging.
+One self-contained paragraph (~150–250 words) covering scope, the central critical thesis (the most damning weakness), the main categories of flaws, the most consequential cross-paper contradictions, and a blunt verdict. No citations or links.
 
 ## Introduction
-The introduction MUST do two things:
-1. **Establish the broader research context** by drawing on the arXiv papers provided under "EXTERNAL CONTEXT FROM ARXIV." Briefly summarize the state of the field using these external sources as evidence. Cite them inline as (Author et al., Date) or (arXiv: ID).
-2. **Immediately flag the central problems** you see in this body of literature, framed against that broader context.
-
-## Inclusion Criteria
-Briefly describe which papers were included and why. Do NOT list every single paper here — just describe the selection criteria and mention a few representative examples.
+Briefly establish the field using the arXiv context, then flag the central problems in this literature.
 
 ## Critical Analysis
-This is the core of the review. Organize the critique into thematic subsections. Each subsection should center on a specific category of weakness (e.g., "Methodological Deficiencies," "Overinterpretation of Results," "Contradictory Findings," "Unsupported Generalizations"). Cite inline throughout. This section must be extensive and deeply analytical.
+The core of the review. Organize into thematic subsections by category of weakness (e.g. methodological deficiencies, overinterpretation, unsupported generalizations). Cite inline as [(Author, Date)](URL). This section must be extensive.
 
-## Cross-Paper Contradictions and Inconsistencies
-Directly compare papers that make conflicting claims or use incompatible methodologies. Explain why these contradictions undermine the collective findings.
+## Cross-Paper Contradictions
+Directly compare papers with conflicting claims or incompatible methods and explain why the contradictions undermine the collective findings.
 
 ## Fundamental Gaps and Blind Spots
-Identify what these papers collectively fail to address. What questions should have been asked but weren't? What controls are missing? What alternative hypotheses are ignored?
+What these papers collectively fail to address — missing controls, ignored alternative hypotheses, unasked questions.
 
 ## Verdict
-A blunt assessment of the state of this literature. Is it building toward reliable knowledge, or is it an echo chamber of weakly validated claims?
+A blunt assessment: is this literature building reliable knowledge, or an echo chamber of weakly validated claims?
 
 ## References
-List every cited paper in Chicago author-date bibliography format with the title as a markdown link to the paper's URL:
-Author. Date. "[Full Paper Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+List every cited paper, journal papers and arXiv papers separately:
+- Journal: Author. Date. "[Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
+- arXiv: Author(s). Date. "[Title](https://arxiv.org/abs/ID)." arXiv: ID.
 
-Additional requirements:
-
-- Base the analysis ONLY on the provided papers (journal corpus + arXiv). Do not reference any work not explicitly given to you.
-- Use arXiv papers in the Introduction to establish broader context against which to frame your critique.
-- The Critical Analysis and Cross-Paper Contradictions sections must focus on journal corpus papers (from Mirror). Do not substitute journal-corpus critique with arXiv-only criticism.
-- Cite every criticism with an inline reference (markdown-linked) to the specific paper(s) being criticized.
-- Do NOT be charitable. If something is wrong, say it is wrong.
-- Length: about 2500–4000 words of analytical content. The References section does not count toward this target.
-- After completing the review, re-read it and confirm that every citation matches a provided paper. If you find a citation that does not match, remove it.
-- In the References section, list journal corpus papers and arXiv papers separately:
-  - Journal papers: Author. Date. "[Title](URL)." *Mirror: An Automated Journal of AI Interpretability*, future-science.org.
-  - arXiv papers: Author(s). Date. "[Title](https://arxiv.org/abs/ID)." arXiv: ID.
+Before finishing, re-read and remove any citation that does not match a provided paper.
 
 I will now provide the papers.`;
 
@@ -1471,7 +1353,6 @@ I will now provide the papers.`;
       }
 
       const filteredAbstracts = fsAbstracts.filter(a => !a.title.toLowerCase().startsWith("literature review:"));
-      const { relevant: relevantFS, other: otherFS } = scoreRelevance(filteredAbstracts, data.researchQuestion);
 
       if (fsFetchFailed) {
         await emitLREvent("paper-fetch", `Future Science fetch failed: ${fsFetchFailureReason}. Continuing with ${projectPapersData.length} paper(s) from project log.`);
@@ -1480,36 +1361,143 @@ I will now provide the papers.`;
       } else if (filteredAbstracts.length === 0) {
         await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} paper(s) from Future Science but all were existing literature reviews and were filtered out. Using ${projectPapersData.length} paper(s) from project log.`);
       } else {
-        await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} unique paper(s) from Future Science (filtered to ${filteredAbstracts.length} after removing existing LRs). Ranked by relevance to your research question: ${relevantFS.length} topic-relevant, ${otherFS.length} background. Using Future Science as the sole source (the synced project log is skipped).`);
+        await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} unique paper(s) from Future Science (filtered to ${filteredAbstracts.length} after removing existing LRs). Using Future Science as the sole source (the synced project log is skipped).`);
       }
 
-      const MAX_RELEVANT_PAPERS = 25;
-      const MAX_BACKGROUND_PAPERS = 5;
+      const MAX_SELECTED_PAPERS = 25;
       const MAX_INPUT_TOKENS = 28000;
 
       const lrInitiativeSlug = INITIATIVE_SLUGS[lrJournalId] || "papers";
       const fsPaperUrl = (docId: string | undefined) => docId ? `https://future-science.org/${lrInitiativeSlug}/${docId}` : "";
       type CorpusPaper = { title: string; authors: string; date: string; abstract: string; url: string; documentId: string; fullText?: string };
+      type Candidate = CorpusPaper & { keywords: string[] };
+
       // The Mirror project log is just a synced copy of Future Science contributions, so
-      // when Future Science returns papers we treat it as the sole source (no project-log
-      // merge, and no title-dedup against the project log). The project log is kept purely
-      // as a resilience fallback for when the Future Science fetch fails or is empty.
+      // when Future Science returns papers we treat it as the sole source. The project log
+      // is kept purely as a resilience fallback for when the FS fetch fails or is empty.
       const fsHasPapers = filteredAbstracts.length > 0;
       const projectCorpus: CorpusPaper[] = projectPapersData.map(p => ({ title: p.title, authors: p.authors, date: p.date, abstract: p.description, url: p.sourceDocumentId ? fsPaperUrl(p.sourceDocumentId) : "", documentId: p.sourceDocumentId || "" }));
-      const relevantFsCorpus: CorpusPaper[] = relevantFS.slice(0, MAX_RELEVANT_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId || "" }));
-      const backgroundFsCorpus: CorpusPaper[] = otherFS.slice(0, MAX_BACKGROUND_PAPERS).map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId || "" }));
+      const candidates: Candidate[] = fsHasPapers
+        ? filteredAbstracts.map(a => ({ title: a.title, authors: a.authors, date: a.date, abstract: a.abstract, url: fsPaperUrl(a.documentId), documentId: a.documentId || "", keywords: Array.isArray(a.keywords) ? a.keywords : [] }))
+        : projectCorpus.map(p => ({ ...p, keywords: [] as string[] }));
       const corpusSource: "future-science" | "project-log-fallback" = fsHasPapers ? "future-science" : "project-log-fallback";
-      let relevantPapers: CorpusPaper[] = fsHasPapers ? [...relevantFsCorpus] : [...projectCorpus];
-      let backgroundPapers: CorpusPaper[] = fsHasPapers ? [...backgroundFsCorpus] : [];
+
+      // Resolve the model config up front — the selection stages below call the model too.
+      const config = modelConfig || { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
+      if (config.providerMode === "byoc" && !config.apiKey && data.userId) {
+        const storedKey = getEphemeralKey(data.userId, config.provider);
+        if (storedKey) config.apiKey = storedKey;
+      }
+      const model = resolveModelName(config);
+
+      // Best-effort JSON extraction from a model response (handles code fences / stray prose).
+      const parseJsonLoose = (text: string): any => {
+        if (!text) return null;
+        let t = text.trim();
+        const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (fence) t = fence[1].trim();
+        const startIdx = t.search(/[\[{]/);
+        if (startIdx > 0) t = t.slice(startIdx);
+        const endIdx = Math.max(t.lastIndexOf("]"), t.lastIndexOf("}"));
+        if (endIdx >= 0) t = t.slice(0, endIdx + 1);
+        try { return JSON.parse(t); } catch { return null; }
+      };
+
+      // STAGE 3 — LLM keyword filter: keep only papers whose keyword tags relate to the question.
+      const llmSelectByKeywords = async (papers: Candidate[]): Promise<number[] | null> => {
+        const list = papers.map((p, i) => `${i}: ${p.title} — keywords: ${p.keywords.length ? p.keywords.join(", ") : "(none)"}`).join("\n");
+        const sys = "You are a research librarian deciding which papers belong in a literature review. Judge ONLY by whether each paper's keyword tags are topically related to the research question. Reply with a JSON array of the integer indices to KEEP and nothing else.";
+        const user = `Research question: ${data.researchQuestion}\n\nPapers (index: title — keywords):\n${list}\n\nReturn a JSON array of the indices whose keywords are topically related to the research question, e.g. [0,3,4]. Keep every paper that is plausibly related; return [] only if none relate.`;
+        try {
+          const r = await generateWithConfig(config, sys, user, { maxTokens: 1200, temperature: 0 });
+          const parsed = parseJsonLoose(r.content);
+          if (!Array.isArray(parsed)) return null;
+          const idxs = parsed.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n) && n >= 0 && n < papers.length);
+          return Array.from(new Set(idxs));
+        } catch (e) {
+          console.error(`[LR ${reviewId}] LLM keyword filter failed:`, e);
+          return null;
+        }
+      };
+
+      // STAGE 4 — LLM abstract scoring: score each selected paper 0-100 for closeness to the topic.
+      const llmScoreByAbstract = async (papers: Candidate[]): Promise<number[] | null> => {
+        const list = papers.map((p, i) => `${i}: ${p.title}\nAbstract: ${(p.abstract || "").slice(0, 600)}`).join("\n\n");
+        const sys = "You score how closely each paper matches a research question, using its abstract. Score each paper from 0 (unrelated) to 100 (directly on-topic). Reply with a JSON array of {\"i\": index, \"s\": score} objects and nothing else.";
+        const user = `Research question: ${data.researchQuestion}\n\nPapers:\n${list}\n\nReturn JSON like [{"i":0,"s":88},{"i":1,"s":12}] with an entry for every index.`;
+        try {
+          const r = await generateWithConfig(config, sys, user, { maxTokens: 1500, temperature: 0 });
+          const parsed = parseJsonLoose(r.content);
+          if (!Array.isArray(parsed)) return null;
+          const scores: number[] = new Array(papers.length).fill(0);
+          for (const item of parsed) {
+            const i = Number(item?.i);
+            const s = Number(item?.s);
+            if (Number.isInteger(i) && i >= 0 && i < papers.length && !Number.isNaN(s)) scores[i] = s;
+          }
+          return scores;
+        } catch (e) {
+          console.error(`[LR ${reviewId}] LLM abstract scoring failed:`, e);
+          return null;
+        }
+      };
+
+      // STAGE 3: keyword pre-filter (LLM, with deterministic fallback).
+      let selected: Candidate[] = candidates;
+      let keywordFilterMode: "llm" | "fallback" | "skipped" = "skipped";
+      if (fsHasPapers && candidates.length > 1) {
+        await emitLREvent("keyword-filter", `Scoring ${candidates.length} paper(s) by keyword relevance to the research question with the model.`);
+        const idxs = await llmSelectByKeywords(candidates);
+        if (idxs && idxs.length > 0) {
+          keywordFilterMode = "llm";
+          selected = idxs.map(i => candidates[i]);
+          await emitLREvent("keyword-filter", `Keyword scoring selected ${selected.length} of ${candidates.length} paper(s) whose keywords relate to the question.`);
+        } else {
+          keywordFilterMode = "fallback";
+          const { relevant } = scoreRelevance(filteredAbstracts, data.researchQuestion);
+          if (relevant.length > 0) {
+            const keepDocs = new Set(relevant.map(r => r.documentId).filter(Boolean));
+            const keepTitles = new Set(relevant.map(r => r.title.toLowerCase()));
+            const filtered = candidates.filter(c => (c.documentId && keepDocs.has(c.documentId)) || keepTitles.has(c.title.toLowerCase()));
+            selected = filtered.length > 0 ? filtered : candidates;
+          }
+          await emitLREvent("keyword-filter", `LLM keyword scoring unavailable; fell back to deterministic keyword matching (${selected.length} paper(s)).`);
+        }
+      }
+
+      // STAGE 4: abstract scoring / ranking (LLM, with fallback to keyword-selection order).
+      let abstractScoreMode: "llm" | "fallback" | "skipped" = "skipped";
+      if (selected.length > 1) {
+        await emitLREvent("abstract-score", `Reading ${selected.length} abstract(s) and scoring each for closeness to the topic with the model.`);
+        const scores = await llmScoreByAbstract(selected);
+        if (scores) {
+          abstractScoreMode = "llm";
+          selected = selected
+            .map((p, i) => ({ p, s: scores[i] ?? 0 }))
+            .sort((a, b) => b.s - a.s)
+            .map(x => x.p);
+          await emitLREvent("abstract-score", `Abstract scoring complete; ${selected.length} paper(s) ranked by closeness to the topic.`);
+        } else {
+          abstractScoreMode = "fallback";
+          await emitLREvent("abstract-score", `LLM abstract scoring unavailable; keeping the keyword-selection order.`);
+        }
+      }
+
+      if (selected.length > MAX_SELECTED_PAPERS) selected = selected.slice(0, MAX_SELECTED_PAPERS);
+
+      // Downstream code works on relevantPapers/backgroundPapers; the new funnel produces a
+      // single ranked list, so relevantPapers = the ranked selection and there is no separate
+      // background tier.
+      let relevantPapers: CorpusPaper[] = selected.map(({ keywords, ...rest }) => rest);
+      let backgroundPapers: CorpusPaper[] = [];
 
       const allPaperSources = [...relevantPapers, ...backgroundPapers];
 
-      // Read the FULL TEXT of the most relevant papers (the rest stay abstract-only).
+      // STAGE 5 — Read the FULL TEXT of the top-ranked papers (the rest stay abstract-only).
       const FULL_TEXT_TARGET = Math.min(15, Math.max(1, data.fullTextCount ?? 15));
       const FULL_TEXT_PER_PAPER_CHARS = 4000;
-      // Read the top-N relevance-ranked papers in full. relevantPapers is already the
-      // relevance-sorted Future Science set (or the project-log fallback), so we simply
-      // take the highest-ranked ones that have a Future Science documentId to fetch.
+      // relevantPapers is the ranked selection, so the top-ranked ones with a Future Science
+      // documentId are the ones we read in full.
       const fullTextCandidates: CorpusPaper[] = relevantPapers
         .filter(p => p.documentId)
         .slice(0, FULL_TEXT_TARGET);
@@ -1538,18 +1526,6 @@ I will now provide the papers.`;
       const formatPaperEntry = (p: CorpusPaper, i: number) =>
         `Paper ${i + 1}:\nTitle: ${p.title}\nAuthors: ${p.authors}\nDate: ${p.date}${p.url ? `\nURL: ${p.url}` : ""}\n${p.fullText ? `Full Text (excerpt):\n${p.fullText}` : `Abstract/Summary: ${p.abstract}`}`;
 
-      const clusters = clusterByKeywords(filteredAbstracts);
-      let clusterText = "";
-      if (clusters.size > 0) {
-        const clusterEntries = Array.from(clusters.entries()).map(([keyword, papers]) =>
-          `Cluster "${keyword}" (${papers.length} papers): ${papers.map(p => p.title).join("; ")}`
-        );
-        clusterText = `\n\nIdentified topic clusters from the corpus:\n${clusterEntries.join("\n")}`;
-      }
-
-      const trendsAnalysis = extractTrendsAndGaps(filteredAbstracts);
-      await emitLREvent("trend-analysis", `Clustered corpus into ${clusters.size} topic cluster(s) and extracted trend/gap analysis.`);
-
       const includeArxiv = data.includeArxiv !== false;
       const searchTerms = data.researchQuestion.trim().length > 0 ? data.researchQuestion.trim() : data.researchQuestion.split(/\s+/).filter(w => w.length > 4).slice(0, 6).join(" ");
       let arxivResults: Awaited<ReturnType<typeof searchArxiv>> = [];
@@ -1576,13 +1552,6 @@ I will now provide the papers.`;
         return;
       }
 
-      const config = modelConfig || { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
-      if (config.providerMode === "byoc" && !config.apiKey && data.userId) {
-        const storedKey = getEphemeralKey(data.userId, config.provider);
-        if (storedKey) config.apiKey = storedKey;
-      }
-      const model = resolveModelName(config);
-
       const systemPrompt = data.prompt;
       const allFSPapers = [...relevantPapers, ...backgroundPapers];
       let papersSection = "";
@@ -1595,7 +1564,7 @@ I will now provide the papers.`;
         ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${allFSPapers.length} papers at least once in the review body AND include each in the References section. Use the URL in markdown link format for each citation. Do NOT skip any paper:\n${allFSPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}${p.url ? ` — ${p.url}` : ""}`).join("\n")}`
         : "";
 
-      let userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nEXTERNAL CONTEXT FROM ARXIV — Use these papers to establish the broader research context in the Introduction section. Cite them as (Author et al., Date) or (arXiv: ID):\n\n${arxivTexts}` : ""}${paperCitationChecklist}`;
+      let userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nEXTERNAL CONTEXT FROM ARXIV — Use these papers to establish the broader research context in the Introduction section. Cite them as (Author et al., Date) or (arXiv: ID):\n\n${arxivTexts}` : ""}${paperCitationChecklist}`;
 
       const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
       let estimatedInput = estimateTokens(systemPrompt + userMessage);
@@ -1614,7 +1583,7 @@ I will now provide the papers.`;
         const trimmedChecklist = trimmedAllPapers.length > 0
           ? `\n\n---\n\nCITATION CHECKLIST — You MUST cite each of these ${trimmedAllPapers.length} papers at least once in the review body AND include each in the References section. Use the URL in markdown link format for each citation. Do NOT skip any paper:\n${trimmedAllPapers.map((p, i) => `${i + 1}. "${p.title}" by ${p.authors}${p.url ? ` — ${p.url}` : ""}`).join("\n")}`
           : "";
-        userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${clusterText}${trendsAnalysis ? `\n\nCorpus trends and gaps analysis:\n${trendsAnalysis}` : ""}${trimmedPapers}${arxivTexts ? `\n\n---\n\nEXTERNAL CONTEXT FROM ARXIV — Use these papers to establish the broader research context in the Introduction section. Cite them as (Author et al., Date) or (arXiv: ID):\n\n${arxivTexts}` : ""}${trimmedChecklist}`;
+        userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${trimmedPapers}${arxivTexts ? `\n\n---\n\nEXTERNAL CONTEXT FROM ARXIV — Use these papers to establish the broader research context in the Introduction section. Cite them as (Author et al., Date) or (arXiv: ID):\n\n${arxivTexts}` : ""}${trimmedChecklist}`;
         estimatedInput = estimateTokens(systemPrompt + userMessage);
       }
       if (relevantPapers.length + backgroundPapers.length < allPaperSources.length) {
@@ -1635,7 +1604,12 @@ I will now provide the papers.`;
         projectPapers: projectPapersData.map(p => ({ title: p.title, authors: p.authors, sourceDocumentId: p.sourceDocumentId })),
         futureScienceAbstracts: fsAbstracts.map(a => ({ title: a.title, documentId: a.documentId, authors: a.authors })),
         futureScienceKeywords: fsKeywords,
-        clusters: Array.from(clusters.entries()).map(([keyword, papers]) => ({ keyword, paperTitles: papers.map(p => p.title) })),
+        selection: {
+          keywordFilterMode,
+          abstractScoreMode,
+          candidateCount: candidates.length,
+          selectedCount: relevantPapers.length + backgroundPapers.length,
+        },
         arxivResults: arxivResults.map(r => ({ arxivId: r.arxivId, title: r.title, authors: r.authors })),
         corpusSource,
         fullTextSettings: { requested: FULL_TEXT_TARGET, includeArxiv },

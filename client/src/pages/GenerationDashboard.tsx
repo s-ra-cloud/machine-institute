@@ -1439,12 +1439,32 @@ export default function GenerationDashboard() {
                         </div>
                       </li>
 
-                      <li className="flex gap-3" data-testid="lr-stage-fulltext">
+                      <li className="flex gap-3" data-testid="lr-stage-keyword-score">
                         <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">3</span>
                         <div className="flex-1">
+                          <div className="text-sm text-foreground/80">
+                            <span className="font-medium">Score papers by keyword.</span>{" "}
+                            <span className="text-muted-foreground/70">The AI model reads every paper's keyword tags and selects the papers whose keywords relate to your research question. Papers that don't relate are dropped before anything is read in depth.</span>
+                          </div>
+                        </div>
+                      </li>
+
+                      <li className="flex gap-3" data-testid="lr-stage-abstract-score">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">4</span>
+                        <div className="flex-1">
+                          <div className="text-sm text-foreground/80">
+                            <span className="font-medium">Read &amp; score abstracts.</span>{" "}
+                            <span className="text-muted-foreground/70">The model reads the abstracts of the selected papers and scores each one for how closely it matches your topic, producing a ranked shortlist.</span>
+                          </div>
+                        </div>
+                      </li>
+
+                      <li className="flex gap-3" data-testid="lr-stage-fulltext">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">5</span>
+                        <div className="flex-1">
                           <div className="text-sm text-foreground/80 mb-2">
-                            <span className="font-medium">Read the full text of the top relevant papers.</span>{" "}
-                            <span className="text-muted-foreground/70">Each paper is scored by how well its title, abstract, and keywords match your research question. The highest-scoring papers are read in full (up to the count below); the rest are analyzed from their abstracts.</span>
+                            <span className="font-medium">Read the top papers in full.</span>{" "}
+                            <span className="text-muted-foreground/70">The highest-ranked papers are read in full (up to the count below); the rest of the shortlist is analyzed from their abstracts.</span>
                           </div>
                           <div className="flex items-center gap-3">
                             <input
@@ -1466,72 +1486,8 @@ export default function GenerationDashboard() {
                         </div>
                       </li>
 
-                      <li className="flex gap-3" data-testid="lr-stage-organize">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">4</span>
-                        <div className="flex-1">
-                          <div className="text-sm text-foreground/80 mb-2">
-                            <span className="font-medium">Organize by theme &amp; trend.</span>{" "}
-                            <span className="text-muted-foreground/70">
-                              The <span className="text-foreground/70">Machine Institute server does this in plain code, not the AI model</span>. It runs two fixed
-                              functions over the collected papers before the model is called, so the same corpus always yields the same clusters and counts.
-                              The model only receives the results and uses them to structure the review and name gaps.
-                            </span>
-                          </div>
-                          <ul className="space-y-1.5 text-[11px] font-mono text-muted-foreground/70 mb-2">
-                            <li className="flex gap-2">
-                              <span className="text-primary/60">·</span>
-                              <span><span className="text-foreground/70">Topic clusters:</span> papers grouped by the keyword tags they carry on Future Science; the 10 largest groups (by paper count) are kept.</span>
-                            </li>
-                            <li className="flex gap-2">
-                              <span className="text-primary/60">·</span>
-                              <span><span className="text-foreground/70">Trends:</span> the top 20 most-used keywords (with paper counts) and the top 15 most-frequent words longer than 5 letters across titles + abstracts.</span>
-                            </li>
-                            <li className="flex gap-2">
-                              <span className="text-primary/60">·</span>
-                              <span><span className="text-foreground/70">Gaps:</span> not computed in code — the model reads the clusters and counts above and names the under-studied themes and open questions.</span>
-                            </li>
-                          </ul>
-                          <details className="group" data-testid="details-organize-algorithm">
-                            <summary className="cursor-pointer text-[10px] font-mono uppercase tracking-widest text-primary/70 hover:text-primary select-none">
-                              Exact algorithm (for reproduction)
-                            </summary>
-                            <div className="mt-2 border-l border-border/40 pl-3 space-y-3 text-[10px] font-mono text-muted-foreground/60 leading-relaxed">
-                              <div>
-                                <span className="text-foreground/60">Input.</span> Every paper fetched from this journal on Future Science, excluding any whose title
-                                starts with "literature review:". Each paper is (title, abstract, keywords[]), where keywords are the tags set on Future Science.
-                                The exact same list feeds both steps below.
-                              </div>
-                              <div>
-                                <span className="text-foreground/60">A · Topic clusters (clusterByKeywords):</span>
-                                <ol className="list-decimal ml-4 mt-1 space-y-0.5">
-                                  <li>Start an empty map of keyword → papers.</li>
-                                  <li>For each paper, for each of its keywords: lowercase the keyword and append the paper to that keyword's list. A paper with N keywords lands in N lists, so clusters overlap.</li>
-                                  <li>Sort the keywords by list length, largest first. Ties keep the order the papers arrived from Future Science.</li>
-                                  <li>Keep the top 10 keywords. Each kept keyword plus its papers is one cluster; its member titles are listed to the model.</li>
-                                </ol>
-                              </div>
-                              <div>
-                                <span className="text-foreground/60">B · Trends (extractTrendsAndGaps):</span>
-                                <ol className="list-decimal ml-4 mt-1 space-y-0.5">
-                                  <li>Trending keywords: count how many papers carry each lowercased keyword, sort by count descending, keep the top 20, render as "keyword (N papers)".</li>
-                                  <li>Frequent terms: for each paper join title + " " + abstract, lowercase, split on whitespace, count every token longer than 5 characters, sort by count descending, keep the top 15 words.</li>
-                                  <li>Output one text block: Trending keywords, Frequent terms, and Total papers analyzed = the input count.</li>
-                                </ol>
-                              </div>
-                              <div>
-                                <span className="text-foreground/60">C · Handoff.</span> The cluster list (each keyword with its member titles) and the trends text block are
-                                inserted verbatim into the model prompt. The model then writes the review and identifies gaps from them.
-                              </div>
-                              <div className="text-muted-foreground/40">
-                                Source: server/future-science.ts → clusterByKeywords() and extractTrendsAndGaps(), wired in server/routes.ts.
-                              </div>
-                            </div>
-                          </details>
-                        </div>
-                      </li>
-
                       <li className="flex gap-3" data-testid="lr-stage-write">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">5</span>
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">6</span>
                         <div className="flex-1 space-y-3">
                           <div className="text-sm text-foreground/80">
                             <span className="font-medium">Write the review.</span>{" "}
@@ -1550,7 +1506,7 @@ export default function GenerationDashboard() {
                       </li>
 
                       <li className="flex gap-3" data-testid="lr-stage-publish">
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">6</span>
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full border border-border/50 text-[11px] font-mono flex items-center justify-center text-muted-foreground">7</span>
                         <div className="text-sm text-foreground/80">
                           <span className="font-medium">Save &amp; publish to Future Science.</span>{" "}
                           <span className="text-muted-foreground/70">Stores the finished review and, when you're signed in, publishes it to Future Science under your orchestrator name.</span>
