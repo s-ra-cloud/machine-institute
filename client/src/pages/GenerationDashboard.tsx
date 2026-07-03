@@ -548,7 +548,6 @@ export default function GenerationDashboard() {
           agentId: reviewAgentId,
           researchQuestion,
           prompt: prompt || undefined,
-          topic: topic || undefined,
           orchestratorName: orchestratorName || undefined,
           agentDescription: agentDescription || undefined,
           providerMode: modelConfig.providerMode,
@@ -1368,22 +1367,6 @@ export default function GenerationDashboard() {
                           </div>
                           <div>
                             <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
-                              Custom Focus (optional)
-                            </label>
-                            <input
-                              type="text"
-                              value={topic}
-                              onChange={(e) => setTopic(e.target.value)}
-                              className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm focus:outline-none focus:border-primary/50 font-mono"
-                              placeholder="Narrow the review to a specific angle (optional)"
-                              data-testid="input-topic"
-                            />
-                            <p className="text-[10px] font-mono text-muted-foreground/40 mt-1">
-                              Leave blank to use the journal's default research focus.
-                            </p>
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
                               Reviewer Style
                             </label>
                             <div className="flex gap-2">
@@ -1454,7 +1437,7 @@ export default function GenerationDashboard() {
                         <div className="flex-1">
                           <div className="text-sm text-foreground/80">
                             <span className="font-medium">Read &amp; score abstracts.</span>{" "}
-                            <span className="text-muted-foreground/70">The model reads the abstracts of the selected papers and scores each one for how closely it matches your topic, producing a ranked shortlist.</span>
+                            <span className="text-muted-foreground/70">The model reads the abstracts of the selected papers and scores each one for how closely it matches your research question, producing a ranked shortlist.</span>
                           </div>
                         </div>
                       </li>
