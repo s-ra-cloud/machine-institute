@@ -1567,8 +1567,10 @@ I will now provide the papers.`;
       let userMessage = `Research question: ${data.researchQuestion}${data.topic ? `\nTopic: ${data.topic}` : ""}${papersSection}${arxivTexts ? `\n\n---\n\nEXTERNAL CONTEXT FROM ARXIV — Use these papers to establish the broader research context in the Introduction section. Cite them as (Author et al., Date) or (arXiv: ID):\n\n${arxivTexts}` : ""}${paperCitationChecklist}`;
 
       const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
+      const fullTextPaperCount = [...relevantPapers, ...backgroundPapers].filter(p => p.fullText).length;
       let estimatedInput = estimateTokens(systemPrompt + userMessage);
-      while (estimatedInput > MAX_INPUT_TOKENS && (backgroundPapers.length > 0 || relevantPapers.length > 5)) {
+      // Trim only abstract-only papers to fit the budget; never silently drop the full-text papers the user asked to read.
+      while (estimatedInput > MAX_INPUT_TOKENS && (relevantPapers.length + backgroundPapers.length) > Math.max(fullTextPaperCount, 1)) {
         if (backgroundPapers.length > 0) {
           backgroundPapers = backgroundPapers.slice(0, -1);
         } else {
@@ -1588,6 +1590,23 @@ I will now provide the papers.`;
       }
       if (relevantPapers.length + backgroundPapers.length < allPaperSources.length) {
         console.log(`Literature review ${reviewId}: Trimmed papers from ${allPaperSources.length} to ${relevantPapers.length + backgroundPapers.length} to fit within ~${MAX_INPUT_TOKENS} token budget (estimated ${estimatedInput} tokens).`);
+      }
+
+      // If even the full-text papers alone exceed the model budget, stop instead of silently dropping them.
+      if (estimatedInput > MAX_INPUT_TOKENS) {
+        const remainingFullText = [...relevantPapers, ...backgroundPapers].filter(p => p.fullText);
+        const fullTextTokens = remainingFullText.reduce((sum, p, i) => sum + estimateTokens(formatPaperEntry(p, i)), 0);
+        const overheadTokens = Math.max(0, estimatedInput - fullTextTokens);
+        const avgPerPaper = remainingFullText.length > 0 ? fullTextTokens / remainingFullText.length : Math.max(1, fullTextTokens);
+        const recommendedMax = Math.max(1, Math.floor((MAX_INPUT_TOKENS - overheadTokens) / Math.max(1, avgPerPaper)));
+        const overBudgetMsg = `The ${remainingFullText.length} full-text paper(s) selected total roughly ${estimatedInput.toLocaleString()} tokens, which exceeds this model's input budget of about ${MAX_INPUT_TOKENS.toLocaleString()} tokens. Lower the "full text" count to about ${recommendedMax} paper(s) or fewer and generate again.`;
+        console.log(`Literature review ${reviewId}: aborting before LLM call — ${overBudgetMsg}`);
+        await emitLREvent("failure", overBudgetMsg);
+        await storage.updateLiteratureReview(reviewId, {
+          status: "failed",
+          contentHtml: `<p>${overBudgetMsg}</p>`,
+        });
+        return;
       }
 
       const promptTrace = JSON.stringify({
