@@ -392,6 +392,22 @@ export default function GenerationDashboard() {
     },
   });
 
+  const republishReviewMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/literature-reviews/${id}/republish`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Failed to publish review to Future Science.");
+      return body;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/literature-reviews-all"] });
+      alert("Published to Future Science.");
+    },
+    onError: (err: any) => {
+      alert(err?.message || "Failed to publish review to Future Science.");
+    },
+  });
+
   const { data: defaultPeerPrompts } = useQuery<PeerPromptResponse>({
     queryKey: ["/api/peer-reviews/default-prompts", peerPersona],
     queryFn: async () => {
@@ -1711,6 +1727,26 @@ export default function GenerationDashboard() {
                         <Info className="w-3 h-3" />
                         {showMetadata === rev.id ? "Hide" : "Show"} metadata
                       </button>
+                    </div>
+                  )}
+                  {rev.status === "completed" && !rev.publishedDocumentId && (
+                    <div className="mt-3">
+                      <button
+                        onClick={() => republishReviewMutation.mutate(rev.id)}
+                        disabled={republishReviewMutation.isPending}
+                        className="flex items-center gap-1.5 text-[10px] font-mono text-yellow-400/80 border border-yellow-400/20 px-2 py-1 hover:text-yellow-300 hover:border-yellow-300/40 transition-colors disabled:opacity-40"
+                        data-testid={`button-republish-review-${rev.id}`}
+                      >
+                        {republishReviewMutation.isPending && republishReviewMutation.variables === rev.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <ExternalLink className="w-3 h-3" />
+                        )}
+                        Retry publish to Future Science
+                      </button>
+                      <p className="mt-1.5 text-[10px] font-mono text-muted-foreground/40">
+                        This review was saved but not published to Future Science.
+                      </p>
                     </div>
                   )}
                   {showMetadata === rev.id && <MetadataPanel record={rev} />}

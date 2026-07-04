@@ -1703,12 +1703,23 @@ I will now provide the papers.`;
       const rawHtml = markdownToHtml(cleanReviewText);
       const safeHtml = sanitizeHtml(rawHtml);
 
+      const submissionKeywords = parsedKeywords.length >= 3
+        ? parsedKeywords
+        : parsedKeywords.concat(fsKeywords.slice(0, Math.max(0, 5 - parsedKeywords.length)));
+
       const updates: Partial<LiteratureReview> = {
         contentMarkdown: cleanReviewText,
         contentHtml: safeHtml,
         status: "completed",
         completedAt: new Date(),
       };
+      // Persist the exact keywords/abstract used for submission inside the existing
+      // sourceTrace JSON (no new column) so a later manual retry can re-publish faithfully.
+      try {
+        const stObj = JSON.parse(sourceTrace);
+        stObj.submission = { keywords: submissionKeywords, abstract: extractedAbstract };
+        updates.sourceTrace = JSON.stringify(stObj);
+      } catch {}
 
       let publishedToFS = false;
       if (!process.env.FUTURE_SCIENCE_API_KEY) {
@@ -1724,13 +1735,13 @@ I will now provide the papers.`;
             agentName: robotAgentName,
             orchestratorName: humanOrchestratorName || null,
             hasAgentDescription: Boolean(data.agentDescription),
-            keywordCount: (parsedKeywords.length >= 3 ? parsedKeywords : parsedKeywords.concat(fsKeywords.slice(0, Math.max(0, 5 - parsedKeywords.length)))).length,
+            keywordCount: submissionKeywords.length,
           });
           const subResult = await submitLiteratureReviewToFutureScience({
             title: `Literature Review: ${data.researchQuestion}`,
             markdownContent: cleanReviewText,
             abstract: extractedAbstract,
-            keywords: parsedKeywords.length >= 3 ? parsedKeywords : parsedKeywords.concat(fsKeywords.slice(0, Math.max(0, 5 - parsedKeywords.length))),
+            keywords: submissionKeywords,
             agentName: robotAgentName,
             orchestratorName: humanOrchestratorName,
             agentDescription: data.agentDescription,
@@ -2545,6 +2556,111 @@ I will now provide the papers.`;
     } catch (err: any) {
       console.error("Error deleting literature review:", err);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Manually retry publishing a completed-but-unpublished literature review to Future Science.
+  // Allowed for the review's owner or an admin. Reconstructs the submission from the stored
+  // record (no regeneration) so a transient FS failure can be recovered without re-running the LLM.
+  app.post("/api/literature-reviews/:id/republish", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const ADMIN_EMAIL = "sacharaoult@gmail.com";
+      const review = await storage.getLiteratureReviewById(String(req.params.id));
+      if (!review) return res.status(404).json({ error: "Literature review not found." });
+
+      const isOwner = review.userId && review.userId === user.id;
+      const isAdmin = user.email === ADMIN_EMAIL;
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ error: "You can only retry publishing your own reviews." });
+      }
+      if (review.status !== "completed") {
+        return res.status(400).json({ error: `Review is not completed (status: ${review.status}).` });
+      }
+      if (review.publishedDocumentId) {
+        return res.status(400).json({ error: "This review is already published to Future Science." });
+      }
+      if (!review.contentMarkdown) {
+        return res.status(400).json({ error: "Review has no stored content to publish." });
+      }
+      if (!process.env.FUTURE_SCIENCE_API_KEY) {
+        return res.status(500).json({ error: "FUTURE_SCIENCE_API_KEY is not configured." });
+      }
+
+      // Reconstruct the abstract: prefer the exact value stored at generation time, else
+      // parse the "## Abstract" section from the stored markdown, else compose a fallback.
+      let storedSubmission: { keywords?: string[]; abstract?: string } | undefined;
+      let storedFsKeywords: string[] = [];
+      try {
+        const st = review.sourceTrace ? JSON.parse(review.sourceTrace) : {};
+        if (st?.submission) storedSubmission = st.submission;
+        if (Array.isArray(st?.futureScienceKeywords)) storedFsKeywords = st.futureScienceKeywords;
+      } catch {}
+
+      let abstract = storedSubmission?.abstract?.trim() || "";
+      if (!abstract) {
+        const abstractMatch = review.contentMarkdown.match(/##\s*Abstract\s*\n+([\s\S]+?)(?=\n##\s|$)/);
+        abstract = abstractMatch
+          ? abstractMatch[1]
+              .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+              .replace(/\*\*([^*]+)\*\*/g, "$1")
+              .replace(/\s+/g, " ")
+              .trim()
+          : buildLiteratureReviewFallbackAbstract({
+              researchQuestion: review.researchQuestion,
+              contentMarkdown: review.contentMarkdown,
+            });
+      }
+
+      // Reconstruct keywords: stored submission keywords > stored journal keywords >
+      // derived from the research question. Enforce Future Science's 3-keyword minimum.
+      let keywords: string[] = (storedSubmission?.keywords || storedFsKeywords)
+        .map((k) => String(k).trim())
+        .filter(Boolean)
+        .slice(0, 8);
+      if (keywords.length < 3) {
+        const derived = review.researchQuestion
+          .split(/\s+/)
+          .map((w) => w.replace(/[^A-Za-z0-9-]/g, ""))
+          .filter((w) => w.length > 4);
+        keywords = Array.from(new Set([...keywords, ...derived])).slice(0, 5);
+      }
+      const genericFallbacks = ["AI interpretability", "machine learning", "literature review"];
+      for (const g of genericFallbacks) {
+        if (keywords.length >= 3) break;
+        if (!keywords.includes(g)) keywords.push(g);
+      }
+
+      const robotAgentName = buildConventionName(review.modelName || "", review.agentId || "bLR");
+      const humanOrchestratorName = review.orchestratorName && review.orchestratorName !== robotAgentName
+        ? review.orchestratorName
+        : undefined;
+
+      const subResult = await submitLiteratureReviewToFutureScience({
+        title: `Literature Review: ${review.researchQuestion}`,
+        markdownContent: review.contentMarkdown,
+        abstract,
+        keywords,
+        agentName: robotAgentName,
+        orchestratorName: humanOrchestratorName,
+        agentDescription: review.agentDescription || undefined,
+      });
+
+      if (!subResult) {
+        return res.status(502).json({ error: "Future Science rejected the submission. See server logs and try again later." });
+      }
+
+      await storage.updateLiteratureReview(review.id, { publishedDocumentId: subResult.documentId });
+      await storage.createResearchEvent({
+        source: robotAgentName,
+        agentId: review.agentId || "bLR",
+        phase: "fs-submission-success",
+        message: `Literature review published to Future Science on retry. Document ID: ${subResult.documentId}`,
+      });
+      res.json({ success: true, documentId: subResult.documentId, url: subResult.url });
+    } catch (err: any) {
+      console.error("Error republishing literature review:", err);
+      res.status(500).json({ error: err?.message || "Internal server error" });
     }
   });
 
