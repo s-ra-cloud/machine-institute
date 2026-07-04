@@ -3268,16 +3268,28 @@ List every cited paper in Chicago author-date bibliography format:
     return null;
   }
 
+  const ARXIV_STOPWORDS = new Set([
+    "a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "for", "with",
+    "by", "from", "as", "at", "is", "are", "was", "were", "be", "been", "being",
+    "do", "does", "did", "how", "what", "why", "when", "where", "which", "who",
+    "whom", "that", "this", "these", "those", "it", "its", "if", "then", "than",
+    "so", "such", "can", "could", "would", "should", "may", "might", "will",
+    "about", "into", "over", "under", "between", "happen", "happens", "happened",
+    "occur", "occurs", "cause", "causes", "caused", "effect", "effects", "make",
+    "makes", "get", "gets", "use", "used", "using", "study", "paper", "research",
+  ]);
+
+  function extractArxivTerms(query: string): string[] {
+    const words = query
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !ARXIV_STOPWORDS.has(w));
+    return Array.from(new Set(words));
+  }
+
   async function searchArxiv(query: string): Promise<Array<{ title: string; summary: string; authors: string; published: string; arxivId: string }>> {
-    try {
-      const encodedQuery = encodeURIComponent(query);
-      const url = `http://export.arxiv.org/api/query?search_query=all:${encodedQuery}&start=0&max_results=10&sortBy=submittedDate&sortOrder=descending`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        console.error(`arXiv API returned ${response.status}`);
-        return [];
-      }
-      const xml = await response.text();
+    const parseEntries = (xml: string) => {
       const entries: Array<{ title: string; summary: string; authors: string; published: string; arxivId: string }> = [];
       const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
       let match;
@@ -3289,7 +3301,7 @@ List every cited paper in Chicago author-date bibliography format:
         const publishedMatch = entry.match(/<published>([\s\S]*?)<\/published>/);
         const authorMatches = [...entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g)];
         const rawId = (idMatch?.[1] || "").trim();
-        const arxivId = rawId.replace("http://arxiv.org/abs/", "").replace(/v\d+$/, "");
+        const arxivId = rawId.replace(/^https?:\/\/arxiv\.org\/abs\//, "").replace(/v\d+$/, "");
         entries.push({
           title: (titleMatch?.[1] || "").trim().replace(/\s+/g, " "),
           summary: (summaryMatch?.[1] || "").trim().replace(/\s+/g, " ").substring(0, 500),
@@ -3297,6 +3309,32 @@ List every cited paper in Chicago author-date bibliography format:
           published: (publishedMatch?.[1] || "").trim().substring(0, 10),
           arxivId,
         });
+      }
+      return entries;
+    };
+
+    const fetchArxiv = async (searchExpr: string) => {
+      // Sort by relevance so results actually match the topic, not just the newest submissions.
+      const url = `https://export.arxiv.org/api/query?search_query=${searchExpr}&start=0&max_results=10&sortBy=relevance&sortOrder=descending`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`arXiv API returned ${response.status}`);
+        return [];
+      }
+      return parseEntries(await response.text());
+    };
+
+    try {
+      const terms = extractArxivTerms(query);
+      // AND the most salient topic terms so results are on-topic; fall back to the raw query if nothing survives cleaning.
+      const andExpr = terms.length > 0
+        ? terms.slice(0, 4).map(t => `all:${encodeURIComponent(t)}`).join("+AND+")
+        : `all:${encodeURIComponent(query.trim())}`;
+      let entries = await fetchArxiv(andExpr);
+      // If the AND query was too strict and returned nothing, broaden to an OR of the terms.
+      if (entries.length === 0 && terms.length > 1) {
+        const orExpr = terms.slice(0, 6).map(t => `all:${encodeURIComponent(t)}`).join("+OR+");
+        entries = await fetchArxiv(orExpr);
       }
       return entries;
     } catch (err) {
