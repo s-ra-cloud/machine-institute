@@ -1710,6 +1710,7 @@ I will now provide the papers.`;
         completedAt: new Date(),
       };
 
+      let publishedToFS = false;
       if (!process.env.FUTURE_SCIENCE_API_KEY) {
         console.warn(`Literature review ${reviewId}: FUTURE_SCIENCE_API_KEY not set — skipping Future Science submission.`);
         await emitLREvent("fs-submission-skipped", "Future Science submission skipped: FUTURE_SCIENCE_API_KEY is not configured.");
@@ -1737,10 +1738,11 @@ I will now provide the papers.`;
 
           if (subResult) {
             updates.publishedDocumentId = subResult.documentId;
+            publishedToFS = true;
             await emitLREvent("fs-submission-success", `Literature review submitted to Future Science successfully. Document ID: ${subResult.documentId}`);
             console.log(`Literature review ${reviewId} submitted to Future Science: ${subResult.documentId}`);
           } else {
-            await emitLREvent("fs-submission-failed", "Future Science submission failed (non-fatal). Check server logs for details.");
+            await emitLREvent("fs-submission-failed", "Future Science submission failed after multiple attempts (their media service returned an error). The review is saved here — you can try publishing again later.");
           }
         } catch (err) {
           console.error("Future Science submission failed (non-fatal):", err);
@@ -1750,9 +1752,12 @@ I will now provide the papers.`;
       }
 
       await storage.updateLiteratureReview(reviewId, updates);
-      await emitLREvent("completed", `Literature review published successfully: "${data.researchQuestion}"`);
+      const completedMsg = publishedToFS
+        ? `Literature review published to Future Science successfully: "${data.researchQuestion}"`
+        : `Literature review generated and saved: "${data.researchQuestion}". It was NOT published to Future Science — see the submission message above.`;
+      await emitLREvent("completed", completedMsg);
 
-      console.log(`Literature review ${reviewId} completed successfully.`);
+      console.log(`Literature review ${reviewId} completed (Future Science published: ${publishedToFS}).`);
     } catch (err: any) {
       console.error(`Literature review ${reviewId} generation failed:`, err);
       const safeError = (err.message || "Unknown error").replace(/[<>&"']/g, "");

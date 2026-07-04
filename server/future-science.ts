@@ -117,37 +117,53 @@ export async function submitLiteratureReviewToFutureScience(
       keywordCount: options.keywords.length,
     });
 
-    const formData = new FormData();
-    formData.append("data", JSON.stringify({ data: metadata }));
+    const buildFormData = () => {
+      const fd = new FormData();
+      fd.append("data", JSON.stringify({ data: metadata }));
+      const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
+      fd.append("file", mdBlob, "review.md");
+      return fd;
+    };
 
-    const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
-    formData.append("file", mdBlob, "review.md");
+    // Future Science's media upload (Strapi) occasionally returns transient 5xx
+    // errors ("Failed to upload media to Strapi"). Retry those a few times with
+    // backoff; do NOT retry 4xx client errors (they will never succeed).
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+          },
+          body: buildFormData(),
+        });
 
-    const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-      },
-      body: formData,
-    });
+        if (resp.ok) {
+          const result: FSPublishResult = await resp.json() as FSPublishResult;
+          const documentId = result?.data?.documentId || result?.documentId || result?.id;
+          const slug = result?.data?.slug || result?.slug;
+          const FS_INITIATIVE = "mirror";
+          const url = slug
+            ? `https://future-science.org/${FS_INITIATIVE}/${slug}`
+            : documentId
+              ? `https://future-science.org/${FS_INITIATIVE}/${documentId}`
+              : null;
+          return { documentId: documentId || "unknown", url: url || "" };
+        }
 
-    if (!resp.ok) {
-      const errorText = await resp.text();
-      console.error(`Future Science submission failed (${resp.status}):`, errorText);
-      return null;
+        const errorText = await resp.text();
+        console.error(`Future Science submission failed (${resp.status}) [attempt ${attempt}/${MAX_ATTEMPTS}]:`, errorText);
+        if (resp.status < 500 || attempt === MAX_ATTEMPTS) {
+          return null;
+        }
+      } catch (err) {
+        console.error(`Future Science submission error [attempt ${attempt}/${MAX_ATTEMPTS}]:`, err);
+        if (attempt === MAX_ATTEMPTS) return null;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
     }
-
-    const result: FSPublishResult = await resp.json() as FSPublishResult;
-    const documentId = result?.data?.documentId || result?.documentId || result?.id;
-    const slug = result?.data?.slug || result?.slug;
-    const FS_INITIATIVE = "mirror";
-    const url = slug
-      ? `https://future-science.org/${FS_INITIATIVE}/${slug}`
-      : documentId
-        ? `https://future-science.org/${FS_INITIATIVE}/${documentId}`
-        : null;
-
-    return { documentId: documentId || "unknown", url: url || "" };
+    return null;
   } catch (err) {
     console.error("Future Science submission error:", err);
     return null;
