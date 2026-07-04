@@ -1442,27 +1442,43 @@ I will now provide the papers.`;
         }
       };
 
-      // STAGE 3: keyword pre-filter (LLM, with deterministic fallback).
+      // STAGE 3: relevance pre-filter.
+      // The LLM keyword pre-filter only makes sense when papers carry keyword tags.
+      // Future Science contributions currently expose NO keywords, so judging by
+      // keywords collapses the pool to ~1 paper. When no candidate has keyword tags,
+      // rank by deterministic title/abstract relevance instead.
+      // A deterministic pre-rank also bounds the candidate set before the (token-heavy)
+      // abstract-scoring stage so the whole corpus can be fetched without blowing limits.
+      const PRE_SCORE_LIMIT = 40;
       let selected: Candidate[] = candidates;
-      let keywordFilterMode: "llm" | "fallback" | "skipped" = "skipped";
+      let keywordFilterMode: "llm" | "fallback" | "deterministic" | "skipped" = "skipped";
       if (fsHasPapers && candidates.length > 1) {
-        await emitLREvent("keyword-filter", `Scoring ${candidates.length} paper(s) by keyword relevance to the research question with the model.`);
-        const idxs = await llmSelectByKeywords(candidates);
-        if (idxs && idxs.length > 0) {
-          keywordFilterMode = "llm";
-          selected = idxs.map(i => candidates[i]);
-          await emitLREvent("keyword-filter", `Keyword scoring selected ${selected.length} of ${candidates.length} paper(s) whose keywords relate to the question.`);
-        } else {
-          keywordFilterMode = "fallback";
-          const { relevant } = scoreRelevance(filteredAbstracts, data.researchQuestion);
-          if (relevant.length > 0) {
-            const keepDocs = new Set(relevant.map(r => r.documentId).filter(Boolean));
-            const keepTitles = new Set(relevant.map(r => r.title.toLowerCase()));
-            const filtered = candidates.filter(c => (c.documentId && keepDocs.has(c.documentId)) || keepTitles.has(c.title.toLowerCase()));
-            selected = filtered.length > 0 ? filtered : candidates;
+        // Only trust the keyword-LLM filter when keyword tags are reasonably common;
+        // if most papers lack tags, keyword-only judging over-prunes the pool.
+        const keywordCoverage = candidates.filter(c => c.keywords.length > 0).length / candidates.length;
+        const hasUsableKeywords = keywordCoverage >= 0.3;
+        if (hasUsableKeywords) {
+          await emitLREvent("keyword-filter", `Scoring ${candidates.length} paper(s) by keyword relevance to the research question with the model.`);
+          const idxs = await llmSelectByKeywords(candidates);
+          if (idxs && idxs.length > 0) {
+            keywordFilterMode = "llm";
+            selected = idxs.map(i => candidates[i]);
+            await emitLREvent("keyword-filter", `Keyword scoring selected ${selected.length} of ${candidates.length} paper(s) whose keywords relate to the question.`);
+          } else {
+            keywordFilterMode = "fallback";
+            const { relevant } = scoreRelevance(candidates, data.researchQuestion);
+            selected = (relevant.length > 0 ? relevant : candidates) as Candidate[];
+            await emitLREvent("keyword-filter", `LLM keyword scoring unavailable; fell back to deterministic title/abstract matching (${selected.length} paper(s)).`);
           }
-          await emitLREvent("keyword-filter", `LLM keyword scoring unavailable; fell back to deterministic keyword matching (${selected.length} paper(s)).`);
+        } else {
+          // Too few papers carry keyword tags — rank by title/abstract relevance instead.
+          keywordFilterMode = "deterministic";
+          const { relevant } = scoreRelevance(candidates, data.researchQuestion);
+          selected = (relevant.length > 0 ? relevant : candidates) as Candidate[];
+          await emitLREvent("keyword-filter", `Journal papers have no keyword tags; ranked ${candidates.length} paper(s) by title/abstract relevance and kept ${selected.length}.`);
         }
+        // Bound the set handed to the token-heavy abstract-scoring stage.
+        if (selected.length > PRE_SCORE_LIMIT) selected = selected.slice(0, PRE_SCORE_LIMIT);
       }
 
       // STAGE 4: abstract scoring / ranking (LLM, with fallback to keyword-selection order).

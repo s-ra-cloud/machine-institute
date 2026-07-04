@@ -649,19 +649,24 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
   abstracts: FutureScienceAbstract[];
   allKeywords: string[];
 }> {
-  const PAGE_SIZE = 100;
-  let page = 1;
+  // The Future Science initiative endpoint honors cursor-based pagination
+  // (?cursor=N&limit=M&isOriginal=true) but IGNORES page-based params
+  // (pagination[page]/pagination[pageSize]), always returning the first page.
+  // Using cursor pagination here so the full corpus is fetched, not just page 1.
+  const LIMIT = 50;
+  const MAX_CURSORS = 200;
+  let cursor = 1;
   let pageCount = 1;
   const seenDocIds = new Set<string>();
   const abstracts: FutureScienceAbstract[] = [];
   const keywordSet = new Set<string>();
 
-  while (page <= pageCount) {
+  while (cursor <= pageCount && cursor <= MAX_CURSORS) {
     let url: string;
     if (initiativeDocId) {
-      url = `${FS_API_BASE}/initiatives/${encodeURIComponent(initiativeDocId)}/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+      url = `${FS_API_BASE}/initiatives/${encodeURIComponent(initiativeDocId)}/contributions?cursor=${cursor}&limit=${LIMIT}&isOriginal=true`;
     } else {
-      url = `${FS_API_BASE}/public/contributions?pagination[pageSize]=${PAGE_SIZE}&pagination[page]=${page}`;
+      url = `${FS_API_BASE}/public/contributions?cursor=${cursor}&limit=${LIMIT}&isOriginal=true`;
     }
 
     let resp: Response;
@@ -669,8 +674,8 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
       resp = await fetch(url);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      console.error(`[future-science] Network error fetching contributions page ${page} from ${url}: ${reason}`);
-      throw new FutureScienceFetchError(`network error: ${reason}`, { url, page, cause: err });
+      console.error(`[future-science] Network error fetching contributions cursor ${cursor} from ${url}: ${reason}`);
+      throw new FutureScienceFetchError(`network error: ${reason}`, { url, page: cursor, cause: err });
     }
 
     if (!resp.ok) {
@@ -681,8 +686,8 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
       } catch {
         bodyExcerpt = "<unable to read body>";
       }
-      console.error(`[future-science] HTTP ${resp.status} fetching contributions page ${page} from ${url}. Body excerpt: ${bodyExcerpt}`);
-      throw new FutureScienceFetchError(`HTTP ${resp.status}`, { url, page, status: resp.status, bodyExcerpt });
+      console.error(`[future-science] HTTP ${resp.status} fetching contributions cursor ${cursor} from ${url}. Body excerpt: ${bodyExcerpt}`);
+      throw new FutureScienceFetchError(`HTTP ${resp.status}`, { url, page: cursor, status: resp.status, bodyExcerpt });
     }
 
     let json: FSContributionsResponse;
@@ -690,8 +695,8 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
       json = await resp.json() as FSContributionsResponse;
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      console.error(`[future-science] JSON parse error on page ${page} from ${url}: ${reason}`);
-      throw new FutureScienceFetchError(`JSON parse error: ${reason}`, { url, page, status: resp.status, cause: err });
+      console.error(`[future-science] JSON parse error on cursor ${cursor} from ${url}: ${reason}`);
+      throw new FutureScienceFetchError(`JSON parse error: ${reason}`, { url, page: cursor, status: resp.status, cause: err });
     }
 
     const items = json?.data || [];
@@ -730,18 +735,18 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
       }
     }
 
-    console.log(`[future-science] page ${page}/${pageCount}: received ${items.length} item(s), ${newItemsOnPage} new, ${dupedOnPage} duplicate (running total: ${abstracts.length}).`);
+    console.log(`[future-science] cursor ${cursor}/${pageCount}: received ${items.length} item(s), ${newItemsOnPage} new, ${dupedOnPage} duplicate (running total: ${abstracts.length}).`);
 
     if (items.length === 0) break;
     if (newItemsOnPage === 0 && dupedOnPage === items.length) {
-      console.log(`[future-science] page ${page} returned only duplicates — API likely not honoring pagination params. Stopping.`);
+      console.log(`[future-science] cursor ${cursor} returned only duplicates — API likely not honoring pagination params. Stopping.`);
       break;
     }
     if (newItemsOnPage === 0) break;
-    page++;
+    cursor++;
   }
 
-  console.log(`[future-science] fetchAbstractsAndKeywords done: ${abstracts.length} unique papers fetched (deduped from ${seenDocIds.size} doc IDs across ${page - 1} page(s)) for initiative=${initiativeDocId || "<public>"}.`);
+  console.log(`[future-science] fetchAbstractsAndKeywords done: ${abstracts.length} unique papers fetched (deduped from ${seenDocIds.size} doc IDs across ${cursor - 1} cursor(s)) for initiative=${initiativeDocId || "<public>"}.`);
   return { abstracts, allKeywords: Array.from(keywordSet) };
 }
 
