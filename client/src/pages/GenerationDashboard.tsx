@@ -1442,8 +1442,8 @@ export default function GenerationDashboard() {
                         <span className="flex-shrink-0 w-6 h-6 rounded-full border border-primary/50 bg-primary/10 text-[11px] font-mono flex items-center justify-center text-primary">3</span>
                         <div className="flex-1">
                           <div className="text-sm text-foreground/80">
-                            <span className="font-medium">Score papers by keyword.</span>{" "}
-                            <span className="text-muted-foreground/70">The AI model reads every paper's keyword tags and selects the papers whose keywords relate to your research question. Papers that don't relate are dropped before anything is read in depth.</span>
+                            <span className="font-medium">Shortlist by relevance.</span>{" "}
+                            <span className="text-muted-foreground/70">Every publication in the journal is ranked for how closely its title and abstract (and keyword tags, when present) relate to your research question. The most relevant papers move forward; the rest are set aside before anything is read in depth.</span>
                           </div>
                         </div>
                       </li>
