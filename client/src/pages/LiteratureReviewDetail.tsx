@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { FadeIn } from "@/components/ui/motion";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
+import { ReviewProgress } from "@/components/ReviewProgress";
 import { useAuth } from "@/lib/auth";
 import type { LiteratureReview } from "@shared/schema";
 
@@ -144,13 +145,18 @@ export default function LiteratureReviewDetail() {
 
           <FadeIn delay={0.2}>
             {review.status === "pending" || review.status === "generating" ? (
-              <div className="border border-border/30 bg-muted/5 p-12 text-center">
-                <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-4" />
-                <p className="text-muted-foreground font-mono text-sm mb-2">
-                  {review.status === "pending" ? "Review request queued..." : "Agent is generating the literature review..."}
-                </p>
-                <p className="text-muted-foreground/50 text-xs">This may take a minute. The page will update automatically.</p>
-              </div>
+              <ReviewProgress
+                createdAt={review.createdAt}
+                status={review.status}
+                expectedDurationMs={90000}
+                queuedLabel="Review request queued"
+                stages={[
+                  "Gathering corpus",
+                  "Analyzing literature",
+                  "Clustering themes",
+                  "Writing the review",
+                ]}
+              />
             ) : review.status === "failed" ? (
               <div className="border border-red-500/20 bg-red-500/5 p-8">
                 <p className="text-red-400 font-mono text-sm">Generation failed. Please try again.</p>

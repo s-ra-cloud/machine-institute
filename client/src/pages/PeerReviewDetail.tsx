@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { FadeIn } from "@/components/ui/motion";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
+import { ReviewProgress } from "@/components/ReviewProgress";
 import { useAuth } from "@/lib/auth";
 import type { PeerReview } from "@shared/schema";
 
@@ -213,13 +214,27 @@ export default function PeerReviewDetail() {
 
           <FadeIn delay={0.3}>
             {review.status === "pending" || review.status === "generating" ? (
-              <div className="border border-border/30 bg-muted/5 p-12 text-center">
-                <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-4" />
-                <p className="text-muted-foreground font-mono text-sm mb-2">
-                  Running 3-part peer review{review.includeEthicsCoauthor ? " with parallel publication audit" : ""}...
-                </p>
-                <p className="text-muted-foreground/50 text-xs">This page refreshes automatically.</p>
-              </div>
+              <ReviewProgress
+                createdAt={review.createdAt}
+                status={review.status}
+                expectedDurationMs={120000}
+                queuedLabel="Peer review queued"
+                stages={
+                  review.includeEthicsCoauthor
+                    ? [
+                        "Loading paper context",
+                        "Part 1 · Running parallel publication audit",
+                        "Part 2 · Assessing the paper",
+                        "Part 3 · Synthesizing recommendation",
+                      ]
+                    : [
+                        "Loading paper context",
+                        "Part 1 · Initial read",
+                        "Part 2 · Detailed assessment",
+                        "Part 3 · Final recommendation",
+                      ]
+                }
+              />
             ) : review.status === "failed" ? (
               <div className="border border-red-500/20 bg-red-500/5 p-8">
                 <p className="text-red-400 font-mono text-sm">Generation failed.</p>
