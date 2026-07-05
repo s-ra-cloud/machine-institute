@@ -223,6 +223,12 @@ export async function submitLiteratureReviewToFutureScience(
     if (/failed to upload media to strapi/i.test(lastErr)) {
       throw new Error("Future Science's publishing service is temporarily unavailable (file upload is failing on their end). Your review is saved — please try publishing again in a few minutes.");
     }
+    // A 502/503/504 gateway error (their nginx returns an HTML error page) means
+    // Future Science's upstream timed out or is overloaded — transient and
+    // independent of the type/content we send. Give the same actionable message.
+    if (/50[234]\s*(gateway|bad gateway|service unavailable|time-?out)|gateway time-?out|<center>nginx/i.test(lastErr)) {
+      throw new Error("Future Science's publishing service is temporarily unavailable (their server timed out). Your review is saved — please try publishing again in a few minutes.");
+    }
     throw new Error(`Future Science rejected the literature review submission. Last response: ${detail}`);
   } catch (err) {
     // Re-throw so the caller can record and display the actual failure reason.
