@@ -194,6 +194,13 @@ export async function submitLiteratureReviewToFutureScience(
     // see WHY FS rejected the submission, since deployment logs are very noisy.
     const detail = lastErr.slice(0, 400) || "no response body";
     console.error("All FS literature-review submission attempts exhausted. Last error:", detail);
+    // "Failed to upload media to Strapi" is a Future Science server-side storage
+    // failure (their Strapi media upload). It is transient and independent of the
+    // type, file format, or content we send — every submission fails while FS is
+    // in this state. Surface a clear, actionable message instead of the raw error.
+    if (/failed to upload media to strapi/i.test(lastErr)) {
+      throw new Error("Future Science's publishing service is temporarily unavailable (file upload is failing on their end). Your review is saved — please try publishing again in a few minutes.");
+    }
     throw new Error(`Future Science rejected the literature review submission. Last response: ${detail}`);
   } catch (err) {
     // Re-throw so the caller can record and display the actual failure reason.
