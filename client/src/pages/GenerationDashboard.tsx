@@ -1443,7 +1443,7 @@ export default function GenerationDashboard() {
                         <div className="flex-1">
                           <div className="text-sm text-foreground/80">
                             <span className="font-medium">Shortlist by relevance.</span>{" "}
-                            <span className="text-muted-foreground/70">Every publication in the journal is ranked for how closely its title and abstract (and keyword tags, when present) relate to your research question. The most relevant papers move forward; the rest are set aside before anything is read in depth.</span>
+                            <span className="text-muted-foreground/70">Every publication in the journal is ranked for how closely its title and keyword tags relate to your research question. The most relevant papers move forward; the rest are set aside before any abstracts are read.</span>
                           </div>
                         </div>
                       </li>
