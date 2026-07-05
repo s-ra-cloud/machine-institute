@@ -67,6 +67,13 @@ function splitAgentNameForFutureScience(name: string): { firstName: string; last
   };
 }
 
+// "Literature review" is a valid Future Science contribution type, so it stays
+// first. But FS is picky about the exact `type` string and rejects unknown ones
+// with a 4xx, so we fall back through progressively more generic accepted types
+// (the last two are known-good — editorials publish as "Article"/"article") to
+// guarantee the review still publishes even if FS ever changes what it accepts.
+const LITERATURE_REVIEW_TYPE_FALLBACKS = ["Literature review", "Review", "Unreviewed manuscript", "Other", "Article", "article"];
+
 export async function submitLiteratureReviewToFutureScience(
   options: LiteratureReviewSubmitOptions,
 ): Promise<{ documentId: string; url: string } | null> {
@@ -78,10 +85,9 @@ export async function submitLiteratureReviewToFutureScience(
 
   try {
     const visibleAuthorName = splitAgentNameForFutureScience(options.agentName);
-    const metadata: Record<string, unknown> = {
+    const baseMetadata: Record<string, unknown> = {
       title: options.title,
       abstract: options.abstract,
-      type: "Literature review",
       language: "en",
       agentName: options.agentName,
       author: [{
@@ -99,17 +105,17 @@ export async function submitLiteratureReviewToFutureScience(
       isMarkdown: true,
     };
     if (options.orchestratorName) {
-      metadata.researchOrchestrator = options.orchestratorName;
+      baseMetadata.researchOrchestrator = options.orchestratorName;
     }
     if (options.agentDescription) {
       const MAX_AGENT_DESC = 500;
-      metadata.agentDescription = options.agentDescription.length > MAX_AGENT_DESC
+      baseMetadata.agentDescription = options.agentDescription.length > MAX_AGENT_DESC
         ? options.agentDescription.slice(0, MAX_AGENT_DESC - 1).trimEnd() + "…"
         : options.agentDescription;
     }
 
     console.log("Future Science literature review api-bot payload fields:", {
-      fields: Object.keys(metadata).sort(),
+      fields: Object.keys(baseMetadata).sort(),
       agentName: options.agentName,
       orchestratorName: options.orchestratorName || null,
       visibleAuthor: `${visibleAuthorName.firstName} ${visibleAuthorName.lastName}`,
@@ -117,7 +123,7 @@ export async function submitLiteratureReviewToFutureScience(
       keywordCount: options.keywords.length,
     });
 
-    const buildFormData = () => {
+    const buildFormData = (metadata: Record<string, unknown>) => {
       const fd = new FormData();
       fd.append("data", JSON.stringify({ data: metadata }));
       const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
@@ -125,48 +131,74 @@ export async function submitLiteratureReviewToFutureScience(
       return fd;
     };
 
-    // Future Science's media upload (Strapi) occasionally returns transient 5xx
-    // errors ("Failed to upload media to Strapi"). Retry those a few times with
-    // backoff; do NOT retry 4xx client errors (they will never succeed).
+    const parseSuccess = (result: FSPublishResult) => {
+      const documentId = result?.data?.documentId || result?.documentId || result?.id;
+      const slug = result?.data?.slug || result?.slug;
+      const FS_INITIATIVE = "mirror";
+      const url = slug
+        ? `https://future-science.org/${FS_INITIATIVE}/${slug}`
+        : documentId
+          ? `https://future-science.org/${FS_INITIATIVE}/${documentId}`
+          : null;
+      return { documentId: documentId || "unknown", url: url || "" };
+    };
+
+    // Try each candidate type in turn. Future Science's media upload (Strapi)
+    // occasionally returns transient 5xx errors, so retry those a few times per
+    // type with backoff; a 4xx means this type was rejected — move to the next.
     const MAX_ATTEMPTS = 3;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
-          method: "POST",
-          headers: {
-            "x-api-key": apiKey,
-          },
-          body: buildFormData(),
-        });
+    let lastErr = "";
+    for (const candidateType of LITERATURE_REVIEW_TYPE_FALLBACKS) {
+      const metadata: Record<string, unknown> = { ...baseMetadata, type: candidateType };
+      let retryType = false;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        try {
+          const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
+            method: "POST",
+            headers: {
+              "x-api-key": apiKey,
+            },
+            body: buildFormData(metadata),
+          });
 
-        if (resp.ok) {
-          const result: FSPublishResult = await resp.json() as FSPublishResult;
-          const documentId = result?.data?.documentId || result?.documentId || result?.id;
-          const slug = result?.data?.slug || result?.slug;
-          const FS_INITIATIVE = "mirror";
-          const url = slug
-            ? `https://future-science.org/${FS_INITIATIVE}/${slug}`
-            : documentId
-              ? `https://future-science.org/${FS_INITIATIVE}/${documentId}`
-              : null;
-          return { documentId: documentId || "unknown", url: url || "" };
-        }
+          if (resp.ok) {
+            const result: FSPublishResult = await resp.json() as FSPublishResult;
+            console.log(`Future Science literature review published with type "${candidateType}".`);
+            return parseSuccess(result);
+          }
 
-        const errorText = await resp.text();
-        console.error(`Future Science submission failed (${resp.status}) [attempt ${attempt}/${MAX_ATTEMPTS}]:`, errorText);
-        if (resp.status < 500 || attempt === MAX_ATTEMPTS) {
-          return null;
+          lastErr = await resp.text();
+          console.warn(`FS rejected literature-review type "${candidateType}" (${resp.status}) [attempt ${attempt}/${MAX_ATTEMPTS}]: ${lastErr.slice(0, 200)}`);
+          // 4xx: this type will never succeed — stop retrying and try the next type.
+          if (resp.status < 500) {
+            retryType = true;
+            break;
+          }
+          if (attempt === MAX_ATTEMPTS) break;
+        } catch (err) {
+          lastErr = err instanceof Error ? err.message : String(err);
+          console.error(`Future Science submission error [type "${candidateType}", attempt ${attempt}/${MAX_ATTEMPTS}]:`, err);
+          if (attempt === MAX_ATTEMPTS) break;
         }
-      } catch (err) {
-        console.error(`Future Science submission error [attempt ${attempt}/${MAX_ATTEMPTS}]:`, err);
-        if (attempt === MAX_ATTEMPTS) return null;
+        await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
       }
-      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+      if (!retryType) {
+        // We exhausted 5xx retries for this type without a definitive 4xx; the
+        // next type is unlikely to help against a persistent server error, but
+        // continue anyway so a type-specific 5xx doesn't block the whole submit.
+        continue;
+      }
     }
-    return null;
+    // Surface the real Future Science error to the caller (and thus to the user
+    // event) instead of a generic message — this is the only reliable place to
+    // see WHY FS rejected the submission, since deployment logs are very noisy.
+    const detail = lastErr.slice(0, 400) || "no response body";
+    console.error("All FS literature-review submission attempts exhausted. Last error:", detail);
+    throw new Error(`Future Science rejected the literature review submission. Last response: ${detail}`);
   } catch (err) {
+    // Re-throw so the caller can record and display the actual failure reason.
     console.error("Future Science submission error:", err);
-    return null;
+    throw err;
   }
 }
 
