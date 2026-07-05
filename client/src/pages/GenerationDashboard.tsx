@@ -25,6 +25,11 @@ import {
 
 type GenerationType = "editorial" | "literature-review" | "ethics-report" | "peer-review";
 
+interface GenerationConfigResponse {
+  platformModels?: Array<{ provider: string; model: string; label: string; maxFullTextPapers?: number }>;
+  byocProviders?: Array<{ id: string; label: string; defaultModel: string; maxFullTextPapers?: number }>;
+}
+
 interface PeerPromptResponse { prompt: string }
 
 interface PeerReviewRecord {
@@ -281,6 +286,31 @@ export default function GenerationDashboard() {
     },
     enabled: activeType === "editorial",
   });
+
+  const { data: generationConfig } = useQuery<GenerationConfigResponse>({
+    queryKey: ["/api/generation/config"],
+    queryFn: async () => {
+      const res = await fetch("/api/generation/config");
+      return res.json();
+    },
+  });
+
+  // How many papers Step 5 can read in full for the currently selected model.
+  // Scales with the model's context window; falls back to a small default until config loads.
+  const maxFullText = (() => {
+    if (!generationConfig) return 15;
+    if (modelConfig.providerMode === "byoc") {
+      const p = generationConfig.byocProviders?.find(bp => bp.id === modelConfig.provider);
+      return p?.maxFullTextPapers ?? 6;
+    }
+    const m = generationConfig.platformModels?.find(pm => pm.model === modelConfig.modelName);
+    return m?.maxFullTextPapers ?? 15;
+  })();
+
+  // Clamp the chosen full-text count whenever the model's max changes (e.g. switching models).
+  useEffect(() => {
+    setFullTextCount(prev => Math.min(prev, maxFullText));
+  }, [maxFullText]);
 
   const reviewAgentId = reviewMode === "adversarial" ? "aLR" : "bLR";
 
@@ -1497,18 +1527,18 @@ export default function GenerationDashboard() {
                             <input
                               type="range"
                               min={1}
-                              max={15}
-                              value={fullTextCount}
+                              max={maxFullText}
+                              value={Math.min(fullTextCount, maxFullText)}
                               onChange={(e) => setFullTextCount(Number(e.target.value))}
                               className="flex-1 accent-primary"
                               data-testid="input-full-text-count"
                             />
                             <span className="text-xs font-mono text-primary w-24 text-right" data-testid="text-full-text-count">
-                              {fullTextCount} paper{fullTextCount === 1 ? "" : "s"}
+                              {Math.min(fullTextCount, maxFullText)} paper{Math.min(fullTextCount, maxFullText) === 1 ? "" : "s"}
                             </span>
                           </div>
                           <p className="text-[10px] font-mono text-muted-foreground/40 mt-1">
-                            Reading more papers in full gives a deeper review but costs more and takes longer (max 15).
+                            Reading more papers in full gives a deeper review but costs more and takes longer. The selected model can read up to {maxFullText} paper{maxFullText === 1 ? "" : "s"} in full.
                           </p>
                         </div>
                       </li>

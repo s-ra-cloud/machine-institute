@@ -13,19 +13,70 @@ export interface GenerationResult {
   provider: string;
 }
 
+// `contextWindow` is the model's real total token window; the reading-budget helper
+// below uses it to decide how many papers a literature review can read in full.
 export const PLATFORM_MODELS = [
-  { provider: "openrouter", model: "deepseek/deepseek-chat", label: "DeepSeek Chat (via OpenRouter)", credits: 1, default: true },
-  { provider: "openrouter", model: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4 (via OpenRouter)", credits: 5 },
-  { provider: "openrouter", model: "openai/gpt-4o", label: "GPT-4o (via OpenRouter)", credits: 5 },
-  { provider: "openrouter", model: "openai/gpt-5", label: "GPT-5 (via OpenRouter)", credits: 10 },
-  { provider: "openrouter", model: "anthropic/claude-opus-4", label: "Claude Opus 4 (via OpenRouter)", credits: 15 },
+  { provider: "openrouter", model: "deepseek/deepseek-chat", label: "DeepSeek Chat (via OpenRouter)", credits: 1, default: true, contextWindow: 64000 },
+  { provider: "openrouter", model: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4 (via OpenRouter)", credits: 5, contextWindow: 200000 },
+  { provider: "openrouter", model: "openai/gpt-4o", label: "GPT-4o (via OpenRouter)", credits: 5, contextWindow: 128000 },
+  { provider: "openrouter", model: "openai/gpt-5", label: "GPT-5 (via OpenRouter)", credits: 10, contextWindow: 400000 },
+  { provider: "openrouter", model: "anthropic/claude-opus-4", label: "Claude Opus 4 (via OpenRouter)", credits: 15, contextWindow: 200000 },
 ];
 
+// `defaultContextWindow` is used for bring-your-own-key models where we don't know
+// the exact model, so we fall back to a sensible per-provider window.
 export const BYOC_PROVIDERS = [
-  { id: "openai", label: "OpenAI", baseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o" },
-  { id: "anthropic", label: "Anthropic", baseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-20250514" },
-  { id: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", defaultModel: "deepseek/deepseek-chat" },
+  { id: "openai", label: "OpenAI", baseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o", defaultContextWindow: 128000 },
+  { id: "anthropic", label: "Anthropic", baseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-20250514", defaultContextWindow: 200000 },
+  { id: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", defaultModel: "deepseek/deepseek-chat", defaultContextWindow: 64000 },
 ];
+
+// Reading-budget constants for literature-review full-text reading.
+// Roughly 8,000 tokens are budgeted per paper read in full. The synthesis call reserves
+// ~12,000 output tokens (see generateWithConfig's default maxTokens) and a modest
+// prompt/instructions overhead is held back before dividing the rest across papers.
+export const READING_BUDGET = {
+  tokensPerPaper: 8000,
+  reservedOutputTokens: 12000,
+  promptOverheadTokens: 4000,
+  fallbackContextWindow: 64000,
+  // Characters ≈ tokens × 3.5 (matches estimateTokens in the LR pipeline).
+  charsPerToken: 3.5,
+};
+
+// Resolve the total context window for a given model config.
+export function getContextWindow(config: ModelProviderConfig): number {
+  const modelName = resolveModelName(config);
+  const platformMatch = PLATFORM_MODELS.find(m => m.model === modelName);
+  if (platformMatch?.contextWindow) return platformMatch.contextWindow;
+  const byocMatch = BYOC_PROVIDERS.find(p => p.id === config.provider);
+  if (byocMatch?.defaultContextWindow) return byocMatch.defaultContextWindow;
+  return READING_BUDGET.fallbackContextWindow;
+}
+
+export interface ReadingBudget {
+  contextWindow: number;
+  // Total input tokens available (context window minus reserved output tokens).
+  maxInputTokens: number;
+  // Max number of papers that can be read in full at ~8k tokens each, after holding
+  // back reserved output tokens and prompt overhead.
+  maxFullTextPapers: number;
+  // Per-paper full-text character cap so one paper can actually use its ~8k-token share.
+  fullTextPerPaperChars: number;
+}
+
+// Given a model config, compute how many papers can be read in full and the input-token
+// budget for trimming the corpus.
+export function getReadingBudget(config: ModelProviderConfig): ReadingBudget {
+  const contextWindow = getContextWindow(config);
+  const maxInputTokens = Math.max(1, contextWindow - READING_BUDGET.reservedOutputTokens);
+  const maxFullTextPapers = Math.max(
+    1,
+    Math.floor((maxInputTokens - READING_BUDGET.promptOverheadTokens) / READING_BUDGET.tokensPerPaper),
+  );
+  const fullTextPerPaperChars = Math.round(READING_BUDGET.tokensPerPaper * READING_BUDGET.charsPerToken);
+  return { contextWindow, maxInputTokens, maxFullTextPapers, fullTextPerPaperChars };
+}
 
 const OPENAI_COMPAT_BASE_URLS: Record<string, string> = {
   openai: "https://api.openai.com/v1",

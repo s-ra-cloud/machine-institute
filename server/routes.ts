@@ -17,7 +17,7 @@ import OpenAI from "openai";
 import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
-import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, type ModelProviderConfig } from "./model-service";
+import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, getReadingBudget, READING_BUDGET, type ModelProviderConfig } from "./model-service";
 import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
@@ -856,8 +856,16 @@ I will now provide the papers.`;
 
   app.get("/api/generation/config", (_req, res) => {
     return res.json({
-      platformModels: PLATFORM_MODELS,
-      byocProviders: BYOC_PROVIDERS,
+      // Attach the per-model max full-text papers so the dashboard's Step 5 slider
+      // can scale its maximum with the selected model's context window.
+      platformModels: PLATFORM_MODELS.map(m => ({
+        ...m,
+        maxFullTextPapers: getReadingBudget({ providerMode: "platform", provider: m.provider, modelName: m.model }).maxFullTextPapers,
+      })),
+      byocProviders: BYOC_PROVIDERS.map(p => ({
+        ...p,
+        maxFullTextPapers: getReadingBudget({ providerMode: "byoc", provider: p.id, modelName: "" }).maxFullTextPapers,
+      })),
       limits: PER_USER_PLATFORM_LIMITS,
       defaultTopics: {
         editorial: "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability",
@@ -982,10 +990,15 @@ I will now provide the papers.`;
       const { projectId, agentId, researchQuestion, prompt, topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, journalId, fullTextCount, includeArxiv } = req.body;
 
       // Number of top-relevance papers to read in FULL TEXT (rest use abstracts).
-      // Clamp to 1–15; default 15. Anything non-numeric falls back to the default.
-      const FULL_TEXT_MAX = 15;
+      // The maximum scales with the selected model's context window (see getReadingBudget):
+      // bigger models can read more papers in full. Default reads the model's full allowance.
+      const FULL_TEXT_MAX = getReadingBudget({
+        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
+        provider: modelProvider || "openrouter",
+        modelName: modelName || "",
+      }).maxFullTextPapers;
       const parsedFullText = Number(fullTextCount);
-      // Only honor a real positive number; null/""/non-numeric all fall back to the default (15).
+      // Only honor a real positive number; null/""/non-numeric all fall back to the model's max.
       const effectiveFullTextCount = (fullTextCount !== undefined && fullTextCount !== null && fullTextCount !== "" && Number.isFinite(parsedFullText) && parsedFullText >= 1)
         ? Math.min(FULL_TEXT_MAX, Math.max(1, Math.round(parsedFullText)))
         : FULL_TEXT_MAX;
@@ -1365,15 +1378,17 @@ I will now provide the papers.`;
       }
 
       // Number of top-ranked papers Stage 5 will read in full text (rest stay abstract-only).
-      // Declared here so the shortlist/cap sizing below can scale with it.
-      const FULL_TEXT_TARGET = Math.min(15, Math.max(1, data.fullTextCount ?? 15));
+      // The cap scales with the selected model's context window (see getReadingBudget),
+      // so bigger models read more papers in full and the input budget grows with them.
+      const readingBudget = getReadingBudget(modelConfig || { providerMode: "platform", provider: "openrouter", modelName: "" });
+      const FULL_TEXT_TARGET = Math.min(readingBudget.maxFullTextPapers, Math.max(1, data.fullTextCount ?? readingBudget.maxFullTextPapers));
       // Keep the shortlist at least 3× the full-text read target so the full-text stage
       // always has a healthy candidate pool (e.g. 45 papers when 15 are read in full).
       // Scales with whatever fullTextCount the run uses; if fewer relevant candidates
       // exist, all of them are kept.
       const SHORTLIST_SIZE = FULL_TEXT_TARGET * 3;
       const MAX_SELECTED_PAPERS = SHORTLIST_SIZE;
-      const MAX_INPUT_TOKENS = 28000;
+      const MAX_INPUT_TOKENS = readingBudget.maxInputTokens;
 
       const lrInitiativeSlug = INITIATIVE_SLUGS[lrJournalId] || "papers";
       const fsPaperUrl = (docId: string | undefined) => docId ? `https://future-science.org/${lrInitiativeSlug}/${docId}` : "";
@@ -1521,7 +1536,9 @@ I will now provide the papers.`;
 
       // STAGE 5 — Read the FULL TEXT of the top-ranked papers (the rest stay abstract-only).
       // FULL_TEXT_TARGET is declared above (the shortlist is sized to 3× of it).
-      const FULL_TEXT_PER_PAPER_CHARS = 4000;
+      // Cap each paper's full text at its ~8k-token share (in characters) so a whole paper
+      // can actually use its budget instead of being cut to a small excerpt.
+      const FULL_TEXT_PER_PAPER_CHARS = readingBudget.fullTextPerPaperChars;
       // relevantPapers is the ranked selection, so the top-ranked ones with a Future Science
       // documentId are the ones we read in full.
       const fullTextCandidates: CorpusPaper[] = relevantPapers
