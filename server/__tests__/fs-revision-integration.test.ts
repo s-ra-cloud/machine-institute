@@ -149,7 +149,7 @@ describe("Future Science — revision arrays accepted end-to-end (deterministic)
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const md = attempts[0].metadata;
-    expect(md.type).toBe("Audit");
+    expect(md.type).toBe("Response to a contribution");
     expect(md.linkOriginalContribution).toBe("https://future-science.org/mirror/doc-1");
     assertRevisionShape(md.majorRevisions);
     assertRevisionShape(md.minorRevisions);

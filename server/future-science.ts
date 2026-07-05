@@ -67,12 +67,34 @@ function splitAgentNameForFutureScience(name: string): { firstName: string; last
   };
 }
 
+// The authoritative set of contribution `type` strings Future Science accepts on
+// the api-bots endpoint. FS rejects anything else with a 4xx, so every fallback
+// array below MUST be a subset of this list. (An earlier version leaked the
+// invalid strings "Review" and "Audit" into the fallbacks, which caused silent
+// rejections — a regression test guards this now.)
+export const FS_ACCEPTED_CONTRIBUTION_TYPES = [
+  "Article",
+  "Book",
+  "Book chapter",
+  "Conference paper",
+  "Podcast",
+  "Peer-review",
+  "Response to a contribution",
+  "Response to a review",
+  "Accepted paper",
+  "Rejected paper",
+  "Retracted paper",
+  "Literature review",
+  "Revised manuscript",
+  "Unreviewed manuscript",
+  "Other",
+] as const;
+
 // "Literature review" is a valid Future Science contribution type, so it stays
-// first. But FS is picky about the exact `type` string and rejects unknown ones
-// with a 4xx, so we fall back through progressively more generic accepted types
-// (the last two are known-good — editorials publish as "Article"/"article") to
+// first. FS is picky about the exact `type` string and rejects unknown ones with
+// a 4xx, so we fall back through progressively more generic ACCEPTED types to
 // guarantee the review still publishes even if FS ever changes what it accepts.
-const LITERATURE_REVIEW_TYPE_FALLBACKS = ["Literature review", "Review", "Unreviewed manuscript", "Other", "Article", "article"];
+export const LITERATURE_REVIEW_TYPE_FALLBACKS = ["Literature review", "Unreviewed manuscript", "Other", "Article"];
 
 export async function submitLiteratureReviewToFutureScience(
   options: LiteratureReviewSubmitOptions,
@@ -259,9 +281,23 @@ interface EthicsReportSubmitOptions {
   minorRevisions?: RevisionItem[];
 }
 
-const ETHICS_TYPE_FALLBACKS_FIELD = ["Audit", "Unreviewed manuscript", "Other", "Article"];
-const ETHICS_TYPE_FALLBACKS_RESPONSE = ["Audit", "Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
+// Field (aggregate) ethics reports have no single linked paper, so they lead with
+// the review-style "Peer-review" type; response-style (single-paper) audits lead
+// with "Response to a contribution" (which carries linkOriginalContribution).
+// "Audit" was removed — Future Science does NOT accept it and rejected every
+// ethics report on the first attempt, silently downgrading to a generic type.
+const ETHICS_TYPE_FALLBACKS_FIELD = ["Peer-review", "Unreviewed manuscript", "Other", "Article"];
+const ETHICS_TYPE_FALLBACKS_RESPONSE = ["Response to a contribution", "Peer-review", "Unreviewed manuscript", "Other", "Article"];
 const PEER_REVIEW_TYPE_FALLBACKS = ["Peer-review", "Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
+
+// Exported for regression testing that every fallback array only contains
+// Future Science–accepted `type` strings.
+export const _FS_TYPE_FALLBACKS_FOR_TEST = {
+  literatureReview: LITERATURE_REVIEW_TYPE_FALLBACKS,
+  ethicsField: ETHICS_TYPE_FALLBACKS_FIELD,
+  ethicsResponse: ETHICS_TYPE_FALLBACKS_RESPONSE,
+  peerReview: PEER_REVIEW_TYPE_FALLBACKS,
+} as const;
 
 export interface PeerReviewSubmitOptions {
   title: string;
@@ -515,12 +551,12 @@ export async function submitEthicsReportToFutureScience(
   let lastErr: string = "";
   for (const candidateType of typeFallbacks) {
     try {
-      // `linkOriginalContribution` is meaningful for both "Audit" (new FS
-      // scheme for single-paper ethics audits) and "Response to a
-      // contribution". For other fallback types FS doesn't accept the field,
-      // so strip it to avoid payload rejection.
+      // `linkOriginalContribution` (and the revision arrays that ride with it)
+      // are only accepted by the response-style types "Response to a
+      // contribution" and "Peer-review". For other fallback types FS rejects the
+      // field, so strip it to avoid payload rejection.
       const metadata: Record<string, unknown> = { ...baseMetadata, type: candidateType };
-      if (candidateType !== "Audit" && candidateType !== "Response to a contribution") {
+      if (candidateType !== "Response to a contribution" && candidateType !== "Peer-review") {
         delete metadata.linkOriginalContribution;
         delete metadata.majorRevisions;
         delete metadata.minorRevisions;

@@ -411,7 +411,7 @@ describe("Future Science — revision arrays gated to response-style types", () 
   }
 
   const PEER_ALLOWED = ["Peer-review", "Response to a contribution"];
-  const ETHICS_ALLOWED = ["Audit", "Response to a contribution"];
+  const ETHICS_ALLOWED = ["Response to a contribution", "Peer-review"];
 
   it("keeps revisions on allowed peer-review types", () => {
     for (const t of PEER_ALLOWED) {
@@ -437,12 +437,12 @@ describe("Future Science — revision arrays gated to response-style types", () 
       expect(m.majorRevisions).toBeUndefined();
       expect(m.minorRevisions).toBeUndefined();
     }
-    const audit = assemble("Audit", ETHICS_ALLOWED, true);
+    const audit = assemble("Response to a contribution", ETHICS_ALLOWED, true);
     expect(audit.majorRevisions).toBeDefined();
   });
 
   it("never includes revisions when there is no linkOriginalContribution", () => {
-    const m = assemble("Audit", ETHICS_ALLOWED, false);
+    const m = assemble("Response to a contribution", ETHICS_ALLOWED, false);
     expect(m.majorRevisions).toBeUndefined();
     expect(m.minorRevisions).toBeUndefined();
     expect(m.linkOriginalContribution).toBeUndefined();
