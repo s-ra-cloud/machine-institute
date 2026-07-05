@@ -418,14 +418,16 @@ export default function GenerationDashboard() {
   });
 
   interface PeerAvailablePaper { documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[]; lockedCombos: string[] }
-  const { data: peerAvailableData } = useQuery<{ papers: PeerAvailablePaper[] }>({
+  const { data: peerAvailableData, isFetching: peerPapersFetching, isError: peerPapersError, refetch: refetchPeerPapers } = useQuery<{ papers: PeerAvailablePaper[] }>({
     queryKey: ["/api/peer-reviews/available-papers", selectedJournal],
     queryFn: async () => {
       const res = await fetch(`/api/peer-reviews/available-papers?journalId=${encodeURIComponent(selectedJournal)}`);
+      if (!res.ok) throw new Error("Failed to load papers");
       return res.json();
     },
     enabled: activeType === "peer-review",
   });
+  const peerPapersLoading = peerPapersFetching && !peerAvailableData;
 
   const { data: peerStatus } = useQuery<RateLimitStatus>({
     queryKey: ["/api/generation/rate-limit-status", "peer-review"],
@@ -1199,10 +1201,36 @@ export default function GenerationDashboard() {
                           className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
                           data-testid="input-peer-paper-search"
                         />
+                        {peerPapersLoading && (
+                          <div className="space-y-1.5" data-testid="progress-peer-papers">
+                            <div className="h-1 w-full bg-border/30 progress-indeterminate" />
+                            <p className="text-[10px] font-mono text-muted-foreground/50">
+                              Loading the Mirror catalogue from Future Science… this can take up to a minute.
+                            </p>
+                          </div>
+                        )}
                         <div className="border border-border/40 max-h-72 overflow-y-auto" data-testid="list-peer-available-papers">
                           {filtered.length === 0 && (
                             <p className="text-xs font-mono text-muted-foreground/50 p-4">
-                              {papers.length === 0 ? "Loading available papers…" : "No papers match this search."}
+                              {peerPapersLoading ? (
+                                "Loading available papers…"
+                              ) : peerPapersError ? (
+                                <span>
+                                  Couldn't load papers from Future Science.{" "}
+                                  <button
+                                    type="button"
+                                    onClick={() => refetchPeerPapers()}
+                                    className="text-primary underline underline-offset-2"
+                                    data-testid="button-retry-peer-papers"
+                                  >
+                                    Retry
+                                  </button>
+                                </span>
+                              ) : papers.length === 0 ? (
+                                "No papers available for this journal yet."
+                              ) : (
+                                "No papers match this search."
+                              )}
                             </p>
                           )}
                           {filtered.map((p) => {

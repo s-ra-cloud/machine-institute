@@ -91,6 +91,25 @@
   @apply text-primary underline underline-offset-2 hover:text-primary/80 transition-colors;
 }
 
+/* Indeterminate progress bar */
+@keyframes indeterminate-progress {
+  0% { left: -40%; width: 40%; }
+  50% { left: 30%; width: 55%; }
+  100% { left: 100%; width: 40%; }
+}
+.progress-indeterminate {
+  position: relative;
+  overflow: hidden;
+}
+.progress-indeterminate::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: hsl(var(--primary));
+  animation: indeterminate-progress 1.4s ease-in-out infinite;
+}
+
 /* Custom scrollbar for cybernetic feel */
 ::-webkit-scrollbar {
   width: 8px;
