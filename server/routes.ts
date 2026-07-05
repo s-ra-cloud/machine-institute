@@ -1364,7 +1364,15 @@ I will now provide the papers.`;
         await emitLREvent("paper-fetch", `Fetched ${fsAbstracts.length} unique paper(s) from Future Science (filtered to ${filteredAbstracts.length} after removing existing LRs). Using Future Science as the sole source (the synced project log is skipped).`);
       }
 
-      const MAX_SELECTED_PAPERS = 25;
+      // Number of top-ranked papers Stage 5 will read in full text (rest stay abstract-only).
+      // Declared here so the shortlist/cap sizing below can scale with it.
+      const FULL_TEXT_TARGET = Math.min(15, Math.max(1, data.fullTextCount ?? 15));
+      // Keep the shortlist at least 3× the full-text read target so the full-text stage
+      // always has a healthy candidate pool (e.g. 45 papers when 15 are read in full).
+      // Scales with whatever fullTextCount the run uses; if fewer relevant candidates
+      // exist, all of them are kept.
+      const SHORTLIST_SIZE = FULL_TEXT_TARGET * 3;
+      const MAX_SELECTED_PAPERS = SHORTLIST_SIZE;
       const MAX_INPUT_TOKENS = 28000;
 
       const lrInitiativeSlug = INITIATIVE_SLUGS[lrJournalId] || "papers";
@@ -1403,11 +1411,11 @@ I will now provide the papers.`;
         try { return JSON.parse(t); } catch { return null; }
       };
 
-      // STAGE 3 — LLM keyword filter: keep only papers whose keyword tags relate to the question.
+      // STAGE 3 — LLM shortlist: keep only papers whose title and keyword tags relate to the question.
       const llmSelectByKeywords = async (papers: Candidate[]): Promise<number[] | null> => {
         const list = papers.map((p, i) => `${i}: ${p.title} — keywords: ${p.keywords.length ? p.keywords.join(", ") : "(none)"}`).join("\n");
-        const sys = "You are a research librarian deciding which papers belong in a literature review. Judge ONLY by whether each paper's keyword tags are topically related to the research question. Reply with a JSON array of the integer indices to KEEP and nothing else.";
-        const user = `Research question: ${data.researchQuestion}\n\nPapers (index: title — keywords):\n${list}\n\nReturn a JSON array of the indices whose keywords are topically related to the research question, e.g. [0,3,4]. Keep every paper that is plausibly related; return [] only if none relate.`;
+        const sys = "You are a research librarian deciding which papers belong in a literature review. Judge each paper by whether its title AND keyword tags are topically related to the research question. Reply with a JSON array of the integer indices to KEEP and nothing else.";
+        const user = `Research question: ${data.researchQuestion}\n\nPapers (index: title — keywords):\n${list}\n\nReturn a JSON array of the indices whose title and keywords are topically related to the research question, e.g. [0,3,4]. Keep every paper that is plausibly related; return [] only if none relate.`;
         try {
           const r = await generateWithConfig(config, sys, user, { maxTokens: 1200, temperature: 0 });
           const parsed = parseJsonLoose(r.content);
@@ -1449,7 +1457,9 @@ I will now provide the papers.`;
       // rank by deterministic title/abstract relevance instead.
       // A deterministic pre-rank also bounds the candidate set before the (token-heavy)
       // abstract-scoring stage so the whole corpus can be fetched without blowing limits.
-      const PRE_SCORE_LIMIT = 40;
+      // Keep the pool at least 3× the full-text read target so the caps never trim the
+      // shortlist below what the full-text stage will draw from.
+      const PRE_SCORE_LIMIT = SHORTLIST_SIZE;
       let selected: Candidate[] = candidates;
       let keywordFilterMode: "llm" | "fallback" | "deterministic" | "skipped" = "skipped";
       if (fsHasPapers && candidates.length > 1) {
@@ -1458,12 +1468,12 @@ I will now provide the papers.`;
         const keywordCoverage = candidates.filter(c => c.keywords.length > 0).length / candidates.length;
         const hasUsableKeywords = keywordCoverage >= 0.3;
         if (hasUsableKeywords) {
-          await emitLREvent("keyword-filter", `Scoring ${candidates.length} paper(s) by keyword relevance to the research question with the model.`);
+          await emitLREvent("keyword-filter", `Shortlisting ${candidates.length} paper(s) by title + keyword relevance to the research question with the model.`);
           const idxs = await llmSelectByKeywords(candidates);
           if (idxs && idxs.length > 0) {
             keywordFilterMode = "llm";
             selected = idxs.map(i => candidates[i]);
-            await emitLREvent("keyword-filter", `Keyword scoring selected ${selected.length} of ${candidates.length} paper(s) whose keywords relate to the question.`);
+            await emitLREvent("keyword-filter", `Title + keyword shortlist selected ${selected.length} of ${candidates.length} paper(s) whose title and keywords relate to the question.`);
           } else {
             keywordFilterMode = "fallback";
             const { relevant } = scoreRelevance(candidates, data.researchQuestion);
@@ -1510,7 +1520,7 @@ I will now provide the papers.`;
       const allPaperSources = [...relevantPapers, ...backgroundPapers];
 
       // STAGE 5 — Read the FULL TEXT of the top-ranked papers (the rest stay abstract-only).
-      const FULL_TEXT_TARGET = Math.min(15, Math.max(1, data.fullTextCount ?? 15));
+      // FULL_TEXT_TARGET is declared above (the shortlist is sized to 3× of it).
       const FULL_TEXT_PER_PAPER_CHARS = 4000;
       // relevantPapers is the ranked selection, so the top-ranked ones with a Future Science
       // documentId are the ones we read in full.
