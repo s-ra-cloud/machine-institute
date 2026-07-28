@@ -19,7 +19,7 @@ import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
 import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, getReadingBudget, READING_BUDGET, type ModelProviderConfig } from "./model-service";
-import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, extractTrendsAndGaps, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
+import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, fetchAbstractsAndKeywordsCached, extractTrendsAndGaps, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
 function buildConventionName(modelName: string, agentId: string): string {
@@ -2041,7 +2041,7 @@ I will now provide the papers.`;
     const initiativeSlug = INITIATIVE_SLUGS[journalId] || journalId;
 
     const [fsData, reviewedRows, projectPapers] = await Promise.all([
-      fetchAbstractsAndKeywords([], initiativeDocId).catch(() => ({ abstracts: [] as any[] })),
+      fetchAbstractsAndKeywordsCached([], initiativeDocId).catch(() => ({ abstracts: [] as any[] })),
       storage.getReviewedPaperPersonasForJournal(journalId),
       storage.getProjectPapers(journalId),
     ]);

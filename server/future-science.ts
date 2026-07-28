@@ -831,6 +831,64 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
   return { abstracts, allKeywords: Array.from(keywordSet) };
 }
 
+// ---------------------------------------------------------------------------
+// Short-lived server-side cache for the Future Science catalogue.
+//
+// fetchAbstractsAndKeywords walks the entire FS corpus with cursor pagination
+// (~30s uncached). The batch peer-review UI hits eligible-count on every
+// persona/model change, so without a cache users wait repeatedly. A short TTL
+// keeps persona/model switching instant while still surfacing newly published
+// papers within a couple of minutes. Concurrent callers share one in-flight
+// fetch so a burst of requests never fans out into parallel full-catalogue
+// crawls. Failures are NOT cached — the next request retries the fetch.
+// ---------------------------------------------------------------------------
+const FS_CATALOGUE_CACHE_TTL_MS = 2 * 60 * 1000;
+
+interface FsCatalogueCacheEntry {
+  fetchedAt: number;
+  value: { abstracts: FutureScienceAbstract[]; allKeywords: string[] };
+}
+
+const fsCatalogueCache = new Map<string, FsCatalogueCacheEntry>();
+const fsCatalogueInFlight = new Map<string, Promise<{ abstracts: FutureScienceAbstract[]; allKeywords: string[] }>>();
+
+function fsCatalogueCacheKey(institutions: string[], initiativeDocId?: string): string {
+  return `${initiativeDocId || "<public>"}|${[...institutions].sort().join(",")}`;
+}
+
+// Test hook: clear the catalogue cache.
+export function _clearFsCatalogueCacheForTest(): void {
+  fsCatalogueCache.clear();
+  fsCatalogueInFlight.clear();
+}
+
+export async function fetchAbstractsAndKeywordsCached(
+  institutions: string[],
+  initiativeDocId?: string,
+): Promise<{ abstracts: FutureScienceAbstract[]; allKeywords: string[] }> {
+  const key = fsCatalogueCacheKey(institutions, initiativeDocId);
+
+  const cached = fsCatalogueCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < FS_CATALOGUE_CACHE_TTL_MS) {
+    return cached.value;
+  }
+
+  const inFlight = fsCatalogueInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    try {
+      const value = await fetchAbstractsAndKeywords(institutions, initiativeDocId);
+      fsCatalogueCache.set(key, { fetchedAt: Date.now(), value });
+      return value;
+    } finally {
+      fsCatalogueInFlight.delete(key);
+    }
+  })();
+  fsCatalogueInFlight.set(key, promise);
+  return promise;
+}
+
 function normalizeText(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
