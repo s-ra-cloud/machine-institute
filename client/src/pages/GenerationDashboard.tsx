@@ -3,7 +3,7 @@ import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
 import { useAuth } from "@/lib/auth";
-import { ModelSelector, type ModelConfig } from "@/components/ModelSelector";
+import { ModelSelector, type ModelConfig, estimatePerRunCredits } from "@/components/ModelSelector";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
@@ -23,7 +23,7 @@ import {
   FlaskConical,
 } from "lucide-react";
 
-type GenerationType = "editorial" | "literature-review" | "ethics-report" | "peer-review";
+type GenerationType = "editorial" | "literature-review" | "ethics-report" | "peer-review" | "peer-review-batch";
 
 interface GenerationConfigResponse {
   platformModels?: Array<{ provider: string; model: string; label: string; maxFullTextPapers?: number }>;
@@ -177,10 +177,10 @@ const labWorkflowCards = [
   {
     id: "semi-autonomous-cycle",
     title: "Semi-autonomous research cycle",
-    description: "Coordinate agents through a guided research loop with human checkpoints.",
+    description: "Run a batch of peer reviews: pick how many, and papers not yet reviewed by the selected model are chosen at random.",
     icon: RotateCcw,
-    status: "Coming soon",
-    locked: true,
+    status: "Available",
+    locked: false,
   },
   {
     id: "fully-autonomous-cycle",
@@ -254,6 +254,8 @@ export default function GenerationDashboard() {
   const [peerPickerQuery, setPeerPickerQuery] = useState<string>("");
   const [peerPrompt, setPeerPrompt] = useState<string>("");
   const [peerPromptsExpanded, setPeerPromptsExpanded] = useState(false);
+  const [batchCount, setBatchCount] = useState<number>(3);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -444,7 +446,28 @@ export default function GenerationDashboard() {
       const res = await fetch(`/api/peer-reviews/default-prompts?persona=${encodeURIComponent(peerPersona)}`);
       return res.json();
     },
-    enabled: activeType === "peer-review",
+    enabled: activeType === "peer-review" || activeType === "peer-review-batch",
+  });
+
+  const { data: eligibleCountData, isFetching: eligibleFetching } = useQuery<{ eligibleCount: number; total: number }>({
+    queryKey: ["/api/peer-reviews/eligible-count", selectedJournal, peerPersona, modelConfig.modelName],
+    queryFn: async () => {
+      const res = await fetch(`/api/peer-reviews/eligible-count?journalId=${encodeURIComponent(selectedJournal)}&persona=${encodeURIComponent(peerPersona)}&modelName=${encodeURIComponent(modelConfig.modelName || "")}`);
+      if (!res.ok) throw new Error("Failed to load eligible count");
+      return res.json();
+    },
+    enabled: activeType === "peer-review-batch",
+  });
+
+  const { data: batchStatus } = useQuery<{ total: number; done: number; failed: number; pending: number; complete: boolean; items: Array<{ id: string; status: string; paperTitle: string | null; recommendation: string | null }> }>({
+    queryKey: ["/api/peer-reviews/batch", activeBatchId],
+    queryFn: async () => {
+      const res = await fetch(`/api/peer-reviews/batch/${activeBatchId}`);
+      if (!res.ok) throw new Error("Failed to load batch status");
+      return res.json();
+    },
+    enabled: !!activeBatchId,
+    refetchInterval: (query) => (query.state.data?.complete ? false : 4000),
   });
 
   interface PeerAvailablePaper { documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[]; lockedCombos: string[] }
@@ -515,7 +538,7 @@ export default function GenerationDashboard() {
       if (!ethicsPrompt2Edited) setEthicsPrompt2(defaultEthicsPrompts.prompt2);
       if (!ethicsPrompt3Edited) setEthicsPrompt3(defaultEthicsPrompts.prompt3);
     }
-    if (activeType === "peer-review" && defaultPeerPrompts) {
+    if ((activeType === "peer-review" || activeType === "peer-review-batch") && defaultPeerPrompts) {
       setPeerPrompt(defaultPeerPrompts.prompt);
     }
   }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, defaultEthicsPrompts, defaultPeerPrompts, reviewMode, peerPersona]);
@@ -687,6 +710,39 @@ export default function GenerationDashboard() {
     },
   });
 
+  const generatePeerBatchMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/peer-reviews/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          journalId: selectedJournal,
+          persona: peerPersona,
+          count: batchCount,
+          includeEthicsCoauthor: peerIncludeEthics,
+          prompt: peerPrompt || undefined,
+          orchestratorName: orchestratorName || undefined,
+          agentDescription: agentDescription || undefined,
+          providerMode: modelConfig.providerMode,
+          modelProvider: modelConfig.provider,
+          modelName: modelConfig.modelName,
+          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to start batch");
+      }
+      return res.json() as Promise<{ batchId: string; total: number }>;
+    },
+    onSuccess: (data) => {
+      setActiveBatchId(data.batchId);
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews/available-papers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews/eligible-count"] });
+    },
+  });
+
   const clearHistoryMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/generation/history", { method: "DELETE" });
@@ -747,15 +803,26 @@ export default function GenerationDashboard() {
     peerSelectedDocId.length > 0 && peerPrompt.trim().length > 0 &&
     (modelConfig.providerMode === "byoc" || peerStatus?.remaining === null || (peerStatus?.remaining ?? 1) > 0);
 
+  const batchIsPending = generatePeerBatchMutation.isPending;
+  const eligibleCount = eligibleCountData?.eligibleCount ?? null;
+  const batchRunning = !!activeBatchId && batchStatus && !batchStatus.complete;
+  const perRunCredits = modelConfig.providerMode === "platform"
+    ? estimatePerRunCredits(modelConfig.modelName, "peer-review", peerIncludeEthics ? 2 : 1)
+    : null;
+  const totalBatchCredits = perRunCredits !== null ? perRunCredits * batchCount : null;
+  const canSubmitBatch = !batchIsPending && !batchRunning && byocReady &&
+    peerPrompt.trim().length > 0 && batchCount >= 1 &&
+    (eligibleCount === null || batchCount <= eligibleCount);
+
   const modelSelectorEl = (
     <ModelSelector
       value={modelConfig}
       onChange={setModelConfig}
-      rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : activeType === "peer-review" ? peerStatus : reviewStatus}
+      rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : activeType === "peer-review" ? peerStatus : activeType === "peer-review-batch" ? null : reviewStatus}
       limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "publication audit generations" : activeType === "peer-review" ? "peer review generations" : "review generations"}
       hasPlatformAccess={hasPlatformAccess}
-      activeType={activeType as "editorial" | "literature-review" | "ethics-report" | "peer-review"}
-      costMultiplier={activeType === "peer-review" && peerIncludeEthics ? 2 : 1}
+      activeType={(activeType === "peer-review-batch" ? "peer-review" : activeType) as "editorial" | "literature-review" | "ethics-report" | "peer-review"}
+      costMultiplier={(activeType === "peer-review" || activeType === "peer-review-batch") && peerIncludeEthics ? 2 : 1}
     />
   );
 
@@ -893,6 +960,9 @@ export default function GenerationDashboard() {
                                   setPeerSelectedDocId("");
                                   setPeerSelectedTitle("");
                                   setPeerPickerQuery("");
+                                } else if (workflow.id === "semi-autonomous-cycle") {
+                                  setActiveType("peer-review-batch");
+                                  setActiveBatchId(null);
                                 } else if (workflow.id === "editorial") {
                                   setActiveType("editorial");
                                   setPromptManuallyEdited(false);
@@ -947,6 +1017,8 @@ export default function GenerationDashboard() {
                       <><Info className="w-5 h-5 text-primary" /> Audit a publication</>
                     ) : activeType === "peer-review" ? (
                       <><BookOpen className="w-5 h-5 text-primary" /> Generate Peer Review</>
+                    ) : activeType === "peer-review-batch" ? (
+                      <><RotateCcw className="w-5 h-5 text-primary" /> Semi-autonomous research cycle</>
                     ) : (
                       <><BookOpen className="w-5 h-5 text-primary" /> Generate Literature Review</>
                     )}
@@ -958,6 +1030,8 @@ export default function GenerationDashboard() {
                       ? "Run a structured 3-part publication audit (paper-by-paper → systemic → consolidated flags) of a journal's recent publications."
                       : activeType === "peer-review"
                       ? "Run a structured 3-part peer review of a single submitted paper. Each persona (basic / innovation / adversarial) can review a paper once. Optionally add the H Research Standards Verification Agent as a parallel co-author."
+                      : activeType === "peer-review-batch"
+                      ? "Produce a batch of peer reviews. Pick how many to run — papers not yet reviewed by the selected persona + model are chosen at random and reviewed one after another."
                       : "Configure and generate a literature review on a specific research question."}
                   </p>
                 </div>
@@ -1146,7 +1220,8 @@ export default function GenerationDashboard() {
                   </div>
                 </div>
 
-                {activeType === "peer-review" && (() => {
+                {(activeType === "peer-review" || activeType === "peer-review-batch") && (() => {
+                  const isBatch = activeType === "peer-review-batch";
                   const papers = peerAvailableData?.papers || [];
                   const filtered = peerPickerQuery.trim()
                     ? papers.filter(p =>
@@ -1202,6 +1277,36 @@ export default function GenerationDashboard() {
                         </label>
                       </div>
 
+                      {isBatch && (
+                        <div className="space-y-3" data-testid="section-batch-count">
+                          <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block">
+                            3. How many peer reviews to produce
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={eligibleCount ?? 25}
+                            value={batchCount}
+                            onChange={(e) => setBatchCount(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+                            className="w-32 bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
+                            data-testid="input-batch-count"
+                          />
+                          <p className="text-[10px] font-mono text-muted-foreground/60">
+                            {eligibleFetching
+                              ? "Counting papers not yet reviewed by this persona + model…"
+                              : eligibleCount === null
+                                ? "Papers are chosen at random among those not yet reviewed by the selected persona + model."
+                                : `${eligibleCount} paper${eligibleCount === 1 ? "" : "s"} available for ${peerPersona} + this model. They'll be chosen at random.`}
+                          </p>
+                          {eligibleCount !== null && batchCount > eligibleCount && (
+                            <p className="text-[10px] font-mono text-red-400" data-testid="text-batch-count-error">
+                              Only {eligibleCount} paper{eligibleCount === 1 ? "" : "s"} available — lower the count to {eligibleCount} or fewer.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {!isBatch && (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block">
@@ -1317,6 +1422,7 @@ export default function GenerationDashboard() {
                           </div>
                         )}
                       </div>
+                      )}
 
                       <div>
                         <button
@@ -1608,28 +1714,73 @@ export default function GenerationDashboard() {
                 )}
 
                 <div className="border-t border-border/30 pt-6">
-                  <button
-                    onClick={() => {
-                      if (activeType === "editorial") generateEditorialMutation.mutate();
-                      else if (activeType === "ethics-report") generateEthicsMutation.mutate();
-                      else if (activeType === "peer-review") generatePeerReviewMutation.mutate();
-                      else generateReviewMutation.mutate();
-                    }}
-                    disabled={
-                      activeType === "editorial" ? !canSubmitEditorial
-                      : activeType === "ethics-report" ? !canSubmitEthics
-                      : activeType === "peer-review" ? !canSubmitPeer
-                      : !canSubmitReview
-                    }
-                    className="px-8 py-3 bg-primary text-white font-mono text-sm tracking-widest hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(124,58,237,0.2)] hover:shadow-[0_0_30px_rgba(124,58,237,0.4)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none flex items-center gap-2"
-                    data-testid="button-generate"
-                  >
-                    {(editorialIsPending || reviewIsPending || ethicsIsPending || peerIsPending) ? (
-                      <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</>
-                    ) : (
-                      <>{activeType === "editorial" ? <PenTool className="w-4 h-4" /> : activeType === "ethics-report" ? <Info className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />} Generate</>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <button
+                      onClick={() => {
+                        if (activeType === "editorial") generateEditorialMutation.mutate();
+                        else if (activeType === "ethics-report") generateEthicsMutation.mutate();
+                        else if (activeType === "peer-review") generatePeerReviewMutation.mutate();
+                        else if (activeType === "peer-review-batch") generatePeerBatchMutation.mutate();
+                        else generateReviewMutation.mutate();
+                      }}
+                      disabled={
+                        activeType === "editorial" ? !canSubmitEditorial
+                        : activeType === "ethics-report" ? !canSubmitEthics
+                        : activeType === "peer-review" ? !canSubmitPeer
+                        : activeType === "peer-review-batch" ? !canSubmitBatch
+                        : !canSubmitReview
+                      }
+                      className="px-8 py-3 bg-primary text-white font-mono text-sm tracking-widest hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(124,58,237,0.2)] hover:shadow-[0_0_30px_rgba(124,58,237,0.4)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none flex items-center gap-2"
+                      data-testid="button-generate"
+                    >
+                      {(editorialIsPending || reviewIsPending || ethicsIsPending || peerIsPending || batchIsPending) ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</>
+                      ) : activeType === "peer-review-batch" ? (
+                        <><RotateCcw className="w-4 h-4" /> Produce {batchCount} peer review{batchCount === 1 ? "" : "s"}</>
+                      ) : (
+                        <>{activeType === "editorial" ? <PenTool className="w-4 h-4" /> : activeType === "ethics-report" ? <Info className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />} Generate</>
+                      )}
+                    </button>
+                    {activeType === "peer-review-batch" && (
+                      <span className="text-xs font-mono text-muted-foreground/70" data-testid="text-batch-credits">
+                        {totalBatchCredits !== null
+                          ? `Estimated total: ~${totalBatchCredits} credit${totalBatchCredits === 1 ? "" : "s"} (${perRunCredits}/review × ${batchCount})`
+                          : "Uses your own API key (BYOC) — no platform credits."}
+                      </span>
                     )}
-                  </button>
+                  </div>
+
+                  {activeType === "peer-review-batch" && activeBatchId && batchStatus && (
+                    <div className="mt-4 border border-border/40 bg-muted/5 p-4 space-y-2" data-testid="section-batch-progress">
+                      <div className="flex items-center justify-between text-xs font-mono">
+                        <span className="text-foreground/80">
+                          {batchStatus.complete ? "Batch complete" : "Running batch…"} — {batchStatus.done + batchStatus.failed}/{batchStatus.total}
+                        </span>
+                        <span className="text-muted-foreground/60">
+                          {batchStatus.done} done{batchStatus.failed > 0 ? ` · ${batchStatus.failed} failed` : ""} · {batchStatus.pending} pending
+                        </span>
+                      </div>
+                      <div className="h-1 w-full bg-border/30">
+                        <div
+                          className="h-1 bg-primary transition-all"
+                          style={{ width: `${Math.round(((batchStatus.done + batchStatus.failed) / Math.max(1, batchStatus.total)) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="space-y-1 max-h-48 overflow-y-auto">
+                        {batchStatus.items.map((it) => (
+                          <div key={it.id} className="flex items-center gap-2 text-[10px] font-mono">
+                            {it.status === "completed" ? <CheckCircle className="w-3 h-3 text-green-400 flex-shrink-0" />
+                              : it.status === "failed" ? <XCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
+                              : <Clock className="w-3 h-3 text-muted-foreground/50 flex-shrink-0 animate-pulse" />}
+                            <span className="truncate text-muted-foreground/70 flex-1">{it.paperTitle || it.id}</span>
+                            {it.status === "completed" && (
+                              <Link href={`/peer-reviews/${it.id}`} className="text-primary underline underline-offset-2 flex-shrink-0">View</Link>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {generateEditorialMutation.isSuccess && (
                     <p className="text-[10px] font-mono text-green-400 mt-3" data-testid="text-success">
@@ -1651,9 +1802,9 @@ export default function GenerationDashboard() {
                       Peer review submitted — 3-part review in progress{peerIncludeEthics ? " with parallel ethics co-author" : ""}.
                     </p>
                   )}
-                  {(generateEditorialMutation.isError || generateReviewMutation.isError || generateEthicsMutation.isError || generatePeerReviewMutation.isError) && (
+                  {(generateEditorialMutation.isError || generateReviewMutation.isError || generateEthicsMutation.isError || generatePeerReviewMutation.isError || generatePeerBatchMutation.isError) && (
                     <p className="text-[10px] font-mono text-red-400 mt-3" data-testid="text-error">
-                      {((generateEditorialMutation.error || generateReviewMutation.error || generateEthicsMutation.error || generatePeerReviewMutation.error) as Error)?.message}
+                      {((generateEditorialMutation.error || generateReviewMutation.error || generateEthicsMutation.error || generatePeerReviewMutation.error || generatePeerBatchMutation.error) as Error)?.message}
                     </p>
                   )}
                 </div>

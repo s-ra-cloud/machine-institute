@@ -13,6 +13,7 @@ import { fromZodError } from "zod-validation-error";
 import { z } from "zod";
 import path from "path";
 import fs from "fs";
+import { randomUUID } from "crypto";
 import OpenAI from "openai";
 import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
@@ -2023,83 +2024,113 @@ I will now provide the papers.`;
     return res.json({ prompt: BR_PROMPT });
   });
 
+  interface PeerAvailablePaper {
+    documentId: string; title: string; authors: string; date: string; url: string;
+    reviewedPersonas: string[]; lockedCombos: string[];
+  }
+
+  // Shared computation for the peer-review paper catalogue: fetches the journal's
+  // Future Science corpus + project papers, filters out the institute's own
+  // generated publications, and annotates each with which persona+model combos
+  // already have a (non-failed) review. Reused by the single picker, the
+  // batch eligible-count endpoint, and the batch runner so the "already
+  // reviewed" logic lives in exactly one place.
+  async function getPeerAvailablePapers(journalId: string): Promise<{ initiativeSlug: string; papers: PeerAvailablePaper[] } | null> {
+    const initiativeDocId = INITIATIVE_DOC_IDS[journalId];
+    if (!initiativeDocId) return null;
+    const initiativeSlug = INITIATIVE_SLUGS[journalId] || journalId;
+
+    const [fsData, reviewedRows, projectPapers] = await Promise.all([
+      fetchAbstractsAndKeywords([], initiativeDocId).catch(() => ({ abstracts: [] as any[] })),
+      storage.getReviewedPaperPersonasForJournal(journalId),
+      storage.getProjectPapers(journalId),
+    ]);
+
+    const isOwnPublication = (title: string, authors: string): boolean => {
+      const t = (title || "").toLowerCase().trim();
+      const a = (authors || "").toLowerCase();
+      if (t.startsWith("single-paper ethics audit") || t.startsWith("publication audit")) return true;
+      if (t.startsWith("field ethics report") || t.startsWith("publication audit field report")) return true;
+      if (t.startsWith("literature review:")) return true;
+      if (t.startsWith("editorial:")) return true;
+      if (t.startsWith("basic peer review:") || t.startsWith("adversarial peer review:") || t.startsWith("innovation peer review:") || t.startsWith("rigorous peer review:")) return true;
+      if (/machinstit\s+\S+(h|ber|blr|alr|o|br|ar|ir|rr)-n\d/.test(a)) return true;
+      return false;
+    };
+
+    // Build two maps per documentId:
+    //   reviewedPersonas: Set<persona>   — for the display badge (which personas have any review)
+    //   lockedCombos: Set<"persona:model"> — for model-aware lock check
+    const reviewedPersonasMap = new Map<string, Set<string>>();
+    const lockedCombosMap = new Map<string, Set<string>>();
+    for (const r of reviewedRows) {
+      if (!reviewedPersonasMap.has(r.documentId)) reviewedPersonasMap.set(r.documentId, new Set());
+      reviewedPersonasMap.get(r.documentId)!.add(r.persona);
+      if (!lockedCombosMap.has(r.documentId)) lockedCombosMap.set(r.documentId, new Set());
+      lockedCombosMap.get(r.documentId)!.add(`${r.persona}:${r.modelName || ""}`);
+    }
+
+    const seen = new Set<string>();
+    const out: PeerAvailablePaper[] = [];
+    for (const a of fsData.abstracts) {
+      const key = a.documentId;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      if (isOwnPublication(a.title, a.authors)) continue;
+      out.push({
+        documentId: a.documentId,
+        title: a.title,
+        authors: a.authors,
+        date: a.date,
+        url: `https://future-science.org/${initiativeSlug}/${a.documentId}`,
+        reviewedPersonas: Array.from(reviewedPersonasMap.get(a.documentId) || []),
+        lockedCombos: Array.from(lockedCombosMap.get(a.documentId) || []),
+      });
+    }
+    for (const p of projectPapers) {
+      if (!p.sourceDocumentId || seen.has(p.sourceDocumentId)) continue;
+      seen.add(p.sourceDocumentId);
+      if (isOwnPublication(p.title, p.authors)) continue;
+      out.push({
+        documentId: p.sourceDocumentId,
+        title: p.title,
+        authors: p.authors,
+        date: p.date,
+        url: p.url || `https://future-science.org/${initiativeSlug}/${p.sourceDocumentId}`,
+        reviewedPersonas: Array.from(reviewedPersonasMap.get(p.sourceDocumentId) || []),
+        lockedCombos: Array.from(lockedCombosMap.get(p.sourceDocumentId) || []),
+      });
+    }
+    out.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    return { initiativeSlug, papers: out };
+  }
+
   app.get("/api/peer-reviews/available-papers", async (req, res) => {
     try {
       const journalId = (req.query.journalId as string | undefined) || "mirror";
-      const initiativeDocId = INITIATIVE_DOC_IDS[journalId];
-      if (!initiativeDocId) return res.status(400).json({ error: "Unknown journal." });
-      const initiativeSlug = INITIATIVE_SLUGS[journalId] || journalId;
-
-      const [fsData, reviewedRows, projectPapers] = await Promise.all([
-        fetchAbstractsAndKeywords([], initiativeDocId).catch(() => ({ abstracts: [] })),
-        storage.getReviewedPaperPersonasForJournal(journalId),
-        storage.getProjectPapers(journalId),
-      ]);
-      const reviewedMap = new Map<string, Set<string>>();
-      for (const r of reviewedRows) {
-        if (!reviewedMap.has(r.documentId)) reviewedMap.set(r.documentId, new Set());
-        reviewedMap.get(r.documentId)!.add(r.persona);
-      }
-
-      const isOwnPublication = (title: string, authors: string): boolean => {
-        const t = (title || "").toLowerCase().trim();
-        const a = (authors || "").toLowerCase();
-        if (t.startsWith("single-paper ethics audit") || t.startsWith("publication audit")) return true;
-        if (t.startsWith("field ethics report") || t.startsWith("publication audit field report")) return true;
-        if (t.startsWith("literature review:")) return true;
-        if (t.startsWith("editorial:")) return true;
-        if (t.startsWith("basic peer review:") || t.startsWith("adversarial peer review:") || t.startsWith("innovation peer review:") || t.startsWith("rigorous peer review:")) return true;
-        if (/machinstit\s+\S+(h|ber|blr|alr|o|br|ar|ir|rr)-n\d/.test(a)) return true;
-        return false;
-      };
-
-      // Build two maps per documentId:
-      //   reviewedPersonas: Set<persona>   — for the display badge (which personas have any review)
-      //   lockedCombos: Set<"persona:model"> — for model-aware lock check in the UI
-      const reviewedPersonasMap = new Map<string, Set<string>>();
-      const lockedCombosMap = new Map<string, Set<string>>();
-      for (const r of reviewedRows) {
-        if (!reviewedPersonasMap.has(r.documentId)) reviewedPersonasMap.set(r.documentId, new Set());
-        reviewedPersonasMap.get(r.documentId)!.add(r.persona);
-        if (!lockedCombosMap.has(r.documentId)) lockedCombosMap.set(r.documentId, new Set());
-        lockedCombosMap.get(r.documentId)!.add(`${r.persona}:${r.modelName || ""}`);
-      }
-
-      const seen = new Set<string>();
-      const out: Array<{ documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[]; lockedCombos: string[] }> = [];
-      for (const a of fsData.abstracts) {
-        const key = a.documentId;
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        if (isOwnPublication(a.title, a.authors)) continue;
-        out.push({
-          documentId: a.documentId,
-          title: a.title,
-          authors: a.authors,
-          date: a.date,
-          url: `https://future-science.org/${initiativeSlug}/${a.documentId}`,
-          reviewedPersonas: Array.from(reviewedPersonasMap.get(a.documentId) || []),
-          lockedCombos: Array.from(lockedCombosMap.get(a.documentId) || []),
-        });
-      }
-      for (const p of projectPapers) {
-        if (!p.sourceDocumentId || seen.has(p.sourceDocumentId)) continue;
-        seen.add(p.sourceDocumentId);
-        if (isOwnPublication(p.title, p.authors)) continue;
-        out.push({
-          documentId: p.sourceDocumentId,
-          title: p.title,
-          authors: p.authors,
-          date: p.date,
-          url: p.url || `https://future-science.org/${initiativeSlug}/${p.sourceDocumentId}`,
-          reviewedPersonas: Array.from(reviewedPersonasMap.get(p.sourceDocumentId) || []),
-          lockedCombos: Array.from(lockedCombosMap.get(p.sourceDocumentId) || []),
-        });
-      }
-      out.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-      res.json({ papers: out });
+      const result = await getPeerAvailablePapers(journalId);
+      if (!result) return res.status(400).json({ error: "Unknown journal." });
+      res.json({ papers: result.papers });
     } catch (err: any) {
       console.error("Error listing peer-review available papers:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // How many papers remain un-reviewed by a given persona+model — used by the
+  // semi-autonomous batch UI to validate the requested count before running.
+  app.get("/api/peer-reviews/eligible-count", async (req, res) => {
+    try {
+      const journalId = (req.query.journalId as string | undefined) || "mirror";
+      const persona = (req.query.persona as string | undefined) || "bR";
+      const modelName = (req.query.modelName as string | undefined) || "";
+      const result = await getPeerAvailablePapers(journalId);
+      if (!result) return res.status(400).json({ error: "Unknown journal." });
+      const combo = `${persona}:${modelName}`;
+      const eligible = result.papers.filter(p => !p.lockedCombos.includes(combo));
+      res.json({ eligibleCount: eligible.length, total: result.papers.length });
+    } catch (err: any) {
+      console.error("Error computing peer-review eligible count:", err);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -2139,6 +2170,210 @@ I will now provide the papers.`;
   });
 
   const peerReviewRateLimit = new Map<string, number>();
+
+  // In-memory registry of batch peer-review runs (semi-autonomous cycle).
+  // Progress is derived from the DB status of each created review, so a server
+  // restart only loses the batch grouping — the individual reviews behave
+  // exactly as single reviews do today.
+  interface PeerReviewBatch {
+    id: string;
+    reviewIds: string[];
+    total: number;
+    persona: string;
+    modelName: string;
+    journalId: string;
+    userId: string | null;
+    createdAt: number;
+  }
+  const peerReviewBatches = new Map<string, PeerReviewBatch>();
+  const peerReviewBatchRateLimit = new Map<string, number>();
+
+  function shuffleInPlace<T>(arr: T[]): T[] {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const MAX_BATCH_PEER_REVIEWS = 25;
+
+  app.post("/api/peer-reviews/batch", requireAuth, async (req, res) => {
+    try {
+      const {
+        journalId, persona, count,
+        prompt,
+        modelProvider, modelName, providerMode, byocApiKey,
+        orchestratorName, agentDescription,
+        includeEthicsCoauthor,
+      } = req.body;
+
+      const VALID_PROVIDER_MODES = ["platform", "byoc"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      const VALID_PERSONAS: PeerReviewPersona[] = ["bR", "iR", "aR", "rR"];
+      if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
+      if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
+      const effectivePersona: PeerReviewPersona = VALID_PERSONAS.includes(persona) ? persona : "bR";
+
+      const requestedCount = Math.floor(Number(count));
+      if (!Number.isFinite(requestedCount) || requestedCount < 1) return res.status(400).json({ error: "count must be a positive whole number." });
+      if (requestedCount > MAX_BATCH_PEER_REVIEWS) return res.status(400).json({ error: `You can run at most ${MAX_BATCH_PEER_REVIEWS} peer reviews per batch.` });
+
+      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
+      const user = (req as any).user;
+      const isPlatform = providerMode !== "byoc";
+
+      if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
+        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
+      }
+      if (isPlatform && !process.env.OPENROUTER_API_KEY) {
+        return res.status(503).json({ error: "Peer review generation is not configured. OPENROUTER_API_KEY is missing." });
+      }
+      // NOTE: batch runs intentionally bypass the per-user 5/24h platform cap.
+      // Platform mode is already restricted to the allowlist above.
+      if (providerMode === "byoc") {
+        if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
+        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
+        if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
+        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
+      }
+      {
+        const clientIp = req.ip || "unknown";
+        const last = peerReviewBatchRateLimit.get(clientIp) || 0;
+        if (Date.now() - last < 30000) return res.status(429).json({ error: "Please wait at least 30 seconds between batch runs." });
+        peerReviewBatchRateLimit.set(clientIp, Date.now());
+      }
+
+      const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
+
+      const modelConfig: ModelProviderConfig = {
+        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
+        provider: modelProvider || "openrouter",
+        modelName: modelName || "",
+        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
+      };
+      const resolvedModel = resolveModelName(modelConfig);
+
+      // Pick N papers at random among those not yet reviewed by this persona+model.
+      const available = await getPeerAvailablePapers(effectiveJournalId);
+      if (!available) return res.status(400).json({ error: "Unknown journal." });
+      const combo = `${effectivePersona}:${resolvedModel}`;
+      const eligible = available.papers.filter(p => !p.lockedCombos.includes(combo));
+      if (eligible.length < requestedCount) {
+        return res.status(409).json({
+          error: `Only ${eligible.length} paper${eligible.length === 1 ? "" : "s"} remain un-reviewed by the ${effectivePersona} persona with this model. Reduce the count to ${eligible.length} or fewer.`,
+          maxAvailable: eligible.length,
+        });
+      }
+      const selected = shuffleInPlace([...eligible]).slice(0, requestedCount);
+
+      const defaultPrompt = getPeerReviewPrompt(effectivePersona);
+      const effectivePrompt = prompt || defaultPrompt;
+      const effectiveOrchestratorName = orchestratorName || buildConventionName(resolvedModel, effectivePersona);
+      const includeEthics = !!includeEthicsCoauthor;
+
+      // Reserve all reviews up front (status "pending") so their locks are taken
+      // atomically and no two batch entries can collide on the same paper.
+      const created: Array<{ reviewId: string; data: any }> = [];
+      for (const paper of selected) {
+        const parsed = insertPeerReviewSchema.safeParse({
+          projectId: effectiveJournalId,
+          agentId: effectivePersona,
+          journalId: effectiveJournalId,
+          persona: effectivePersona,
+          documentId: paper.documentId,
+          paperTitle: paper.title || null,
+          includeEthicsCoauthor: includeEthics,
+          prompt1: effectivePrompt,
+          prompt2: "",
+          prompt3: "",
+          userId: user?.id || null,
+          orchestratorName: effectiveOrchestratorName,
+          agentDescription: agentDescription || null,
+          modelProvider: modelConfig.provider,
+          modelName: resolvedModel,
+          providerMode: modelConfig.providerMode,
+        });
+        if (!parsed.success) continue;
+        const review = await storage.createPeerReview(parsed.data);
+        if (review) created.push({ reviewId: review.id, data: parsed.data });
+      }
+
+      // All-or-nothing: if concurrent requests grabbed some of the selected
+      // papers, roll back what we reserved and report the new availability.
+      if (created.length < requestedCount) {
+        await Promise.all(created.map(c => storage.deletePeerReview(c.reviewId).catch(() => {})));
+        const remaining = created.length + Math.max(0, eligible.length - selected.length);
+        return res.status(409).json({
+          error: `Could not reserve ${requestedCount} papers — some were just claimed by another run. Try again${remaining > 0 ? ` with ${remaining} or fewer` : " later"}.`,
+          maxAvailable: remaining,
+        });
+      }
+
+      const batchId = randomUUID();
+      peerReviewBatches.set(batchId, {
+        id: batchId,
+        reviewIds: created.map(c => c.reviewId),
+        total: created.length,
+        persona: effectivePersona,
+        modelName: resolvedModel,
+        journalId: effectiveJournalId,
+        userId: user?.id || null,
+        createdAt: Date.now(),
+      });
+
+      res.status(201).json({ batchId, total: created.length, reviewIds: created.map(c => c.reviewId) });
+
+      // Generate reviews sequentially in the background. A single failure is
+      // skipped (its row is marked failed inside generatePeerReviewBackground)
+      // and the batch continues.
+      (async () => {
+        for (const { reviewId, data } of created) {
+          try {
+            await generatePeerReviewBackground(reviewId, data, { ...modelConfig }, includeEthics);
+          } catch (err) {
+            console.error(`Batch ${batchId}: peer review ${reviewId} failed:`, err);
+          }
+        }
+      })().catch(err => console.error(`Batch ${batchId} runner crashed:`, err));
+    } catch (err: any) {
+      console.error("Error creating peer review batch:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/peer-reviews/batch/:id", requireAuth, async (req, res) => {
+    try {
+      const batch = peerReviewBatches.get(String(req.params.id));
+      if (!batch) return res.status(404).json({ error: "Batch not found." });
+      const user = (req as any).user;
+      const isAdmin = user?.email === "sacharaoult@gmail.com";
+      if (batch.userId && batch.userId !== user?.id && !isAdmin) {
+        return res.status(404).json({ error: "Batch not found." });
+      }
+      const reviews = await Promise.all(batch.reviewIds.map(id => storage.getPeerReviewById(id)));
+      const items = reviews
+        .filter((r): r is NonNullable<typeof r> => !!r)
+        .map(r => ({ id: r.id, status: r.status, paperTitle: r.paperTitle, recommendation: r.recommendation }));
+      const done = items.filter(i => i.status === "completed").length;
+      const failed = items.filter(i => i.status === "failed").length;
+      const complete = done + failed >= batch.total;
+      res.json({
+        batchId: batch.id,
+        total: batch.total,
+        done,
+        failed,
+        pending: batch.total - done - failed,
+        complete,
+        persona: batch.persona,
+        modelName: batch.modelName,
+        items,
+      });
+    } catch (err: any) {
+      console.error("Error fetching peer review batch:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
 
   app.post("/api/peer-reviews", requireAuth, async (req, res) => {
     try {

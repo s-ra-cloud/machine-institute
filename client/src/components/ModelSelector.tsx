@@ -66,6 +66,19 @@ function formatCostBadge(modelKey: string, activeType?: Props["activeType"], mul
   return `~${cost} credit${cost === 1 ? "" : "s"} / run`;
 }
 
+// Per-run credit estimate for a given model + generation type, used by the
+// batch runner to show a total (per-run × count) next to the run button.
+// Returns null for models/types with no known weight (e.g. BYOC-typed models).
+export function estimatePerRunCredits(
+  modelKey: string,
+  activeType: NonNullable<Props["activeType"]>,
+  multiplier: number = 1,
+): number | null {
+  const base = MODEL_AGENT_CREDITS[modelKey]?.[activeType];
+  if (!base) return null;
+  return Math.max(1, Math.round(base * multiplier));
+}
+
 export function ModelSelector({ value, onChange, rateLimitInfo, limitLabel, hasPlatformAccess = true, activeType, costMultiplier = 1 }: Props) {
   const [tab, setTab] = useState<"platform" | "byoc">(
     hasPlatformAccess ? value.providerMode : "byoc"
