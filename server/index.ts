@@ -5,7 +5,7 @@ import { serveStatic } from "./static";
 import { seedDatabase } from "./seed";
 import { setupAuth } from "./auth";
 import { db } from "./db";
-import { researchEvents, literatureReviews, editorials, ethicsReports } from "@shared/schema";
+import { researchEvents, literatureReviews, editorials, ethicsReports, peerReviews } from "@shared/schema";
 import { inArray, sql, eq, or } from "drizzle-orm";
 import { createServer } from "http";
 
@@ -99,6 +99,12 @@ app.use((req, res, next) => {
   }
 
   try {
+    await db.execute(sql`ALTER TABLE peer_reviews ADD COLUMN IF NOT EXISTS batch_id VARCHAR`);
+  } catch (err) {
+    console.error("Schema migration (peer_reviews.batch_id) failed (non-fatal):", err);
+  }
+
+  try {
     const stuckLRs = await db
       .update(literatureReviews)
       .set({ status: "failed", contentHtml: "<p>Generation interrupted by server restart. Please try again.</p>" })
@@ -122,6 +128,17 @@ app.use((req, res, next) => {
       .returning({ id: ethicsReports.id });
     if (stuckERs.length > 0) {
       console.log(`Marked ${stuckERs.length} stuck ethics report(s) as failed on startup.`);
+    }
+    // Peer reviews left "pending"/"generating" were orphaned by the restart —
+    // their in-process generation loop is gone. Mark them failed so batch
+    // progress panels resolve instead of showing them pending forever.
+    const stuckPRs = await db
+      .update(peerReviews)
+      .set({ status: "failed", contentHtml: "<p>Generation interrupted by server restart. Please try again.</p>" })
+      .where(or(eq(peerReviews.status, "generating"), eq(peerReviews.status, "pending")))
+      .returning({ id: peerReviews.id });
+    if (stuckPRs.length > 0) {
+      console.log(`Marked ${stuckPRs.length} stuck peer review(s) as failed on startup.`);
     }
   } catch (err) {
     console.error("Stuck generation cleanup failed (non-fatal):", err);

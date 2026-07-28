@@ -75,6 +75,7 @@ export interface IStorage {
 
   createPeerReview(review: InsertPeerReview): Promise<PeerReview | null>;
   getPeerReviewById(id: string): Promise<PeerReview | undefined>;
+  getPeerReviewsByBatchId(batchId: string): Promise<PeerReview[]>;
   getPeerReviewsByProject(projectId: string): Promise<PeerReview[]>;
   getAllPeerReviews(): Promise<PeerReview[]>;
   updatePeerReview(id: string, updates: Partial<PeerReview>): Promise<PeerReview>;
@@ -474,6 +475,10 @@ export class DatabaseStorage implements IStorage {
   async getPeerReviewById(id: string): Promise<PeerReview | undefined> {
     const [row] = await db.select().from(peerReviews).where(eq(peerReviews.id, id));
     return row;
+  }
+
+  async getPeerReviewsByBatchId(batchId: string): Promise<PeerReview[]> {
+    return db.select().from(peerReviews).where(eq(peerReviews.batchId, batchId)).orderBy(peerReviews.createdAt);
   }
 
   async getPeerReviewsByProject(projectId: string): Promise<PeerReview[]> {

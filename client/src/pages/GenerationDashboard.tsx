@@ -255,7 +255,18 @@ export default function GenerationDashboard() {
   const [peerPrompt, setPeerPrompt] = useState<string>("");
   const [peerPromptsExpanded, setPeerPromptsExpanded] = useState(false);
   const [batchCount, setBatchCount] = useState<number>(3);
-  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  // Persist the active batch id so the progress panel survives page reloads
+  // (the batch itself is persisted server-side and survives restarts).
+  const [activeBatchId, setActiveBatchIdState] = useState<string | null>(() => {
+    try { return localStorage.getItem("activePeerReviewBatchId"); } catch { return null; }
+  });
+  const setActiveBatchId = (id: string | null) => {
+    setActiveBatchIdState(id);
+    try {
+      if (id) localStorage.setItem("activePeerReviewBatchId", id);
+      else localStorage.removeItem("activePeerReviewBatchId");
+    } catch {}
+  };
 
   const queryClient = useQueryClient();
 
@@ -463,11 +474,18 @@ export default function GenerationDashboard() {
     queryKey: ["/api/peer-reviews/batch", activeBatchId],
     queryFn: async () => {
       const res = await fetch(`/api/peer-reviews/batch/${activeBatchId}`);
+      if (res.status === 404) {
+        // Stale/unknown batch id (e.g. old localStorage entry) — clear it.
+        setActiveBatchId(null);
+        throw new Error("Batch not found");
+      }
       if (!res.ok) throw new Error("Failed to load batch status");
       return res.json();
     },
     enabled: !!activeBatchId,
-    refetchInterval: (query) => (query.state.data?.complete ? false : 4000),
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.complete || query.state.error ? false : 4000,
   });
 
   interface PeerAvailablePaper { documentId: string; title: string; authors: string; date: string; url: string; reviewedPersonas: string[]; lockedCombos: string[] }
@@ -962,7 +980,8 @@ export default function GenerationDashboard() {
                                   setPeerPickerQuery("");
                                 } else if (workflow.id === "semi-autonomous-cycle") {
                                   setActiveType("peer-review-batch");
-                                  setActiveBatchId(null);
+                                  // Keep any persisted activeBatchId so batch
+                                  // progress survives page reloads/restarts.
                                 } else if (workflow.id === "editorial") {
                                   setActiveType("editorial");
                                   setPromptManuallyEdited(false);

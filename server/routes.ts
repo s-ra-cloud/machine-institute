@@ -2171,21 +2171,9 @@ I will now provide the papers.`;
 
   const peerReviewRateLimit = new Map<string, number>();
 
-  // In-memory registry of batch peer-review runs (semi-autonomous cycle).
-  // Progress is derived from the DB status of each created review, so a server
-  // restart only loses the batch grouping — the individual reviews behave
-  // exactly as single reviews do today.
-  interface PeerReviewBatch {
-    id: string;
-    reviewIds: string[];
-    total: number;
-    persona: string;
-    modelName: string;
-    journalId: string;
-    userId: string | null;
-    createdAt: number;
-  }
-  const peerReviewBatches = new Map<string, PeerReviewBatch>();
+  // Batch peer-review runs (semi-autonomous cycle) are grouped by the
+  // persisted `batchId` column on peer_reviews, so batch progress is derived
+  // entirely from the DB and survives server restarts.
   const peerReviewBatchRateLimit = new Map<string, number>();
 
   function shuffleInPlace<T>(arr: T[]): T[] {
@@ -2274,6 +2262,7 @@ I will now provide the papers.`;
 
       // Reserve all reviews up front (status "pending") so their locks are taken
       // atomically and no two batch entries can collide on the same paper.
+      const batchId = randomUUID();
       const created: Array<{ reviewId: string; data: any }> = [];
       for (const paper of selected) {
         const parsed = insertPeerReviewSchema.safeParse({
@@ -2281,6 +2270,7 @@ I will now provide the papers.`;
           agentId: effectivePersona,
           journalId: effectiveJournalId,
           persona: effectivePersona,
+          batchId,
           documentId: paper.documentId,
           paperTitle: paper.title || null,
           includeEthicsCoauthor: includeEthics,
@@ -2310,18 +2300,6 @@ I will now provide the papers.`;
         });
       }
 
-      const batchId = randomUUID();
-      peerReviewBatches.set(batchId, {
-        id: batchId,
-        reviewIds: created.map(c => c.reviewId),
-        total: created.length,
-        persona: effectivePersona,
-        modelName: resolvedModel,
-        journalId: effectiveJournalId,
-        userId: user?.id || null,
-        createdAt: Date.now(),
-      });
-
       res.status(201).json({ batchId, total: created.length, reviewIds: created.map(c => c.reviewId) });
 
       // Generate reviews sequentially in the background. A single failure is
@@ -2344,29 +2322,29 @@ I will now provide the papers.`;
 
   app.get("/api/peer-reviews/batch/:id", requireAuth, async (req, res) => {
     try {
-      const batch = peerReviewBatches.get(String(req.params.id));
-      if (!batch) return res.status(404).json({ error: "Batch not found." });
+      const batchId = String(req.params.id);
+      const reviews = await storage.getPeerReviewsByBatchId(batchId);
+      if (reviews.length === 0) return res.status(404).json({ error: "Batch not found." });
       const user = (req as any).user;
       const isAdmin = user?.email === "sacharaoult@gmail.com";
-      if (batch.userId && batch.userId !== user?.id && !isAdmin) {
+      const ownerId = reviews[0].userId;
+      if (ownerId && ownerId !== user?.id && !isAdmin) {
         return res.status(404).json({ error: "Batch not found." });
       }
-      const reviews = await Promise.all(batch.reviewIds.map(id => storage.getPeerReviewById(id)));
-      const items = reviews
-        .filter((r): r is NonNullable<typeof r> => !!r)
-        .map(r => ({ id: r.id, status: r.status, paperTitle: r.paperTitle, recommendation: r.recommendation }));
+      const items = reviews.map(r => ({ id: r.id, status: r.status, paperTitle: r.paperTitle, recommendation: r.recommendation }));
       const done = items.filter(i => i.status === "completed").length;
       const failed = items.filter(i => i.status === "failed").length;
-      const complete = done + failed >= batch.total;
+      const total = items.length;
+      const complete = done + failed >= total;
       res.json({
-        batchId: batch.id,
-        total: batch.total,
+        batchId,
+        total,
         done,
         failed,
-        pending: batch.total - done - failed,
+        pending: total - done - failed,
         complete,
-        persona: batch.persona,
-        modelName: batch.modelName,
+        persona: reviews[0].persona,
+        modelName: reviews[0].modelName,
         items,
       });
     } catch (err: any) {

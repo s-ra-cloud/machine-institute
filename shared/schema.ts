@@ -359,6 +359,9 @@ export const peerReviews = pgTable("peer_reviews", {
   persona: peerReviewPersonaEnum("persona").notNull().default("bR"),
   documentId: text("document_id").notNull(),
   paperTitle: text("paper_title"),
+  // Groups reviews created by one semi-autonomous batch run. Persisted so the
+  // batch progress panel survives server restarts.
+  batchId: varchar("batch_id"),
   includeEthicsCoauthor: boolean("include_ethics_coauthor").notNull().default(false),
   ethicsReportId: varchar("ethics_report_id").references(() => ethicsReports.id, { onDelete: "set null" }),
   prompt1: text("prompt1").notNull(),
@@ -407,6 +410,7 @@ export const insertPeerReviewSchema = createInsertSchema(peerReviews).omit({
   persona: z.enum(["bR", "iR", "aR", "rR"]),
   documentId: z.string().min(1),
   paperTitle: z.string().nullable().optional(),
+  batchId: z.string().nullable().optional(),
   includeEthicsCoauthor: z.boolean().default(false),
   ethicsReportId: z.string().nullable().optional(),
   prompt1: z.string().min(1),
