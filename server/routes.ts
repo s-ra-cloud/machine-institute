@@ -1848,7 +1848,7 @@ I will now provide the papers.`;
       const initiativeSlug = INITIATIVE_SLUGS[journalId] || journalId;
 
       const [fsData, lockedIds, projectPapers] = await Promise.all([
-        fetchAbstractsAndKeywords([], initiativeDocId).catch(() => ({ abstracts: [] })),
+        fetchAbstractsAndKeywordsCached([], initiativeDocId).catch(() => ({ abstracts: [] })),
         storage.getAuditedPaperIdsForJournal(journalId),
         storage.getProjectPapers(journalId),
       ]);
