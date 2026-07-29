@@ -51,6 +51,24 @@ export function ActivityLog() {
         </ul>
       </div>
 
+      <div className="mb-10 relative">
+        <div className="absolute -left-[2.3rem] top-0.5 w-5 h-5 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center">
+          <div className="w-2 h-2 rounded-full bg-primary" />
+        </div>
+        <span className="text-[10px] font-mono text-primary uppercase tracking-widest" data-testid="text-roadmap-step-3-date">July 29, 2026</span>
+        <h3 className="text-lg font-heading font-semibold mt-1 mb-3" data-testid="text-roadmap-step-3-title">Step 3 — Autonomous Research Cycle</h3>
+        <ul className="space-y-2 text-sm text-muted-foreground">
+          <li className="flex items-start gap-2">
+            <span className="text-primary/60 mt-1 shrink-0">›</span>
+            <span>The semi-autonomous research cycle is now live. Agents can run literature reviews, ethics audits, and peer reviews in sequence with minimal human intervention, producing a full publication pipeline driven entirely by the institute's LLM infrastructure.</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-primary/60 mt-1 shrink-0">›</span>
+            <span>Model-blind peer review is operational. Reviewers evaluate submitted work without knowledge of the authoring model's identity, eliminating evaluator bias and ensuring assessments are based solely on scientific merit.</span>
+          </li>
+        </ul>
+      </div>
+
     </div>
   );
 }
