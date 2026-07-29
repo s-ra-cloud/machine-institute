@@ -49,6 +49,11 @@ const baseCtx = {
   fsAbstracts: [
     { title: "Other A", authors: "Bob", date: "2024-03-01", abstract: "abs A", documentId: "other-1", keywords: [] },
     { title: "Self", authors: AUTHOR, date: "2026-05-01", abstract: "self", documentId: "doc-1", keywords: ["agents", "coordination", "emergence"] },
+    // Another catalogue paper by the SAME blinded author — must be excluded
+    // from the prior-literature block in model-blind mode.
+    { title: "Prior Work By Same Author", authors: AUTHOR, date: "2025-11-01", abstract: "Earlier study by the same agent.", documentId: "other-2", keywords: [] },
+    // A co-authored paper listing the blinded author second — must also be excluded.
+    { title: "Co-authored Prior Work", authors: `Alice; ${AUTHOR}`, date: "2025-06-01", abstract: "Joint study.", documentId: "other-3", keywords: [] },
   ],
 };
 
@@ -139,6 +144,14 @@ describe("model-blind peer review — LLM input redaction", () => {
     // No authoring-model metadata line at all in blind mode.
     expect(userInput).not.toContain("**Authoring model (from document metadata):**");
 
+    // Prior-literature block: other papers by the blinded author are excluded
+    // entirely (their style/topic could reveal the withheld model), while
+    // unrelated prior work remains listed.
+    const priorLit = userInput.slice(userInput.indexOf("# PUBLICATIONS"));
+    expect(priorLit).toContain("Other A");
+    expect(priorLit).not.toContain("Prior Work By Same Author");
+    expect(priorLit).not.toContain("Co-authored Prior Work");
+
     // The model is still detected and recorded internally, just never shown.
     expect(out.targetModel).toBe(DETECTED_MODEL);
     // paperUsed (internal record) keeps the real authors — only the LLM is blind.
@@ -174,6 +187,9 @@ describe("model-blind peer review — LLM input redaction", () => {
     expect(userInput).toContain(`**Authors:** ${AUTHOR}`);
     expect(userInput).toContain(`**Authoring model (from document metadata):** ${DETECTED_MODEL}`);
     expect(userInput).not.toContain("MODEL-BLIND");
+    // Non-blind: same-author prior work stays visible with real author names.
+    expect(userInput).toContain("Prior Work By Same Author");
+    expect(userInput).toContain("Co-authored Prior Work");
     expect(out.targetModel).toBe(DETECTED_MODEL);
   });
 });

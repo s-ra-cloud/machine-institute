@@ -54,15 +54,38 @@ interface RunPeerReviewOptions {
   modelBlind?: boolean;
 }
 
-function buildPriorLiteratureBlock(fsAbstracts: Array<{ title: string; authors: string; date: string; abstract: string; documentId: string }>, currentDocumentId: string): string {
-  const others = fsAbstracts.filter(a => a.documentId !== currentDocumentId).slice(0, 30);
+function buildPriorLiteratureBlock(
+  fsAbstracts: Array<{ title: string; authors: string; date: string; abstract: string; documentId: string }>,
+  currentDocumentId: string,
+  opts?: {
+    /** Model-blind mode: exclude other papers by the blinded author entirely. */
+    excludeAuthors?: string;
+    /** Redactor applied to the assembled block as a final safety net. */
+    redact?: (text: string) => string;
+  },
+): string {
+  const excludeTokens = (opts?.excludeAuthors || "")
+    .split(/[,;]/)
+    .map(s => s.trim().toLowerCase())
+    .filter(s => s.length >= 4);
+  const others = fsAbstracts
+    .filter(a => a.documentId !== currentDocumentId)
+    // In model-blind mode, other papers by the same author could let the
+    // evaluator correlate style/topic and infer the withheld model — drop them.
+    .filter(a => {
+      if (excludeTokens.length === 0) return true;
+      const authors = (a.authors || "").toLowerCase();
+      return !excludeTokens.some(t => authors.includes(t));
+    })
+    .slice(0, 30);
   if (others.length === 0) return "(No prior literature available from this journal.)";
-  return others.map((a, i) => {
+  const redact = opts?.redact ?? ((t: string) => t);
+  return redact(others.map((a, i) => {
     const yearMatch = (a.date || "").match(/\d{4}/);
     const year = yearMatch ? yearMatch[0] : "n.d.";
     const firstAuthor = (a.authors || "Unknown").split(/[,;]/)[0].trim();
     return `[${i + 1}] ${firstAuthor} (${year}). "${a.title}".\n    Abstract: ${(a.abstract || "").slice(0, 800)}`;
-  }).join("\n\n");
+  }).join("\n\n"));
 }
 
 function buildEthicsCoauthorBlock(ethics: EthicsReviewOutput): string {
@@ -142,7 +165,12 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
     : "";
   const paperBody = `# SUBMITTED PAPER\n\n**Title:** ${title}\n**Authors:** ${authorsLine}${modelLine}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${modelBlind ? "(withheld — model-blind review)" : url}\n\n## Abstract\n${redactAuthors((abstract || "(no abstract available)").slice(0, 6000))}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — reviewer could not retrieve)"}\n${hadFullText ? redactAuthors(fullText!.slice(0, 30000)) : "(The reviewer's automated full-text fetcher returned no usable body content. Review proceeds on abstract only — note this limitation in your assessment.)"}`;
 
-  const priorLitBlock = buildPriorLiteratureBlock(fsAbstracts, documentId);
+  // In model-blind mode: (1) exclude other catalogue papers by the blinded
+  // author (their style/topic could reveal the withheld model), and (2) redact
+  // any remaining author/model tokens from the block as a safety net.
+  const priorLitBlock = buildPriorLiteratureBlock(fsAbstracts, documentId, modelBlind
+    ? { excludeAuthors: authors, redact: redactAuthors }
+    : undefined);
 
   if (!ethicsResult && ethicsPromise) {
     await emitEvent("peer-review-ethics-await", "Awaiting parallel ethics co-author audit before final synthesis...");
