@@ -249,6 +249,8 @@ export default function GenerationDashboard() {
   const [paperPickerQuery, setPaperPickerQuery] = useState<string>("");
   const [peerPersona, setPeerPersona] = useState<"bR" | "iR" | "aR" | "rR">("bR");
   const [peerIncludeEthics, setPeerIncludeEthics] = useState<boolean>(true);
+  const [peerModelBlind, setPeerModelBlind] = useState<boolean>(false);
+  const [batchPriority, setBatchPriority] = useState<string>("random");
   const [peerSelectedDocId, setPeerSelectedDocId] = useState<string>("");
   const [peerSelectedTitle, setPeerSelectedTitle] = useState<string>("");
   const [peerPickerQuery, setPeerPickerQuery] = useState<string>("");
@@ -705,6 +707,7 @@ export default function GenerationDashboard() {
           documentId: peerSelectedDocId,
           paperTitle: peerSelectedTitle,
           includeEthicsCoauthor: peerIncludeEthics,
+          modelBlind: peerModelBlind,
           prompt: peerPrompt || undefined,
           orchestratorName: orchestratorName || undefined,
           agentDescription: agentDescription || undefined,
@@ -738,6 +741,8 @@ export default function GenerationDashboard() {
           persona: peerPersona,
           count: batchCount,
           includeEthicsCoauthor: peerIncludeEthics,
+          modelBlind: peerModelBlind,
+          prioritize: batchPriority,
           prompt: peerPrompt || undefined,
           orchestratorName: orchestratorName || undefined,
           agentDescription: agentDescription || undefined,
@@ -1294,6 +1299,16 @@ export default function GenerationDashboard() {
                           />
                           <span>Include H Research Standards Verification Agent as co-author (runs in parallel; adds audit findings to final synthesis and lists H as second author on Future Science)</span>
                         </label>
+                        <label className="flex items-center gap-2 text-xs font-mono cursor-pointer mt-2" data-testid="label-model-blind">
+                          <input
+                            type="checkbox"
+                            checked={peerModelBlind}
+                            onChange={(e) => setPeerModelBlind(e.target.checked)}
+                            className="accent-primary"
+                            data-testid="checkbox-model-blind"
+                          />
+                          <span>Author-blind review (model-blind) — the evaluator is not told which model wrote the paper; author identity is withheld. The evaluator code gets an MB suffix. The target model is still detected and recorded for analysis.</span>
+                        </label>
                       </div>
 
                       {isBatch && (
@@ -1322,6 +1337,34 @@ export default function GenerationDashboard() {
                               Only {eligibleCount} paper{eligibleCount === 1 ? "" : "s"} available — lower the count to {eligibleCount} or fewer.
                             </p>
                           )}
+                          <div className="pt-2">
+                            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                              Prioritise articles
+                            </label>
+                            <div className="space-y-1.5" data-testid="section-batch-priority">
+                              {([
+                                { value: "random", label: "No priority — pick fully at random" },
+                                { value: "unreviewed", label: "Articles not yet evaluated at all" },
+                                { value: "other-models", label: "Articles already evaluated, but only by a different model" },
+                                { value: "not-this-model", label: "Articles not yet evaluated by the current evaluator model" },
+                              ]).map(opt => (
+                                <label key={opt.value} className="flex items-center gap-2 text-xs font-mono cursor-pointer">
+                                  <input
+                                    type="radio"
+                                    name="batch-priority"
+                                    checked={batchPriority === opt.value}
+                                    onChange={() => setBatchPriority(opt.value)}
+                                    className="accent-primary"
+                                    data-testid={`radio-batch-priority-${opt.value}`}
+                                  />
+                                  <span>{opt.label}</span>
+                                </label>
+                              ))}
+                            </div>
+                            <p className="text-[10px] font-mono text-muted-foreground/50 mt-1.5">
+                              Matching articles are placed at the top of the evaluation queue (random order within each group).
+                            </p>
+                          </div>
                         </div>
                       )}
 
@@ -1833,7 +1876,12 @@ export default function GenerationDashboard() {
 
           <FadeIn className="mt-16">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-heading font-semibold">Recent Generations</h2>
+              <div className="flex items-baseline gap-4">
+                <h2 className="text-2xl font-heading font-semibold">Recent Generations</h2>
+                <Link href="/evaluations" className="text-xs font-mono text-primary hover:underline underline-offset-2" data-testid="link-evaluation-history">
+                  Evaluation history →
+                </Link>
+              </div>
               {isAdmin && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0) + (recentEthics?.length ?? 0) + (recentPeerReviews?.length ?? 0)) > 0 && (
                 <button
                   onClick={() => {

@@ -1,4 +1,5 @@
 - [Future Science revision arrays](future-science-revisions.md) — majorRevisions/minorRevisions only valid with linkOriginalContribution; strip them in lockstep for non-response fallback types or FS rejects the payload.
 - [Peer-review H verification section](peer-review-h-section.md) — H audit is only LLM input; deterministically append the verification section to the published doc, the LLM won't.
 - [Future Science publishing](future-science-publishing.md) — two endpoints (editorial=Bearer /contributions, LR/peer/ethics=x-api-key /api-bots); valid `type` list; logs too noisy so LR submit throws real FS error; republish endpoints exist.
+- [Model-blind peer reviews](model-blind-reviews.md) — redact ALL evaluator-visible blocks (incl. ethics block); MB suffix on every code-rebuild path; never detect target model from body text.
 - [Available-papers endpoints are slow](available-papers-slow.md) — peer/ethics paper pickers re-fetch the whole FS catalogue (~30s, no cache) per request; UI must show real loading/error states, not conflate empty with loading.

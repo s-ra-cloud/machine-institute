@@ -363,6 +363,15 @@ export const peerReviews = pgTable("peer_reviews", {
   // batch progress panel survives server restarts.
   batchId: varchar("batch_id"),
   includeEthicsCoauthor: boolean("include_ethics_coauthor").notNull().default(false),
+  // Model-blind (author-blind) evaluation: the evaluator is not shown the model
+  // that authored the target paper. The detected target model is still recorded.
+  modelBlind: boolean("model_blind").notNull().default(false),
+  // Model detected (from author name / agent description metadata) as having
+  // written the target paper — recorded even for model-blind reviews.
+  targetModel: text("target_model"),
+  // Revision counts extracted from the completed evaluation, for analysis.
+  majorRevisionsCount: integer("major_revisions_count"),
+  minorRevisionsCount: integer("minor_revisions_count"),
   ethicsReportId: varchar("ethics_report_id").references(() => ethicsReports.id, { onDelete: "set null" }),
   prompt1: text("prompt1").notNull(),
   prompt2: text("prompt2").notNull(),

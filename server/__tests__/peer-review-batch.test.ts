@@ -76,6 +76,9 @@ const storageMock = {
     if (row) Object.assign(row, updates);
     return row;
   },
+  async getPeerReviewsByBatchId(batchId: string): Promise<FakeReview[]> {
+    return Array.from(fakeDb.rows.values()).filter((r) => r.batchId === batchId);
+  },
   async getReviewedPaperPersonasForJournal(journalId: string) {
     return Array.from(fakeDb.rows.values())
       .filter((r) => r.journalId === journalId && r.status !== "failed")

@@ -19,6 +19,7 @@ import LiteratureReviewDetail from "@/pages/LiteratureReviewDetail";
 import EthicsReportDetail from "@/pages/EthicsReportDetail";
 import PeerReviewDetail from "@/pages/PeerReviewDetail";
 import GenerationDashboard from "@/pages/GenerationDashboard";
+import EvaluationHistory from "@/pages/EvaluationHistory";
 
 function ScrollToTop() {
   const [location] = useLocation();
@@ -45,6 +46,7 @@ function Router() {
         <Route path="/literature-reviews/:id" component={LiteratureReviewDetail} />
         <Route path="/ethics-reports/:id" component={EthicsReportDetail} />
         <Route path="/peer-reviews/:id" component={PeerReviewDetail} />
+        <Route path="/evaluations" component={EvaluationHistory} />
         <Route component={NotFound} />
       </Switch>
     </>

@@ -1,0 +1,66 @@
+## Blind Review Options and Evaluation Metadata
+
+I would like to add a new review option to both the peer-review system and the semi-autonomous cycle.
+
+### 1. Author-Blind and Non-Author-Blind Reviews
+
+Peer reviews should be configurable as either:
+
+* author-blind, meaning that the evaluator does not know the model used by the author;
+* non-author-blind, meaning that the evaluator has access to model information contained in the document metadata.
+
+### 2. Identification of the Model Used to Produce the Target Article
+
+The system should  inspect the document metadata to determine what is the model used to write the original article has been identified. it can be in the "author name" or in the "agent description"
+
+When this information is available, the system must record it and, unless model-blind mode is enabled, communicate it to the evaluator.
+
+### 3. Evaluator Code
+
+When model-blind mode is enabled, this configuration must be visible in the evaluator’s code name.
+
+Add the suffix **MB** at the end of the evaluator’s configuration code to indicate that the review was conducted in model-blind mode.
+
+### 4. Storage of Reviews and Associated Metadata
+
+All evaluations produced through the peer-review system or the semi-autonomous cycle must be stored on the website.
+
+For every evaluation, the database should record at least the following information:
+
+* whether the evaluation was model-blind;
+* the model used to produce the target document;
+* the model used by the evaluating agent;
+* the evaluator’s full configuration code;
+* the number of major and minor revisions requested or proposed by the evaluator;
+* the target article or document being evaluated;
+* the evaluation itself;
+
+The model used to produce the target document must be stored even when the evaluator was not allowed to see that information during the review.
+
+The evaluator model and its model-blind status should already be recoverable from the evaluator’s code name, although these fields may also be stored separately to make querying and analysis easier.
+
+### 6. Evaluation History and Comparative Analysis
+
+The purpose of storing this information is to make it possible, after running a large autonomous research and evaluation cycle, to retrieve and analyse all evaluations according to criteria such as:
+
+* whether the evaluation was model-blind;
+* which model evaluated which target model;
+* how many evaluations were conducted for each model pairing;
+* how many revisions were requested in each evaluation;
+* how revision requests vary depending on the evaluator model, target model, and review configuration.
+
+The interface should therefore provide a clear list or exportable table containing these variables for every evaluation.
+
+### 7. Prioritisation Options in the Semi-Autonomous Cycle
+
+The semi-autonomous cycle should include an additional article-prioritisation option.
+
+The user should be able to prioritise:
+
+* articles that have not yet been evaluated at all;
+* articles that have already been evaluated, although only by a different model;
+* potentially, articles that have not yet been evaluated by the model currently acting as evaluator.
+
+When one of these options is selected, the system should place the corresponding articles at the top of the evaluation queue.
+
+This feature is required only for the semi-autonomous cycle and does not need to be added to the standard peer-review workflow.

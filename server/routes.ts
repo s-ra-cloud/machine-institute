@@ -22,7 +22,7 @@ import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, 
 import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, fetchAbstractsAndKeywordsCached, extractTrendsAndGaps, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 
-function buildConventionName(modelName: string, agentId: string): string {
+function buildConventionName(modelName: string, agentId: string, modelBlind: boolean = false): string {
   const m = (modelName || "").toLowerCase();
   let initials: string;
   if (m.includes("deepseek-r1")) initials = "DSR1";
@@ -35,7 +35,9 @@ function buildConventionName(modelName: string, agentId: string): string {
   else if (m.includes("gpt-4o")) initials = "G4O";
   else if (m.includes("gpt-4")) initials = "G4";
   else initials = "ML";
-  return `MachInstit ${initials}${agentId}-N1`;
+  // Model-blind reviews are flagged with an MB suffix at the end of the
+  // evaluator's configuration code (e.g. "MachInstit CS45bR-N1MB").
+  return `MachInstit ${initials}${agentId}-N1${modelBlind ? "MB" : ""}`;
 }
 
 // Map publication-audit flags to Future Science revision arrays:
@@ -2148,6 +2150,37 @@ I will now provide the papers.`;
     }
   });
 
+  // Evaluation history for comparative analysis: one row per evaluation with
+  // blind status, evaluator/target models, configuration code, and revision counts.
+  app.get("/api/peer-reviews/evaluations", async (_req, res) => {
+    try {
+      const reviews = await storage.getAllPeerReviews();
+      const rows = reviews.map(r => ({
+        id: r.id,
+        createdAt: r.createdAt,
+        status: r.status,
+        journalId: r.journalId,
+        documentId: r.documentId,
+        paperTitle: r.paperTitle,
+        persona: r.persona,
+        modelBlind: r.modelBlind,
+        evaluatorModel: r.modelName,
+        evaluatorCode: r.orchestratorName || buildConventionName(r.modelName || "", r.persona, r.modelBlind),
+        targetModel: r.targetModel,
+        majorRevisionsCount: r.majorRevisionsCount,
+        minorRevisionsCount: r.minorRevisionsCount,
+        recommendation: r.recommendation,
+        includeEthicsCoauthor: r.includeEthicsCoauthor,
+        publishedDocumentId: r.publishedDocumentId,
+        batchId: r.batchId,
+      }));
+      return res.json(rows);
+    } catch (err: any) {
+      console.error("Error fetching evaluation history:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/peer-reviews/:id", async (req, res) => {
     try {
       const review = await storage.getPeerReviewById(req.params.id);
@@ -2193,8 +2226,11 @@ I will now provide the papers.`;
         prompt,
         modelProvider, modelName, providerMode, byocApiKey,
         orchestratorName, agentDescription,
-        includeEthicsCoauthor,
+        includeEthicsCoauthor, modelBlind, prioritize,
       } = req.body;
+
+      const VALID_PRIORITIES = ["random", "unreviewed", "other-models", "not-this-model"];
+      const effectivePriority = VALID_PRIORITIES.includes(prioritize) ? prioritize : "random";
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
       const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
@@ -2253,11 +2289,31 @@ I will now provide the papers.`;
           maxAvailable: eligible.length,
         });
       }
-      const selected = shuffleInPlace([...eligible]).slice(0, requestedCount);
+      // Prioritisation: place the selected category of papers at the top of the
+      // evaluation queue (random order within each tier).
+      const reviewedModelsOf = (p: PeerAvailablePaper) => p.lockedCombos.map(c => c.split(":").slice(1).join(":"));
+      const matchesPriority = (p: PeerAvailablePaper): boolean => {
+        switch (effectivePriority) {
+          case "unreviewed": return p.lockedCombos.length === 0;
+          case "other-models": return p.lockedCombos.length > 0 && !reviewedModelsOf(p).includes(resolvedModel);
+          case "not-this-model": return !reviewedModelsOf(p).includes(resolvedModel);
+          default: return false;
+        }
+      };
+      let ordered: PeerAvailablePaper[];
+      if (effectivePriority === "random") {
+        ordered = shuffleInPlace([...eligible]);
+      } else {
+        const prioritized = shuffleInPlace(eligible.filter(matchesPriority));
+        const rest = shuffleInPlace(eligible.filter(p => !matchesPriority(p)));
+        ordered = [...prioritized, ...rest];
+      }
+      const selected = ordered.slice(0, requestedCount);
 
+      const isModelBlind = !!modelBlind;
       const defaultPrompt = getPeerReviewPrompt(effectivePersona);
       const effectivePrompt = prompt || defaultPrompt;
-      const effectiveOrchestratorName = orchestratorName || buildConventionName(resolvedModel, effectivePersona);
+      const effectiveOrchestratorName = orchestratorName || buildConventionName(resolvedModel, effectivePersona, isModelBlind);
       const includeEthics = !!includeEthicsCoauthor;
 
       // Reserve all reviews up front (status "pending") so their locks are taken
@@ -2274,6 +2330,7 @@ I will now provide the papers.`;
           documentId: paper.documentId,
           paperTitle: paper.title || null,
           includeEthicsCoauthor: includeEthics,
+          modelBlind: isModelBlind,
           prompt1: effectivePrompt,
           prompt2: "",
           prompt3: "",
@@ -2360,7 +2417,7 @@ I will now provide the papers.`;
         prompt,
         modelProvider, modelName, providerMode, byocApiKey,
         orchestratorName, agentDescription,
-        includeEthicsCoauthor,
+        includeEthicsCoauthor, modelBlind,
       } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
@@ -2413,9 +2470,10 @@ I will now provide the papers.`;
         return res.status(409).json({ error: `This paper has already been reviewed by the ${effectivePersona} persona using this model. Select a different model to run another review.` });
       }
 
+      const isModelBlind = !!modelBlind;
       const defaultPrompt = getPeerReviewPrompt(effectivePersona);
       const effectivePrompt = prompt || defaultPrompt;
-      const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", effectivePersona);
+      const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", effectivePersona, isModelBlind);
       const includeEthics = !!includeEthicsCoauthor;
 
       const parsed = insertPeerReviewSchema.safeParse({
@@ -2426,6 +2484,7 @@ I will now provide the papers.`;
         documentId,
         paperTitle: paperTitle || null,
         includeEthicsCoauthor: includeEthics,
+        modelBlind: isModelBlind,
         prompt1: effectivePrompt,
         prompt2: "",
         prompt3: "",
@@ -2455,7 +2514,7 @@ I will now provide the papers.`;
 
   async function generatePeerReviewBackground(
     reviewId: string,
-    data: { projectId: string; agentId: string; journalId: string; persona: string; documentId: string; paperTitle?: string | null; prompt1: string; prompt2?: string; prompt3?: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
+    data: { projectId: string; agentId: string; journalId: string; persona: string; documentId: string; paperTitle?: string | null; prompt1: string; prompt2?: string; prompt3?: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null; modelBlind?: boolean },
     modelConfig: ModelProviderConfig,
     includeEthicsCoauthor: boolean,
   ) {
@@ -2466,7 +2525,8 @@ I will now provide the papers.`;
     }
     const resolvedModel = resolveModelName(modelConfig);
     const persona = data.persona as PeerReviewPersona;
-    const robotAgentName = buildConventionName(resolvedModel, persona);
+    const isModelBlind = !!data.modelBlind;
+    const robotAgentName = buildConventionName(resolvedModel, persona, isModelBlind);
     const ethicsAgentName = buildConventionName(resolvedModel, "H");
 
     async function emit(phase: string, message: string) {
@@ -2603,6 +2663,7 @@ I will now provide the papers.`;
         modelConfig: { ...modelConfig, modelName: resolvedModel },
         emitEvent: emit,
         ethicsPromise: includeEthicsCoauthor ? ethicsPromise : undefined,
+        modelBlind: isModelBlind,
       });
 
       const rawHtml = markdownToHtml(result.reviewText);
@@ -2637,6 +2698,9 @@ I will now provide the papers.`;
         reviewTitle: result.reviewTitle,
         reviewAbstract: result.reviewAbstract,
         recommendation: result.recommendation,
+        targetModel: result.targetModel,
+        majorRevisionsCount: result.majorRevisions.length,
+        minorRevisionsCount: result.minorRevisions.length,
         promptTrace,
         sourceTrace,
         ethicsReportId: linkedEthicsReportId,
@@ -2705,7 +2769,7 @@ I will now provide the papers.`;
       if (!process.env.FUTURE_SCIENCE_API_KEY) return res.status(500).json({ error: "FUTURE_SCIENCE_API_KEY is not configured." });
 
       const initiativeDocId = INITIATIVE_DOC_IDS[review.journalId] || INITIATIVE_DOC_IDS["mirror"];
-      const robotAgentName = buildConventionName(review.modelName || "", review.persona);
+      const robotAgentName = buildConventionName(review.modelName || "", review.persona, review.modelBlind);
       const humanOrchestratorName = review.orchestratorName && review.orchestratorName !== robotAgentName
         ? review.orchestratorName
         : undefined;

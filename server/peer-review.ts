@@ -13,6 +13,7 @@ import {
   type PeerReviewPersona,
 } from "./prompts/peer-review";
 import type { EthicsReviewOutput } from "./ethics-review";
+import { detectAuthoringModel } from "./model-detection";
 
 export interface PeerReviewOutput {
   reviewText: string;
@@ -29,6 +30,8 @@ export interface PeerReviewOutput {
   keywords: string[];
   ethicsSummary?: string;
   ethicsUsed: boolean;
+  /** Model detected as having authored the target paper (recorded even in model-blind mode). */
+  targetModel: string | null;
 }
 
 interface RunPeerReviewOptions {
@@ -47,6 +50,8 @@ interface RunPeerReviewOptions {
   emitEvent: (phase: string, message: string) => Promise<void>;
   ethicsResult?: EthicsReviewOutput | null;
   ethicsPromise?: Promise<EthicsReviewOutput | null>;
+  /** Author-blind (model-blind) review: withhold the target paper's author/model identity from the evaluator. */
+  modelBlind?: boolean;
 }
 
 function buildPriorLiteratureBlock(fsAbstracts: Array<{ title: string; authors: string; date: string; abstract: string; documentId: string }>, currentDocumentId: string): string {
@@ -93,7 +98,49 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   const ctx = await loadPaperContext({ projectId, documentId, initiativeDocId, initiativeSlug, paperTitle: paperTitle || undefined, emitEvent, eventPrefix: "paper" });
   const { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts } = ctx;
 
-  const paperBody = `# SUBMITTED PAPER\n\n**Title:** ${title}\n**Authors:** ${authors}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${url}\n\n## Abstract\n${(abstract || "(no abstract available)").slice(0, 6000)}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — reviewer could not retrieve)"}\n${hadFullText ? (fullText!.slice(0, 30000)) : "(The reviewer's automated full-text fetcher returned no usable body content. Review proceeds on abstract only — note this limitation in your assessment.)"}`;
+  // Detect the model that authored the target paper from its metadata (author
+  // name convention codes, agent description if present). Recorded regardless
+  // of blind mode; only COMMUNICATED to the evaluator in non-blind mode.
+  const modelBlind = !!opts.modelBlind;
+  const targetModel = detectAuthoringModel(authors, null);
+  if (targetModel) {
+    await emitEvent("peer-review-target-model", `Target paper authoring model identified from metadata: ${targetModel}${modelBlind ? " (withheld from evaluator — model-blind review)" : " (communicated to evaluator)"}.`);
+  } else {
+    await emitEvent("peer-review-target-model", "No authoring model could be identified from the target paper's metadata.");
+  }
+
+  // In model-blind mode, withhold author identity (which encodes the model by
+  // convention) and any detected model info from everything the evaluator sees.
+  // Redaction is token-based and case-insensitive: full author names AND each
+  // distinctive name token (e.g. "Autointerp", "CS45bR-N1") are stripped, so
+  // surname-only or reformatted mentions in the abstract/full text are caught.
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const redactionTargets: string[] = [];
+  if (authors) {
+    for (const name of authors.split(/[,;]/).map(s => s.trim()).filter(Boolean)) {
+      if (name.length >= 4) redactionTargets.push(name);
+      for (const token of name.split(/\s+/)) {
+        if (token.length >= 4 && !/^(the|and|of|for)$/i.test(token)) redactionTargets.push(token);
+      }
+    }
+  }
+  if (targetModel) redactionTargets.push(targetModel);
+  // Longest first so full names are replaced before their tokens.
+  redactionTargets.sort((a, b) => b.length - a.length);
+  const redactAuthors = (text: string): string => {
+    if (!modelBlind || redactionTargets.length === 0) return text;
+    let out = text;
+    for (const target of redactionTargets) {
+      out = out.replace(new RegExp(escapeRe(target), "gi"), "[withheld]");
+    }
+    return out;
+  };
+
+  const authorsLine = modelBlind ? "(withheld — model-blind review)" : authors;
+  const modelLine = !modelBlind
+    ? `\n**Authoring model (from document metadata):** ${targetModel || "(not identifiable)"}`
+    : "";
+  const paperBody = `# SUBMITTED PAPER\n\n**Title:** ${title}\n**Authors:** ${authorsLine}${modelLine}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${modelBlind ? "(withheld — model-blind review)" : url}\n\n## Abstract\n${redactAuthors((abstract || "(no abstract available)").slice(0, 6000))}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — reviewer could not retrieve)"}\n${hadFullText ? redactAuthors(fullText!.slice(0, 30000)) : "(The reviewer's automated full-text fetcher returned no usable body content. Review proceeds on abstract only — note this limitation in your assessment.)"}`;
 
   const priorLitBlock = buildPriorLiteratureBlock(fsAbstracts, documentId);
 
@@ -115,12 +162,17 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   let ethicsBlock = "";
   let ethicsSummary: string | undefined;
   if (ethicsResult) {
-    ethicsBlock = `\n\n---\n\n${buildEthicsCoauthorBlock(ethicsResult)}`;
+    // The ethics audit can quote author/model-identifying details from the
+    // paper; in model-blind mode this block must be redacted too.
+    ethicsBlock = redactAuthors(`\n\n---\n\n${buildEthicsCoauthorBlock(ethicsResult)}`);
     ethicsSummary = `Ethics co-author (H): ${ethicsResult.clearanceStatus.replace(/_/g, " ")} — ${ethicsResult.flagsList.filter(f => f.severity === "CRITICAL").length} critical, ${ethicsResult.flagsList.filter(f => f.severity === "MAJOR").length} major, ${ethicsResult.flagsList.filter(f => f.severity === "MINOR").length} minor flags.`;
     await emitEvent("peer-review-ethics-merge", `Integrating ethics co-author findings into review. ${ethicsSummary}`);
   }
 
-  const userInput = `${paperBody}\n\n---\n\n# PUBLICATIONS (Prior work from ${journalDisplayName})\n\n${priorLitBlock}${ethicsBlock}`;
+  const blindNote = modelBlind
+    ? `\n\n---\n\n# REVIEW CONFIGURATION\nThis is a MODEL-BLIND (author-blind) review: the identity of the author and the model that produced the submitted paper have been deliberately withheld. Evaluate the work strictly on its content. Do not speculate about which model or agent wrote it.`
+    : "";
+  const userInput = `${paperBody}${blindNote}\n\n---\n\n# PUBLICATIONS (Prior work from ${journalDisplayName})\n\n${priorLitBlock}${ethicsBlock}`;
 
   await emitEvent("peer-review-llm", `Sending peer review to ${modelConfig.modelName || modelConfig.provider}${ethicsResult ? " with ethics integration" : ""}...`);
   const result = await generateWithConfig(modelConfig, prompt, userInput, { maxTokens: 8000, temperature: 0.4 });
@@ -190,5 +242,6 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
     keywords,
     ethicsSummary,
     ethicsUsed: !!ethicsResult,
+    targetModel,
   };
 }
