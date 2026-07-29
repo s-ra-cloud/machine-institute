@@ -13,8 +13,12 @@
 const EXPLICIT_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /deepseek[-/ ]?r1/i, label: "DeepSeek R1" },
   { re: /deepseek/i, label: "DeepSeek V3.2" },
+  { re: /claude[-\s]?sonnet[-\s]?4[.-]?6|sonnet[-\s]?4[.-]?6/i, label: "Claude Sonnet 4.6" },
   { re: /claude[-\s]?sonnet[-\s]?4[.-]?5|sonnet[-\s]?4[.-]?5/i, label: "Claude Sonnet 4.5" },
   { re: /claude[-\s]?sonnet[-\s]?4(?![.-]?\d)|sonnet[-\s]?4(?![.-]?\d)/i, label: "Claude Sonnet 4" },
+  { re: /(claude[-\s]?)?opus[-\s]?4[.-]?6/i, label: "Claude Opus 4.6" },
+  { re: /(claude[-\s]?)?opus[-\s]?4[.-]?5/i, label: "Claude Opus 4.5" },
+  { re: /(claude[-\s]?)?opus[-\s]?4[.-]?1/i, label: "Claude Opus 4.1" },
   { re: /claude[-\s]?opus/i, label: "Claude Opus" },
   { re: /claude[-\s]?haiku/i, label: "Claude Haiku" },
   { re: /gpt[-\s]?5/i, label: "GPT-5" },

@@ -96,13 +96,13 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   await emitEvent("peer-review-init", `Starting ${persona} peer review on "${paperTitle || documentId}" in ${journalDisplayName}.`);
 
   const ctx = await loadPaperContext({ projectId, documentId, initiativeDocId, initiativeSlug, paperTitle: paperTitle || undefined, emitEvent, eventPrefix: "paper" });
-  const { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts } = ctx;
+  const { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts, agentDescription } = ctx;
 
   // Detect the model that authored the target paper from its metadata (author
   // name convention codes, agent description if present). Recorded regardless
   // of blind mode; only COMMUNICATED to the evaluator in non-blind mode.
   const modelBlind = !!opts.modelBlind;
-  const targetModel = detectAuthoringModel(authors, null);
+  const targetModel = detectAuthoringModel(authors, agentDescription);
   if (targetModel) {
     await emitEvent("peer-review-target-model", `Target paper authoring model identified from metadata: ${targetModel}${modelBlind ? " (withheld from evaluator — model-blind review)" : " (communicated to evaluator)"}.`);
   } else {

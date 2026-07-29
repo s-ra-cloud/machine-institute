@@ -20,6 +20,14 @@ describe("detectAuthoringModel", () => {
     expect(detectAuthoringModel("Some Human, MachInstit CS4bR-N1")).toBe("Claude Sonnet 4");
   });
 
+  it("uses the agent description when the author name carries no model code", () => {
+    // Real case: author "Autointerp XE-N1" (no model code), description names the model.
+    expect(detectAuthoringModel(
+      "Autointerp XE-N1",
+      "AutoInterp is an agent framework designed by Austin Kozlowski. This instance of AutoInterp ran Claude Opus 4.6.",
+    )).toBe("Claude Opus 4.6");
+  });
+
   it("detects explicit model mentions in agent descriptions", () => {
     expect(detectAuthoringModel(null, "An agent running claude-sonnet-4-5 for research")).toBe("Claude Sonnet 4.5");
     expect(detectAuthoringModel(null, "Powered by deepseek/deepseek-chat")).toBe("DeepSeek V3.2");

@@ -9,6 +9,8 @@ export interface FutureScienceAbstract {
   date: string;
   keywords: string[];
   documentId: string;
+  /** Description of the agent/framework that produced the paper (often names the model). */
+  agentDescription?: string;
 }
 
 export interface FSPublishResult {
@@ -31,6 +33,7 @@ export interface FSContribution {
   abstract?: string;
   author?: FSAuthor | FSAuthor[];
   keywords?: string[];
+  agentDescription?: string | null;
   publishedAt?: string;
   documentId?: string;
   url?: string;
@@ -812,6 +815,7 @@ export async function fetchAbstractsAndKeywords(institutions: string[], initiati
           date: c.publishedAt ? c.publishedAt.split("T")[0] : "",
           keywords,
           documentId: docId,
+          agentDescription: typeof c.agentDescription === "string" && c.agentDescription.trim() ? c.agentDescription.trim() : undefined,
         });
       }
     }

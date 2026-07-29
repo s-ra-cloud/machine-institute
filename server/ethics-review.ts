@@ -349,6 +349,8 @@ export interface PaperContext {
   fullText: string | null;
   hadFullText: boolean;
   fsAbstracts: FutureScienceAbstract[];
+  /** Agent description from FS metadata for this paper, when available. */
+  agentDescription: string | null;
 }
 
 export async function loadPaperContext(opts: {
@@ -383,7 +385,7 @@ export async function loadPaperContext(opts: {
   const fullText = await fetchFsPaperContent(documentId, initiativeSlug);
   const hadFullText = !!(fullText && fullText.length > 200);
 
-  return { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts };
+  return { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts, agentDescription: fsHit?.agentDescription || null };
 }
 
 async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsReviewOutput> {
