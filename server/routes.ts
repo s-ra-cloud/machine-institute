@@ -40,6 +40,14 @@ function buildConventionName(modelName: string, agentId: string, modelBlind: boo
   return `MachInstit ${initials}${agentId}-N1${modelBlind ? "MB" : ""}`;
 }
 
+// Ensures the MB (model-blind) suffix on an evaluator code, including
+// user-supplied custom orchestrator names.
+function withMbSuffix(name: string, modelBlind: boolean): string {
+  const trimmed = name.trim();
+  if (!modelBlind || !trimmed || trimmed.endsWith("MB")) return trimmed;
+  return `${trimmed}MB`;
+}
+
 // Map publication-audit flags to Future Science revision arrays:
 // CRITICAL + MAJOR flags become majorRevisions, MINOR flags become
 // minorRevisions. Each flag summary is the revision description.
@@ -2137,13 +2145,22 @@ I will now provide the papers.`;
     }
   });
 
-  app.get("/api/peer-reviews", async (req, res) => {
+  // Public review payloads must not disclose the blinded identity of a
+  // model-blind review to unauthenticated callers: targetModel directly, and
+  // promptTrace/sourceTrace indirectly (sourceTrace.paperUsed carries the real
+  // convention-coded author name, which encodes the model).
+  const sanitizeBlindReview = <T extends { modelBlind?: boolean | null; targetModel?: string | null }>(review: T, authed: boolean): T =>
+    !authed && review.modelBlind
+      ? { ...review, targetModel: null, promptTrace: null, sourceTrace: null }
+      : review;
+
+  app.get("/api/peer-reviews", optionalAuth, async (req, res) => {
     try {
       const projectId = req.query.projectId as string | undefined;
       const reviews = projectId
         ? await storage.getPeerReviewsByProject(projectId)
         : await storage.getAllPeerReviews();
-      return res.json(reviews);
+      return res.json(reviews.map(r => sanitizeBlindReview(r, !!(req as any).user)));
     } catch (err: any) {
       console.error("Error fetching peer reviews:", err);
       return res.status(500).json({ error: "Internal server error" });
@@ -2152,7 +2169,7 @@ I will now provide the papers.`;
 
   // Evaluation history for comparative analysis: one row per evaluation with
   // blind status, evaluator/target models, configuration code, and revision counts.
-  app.get("/api/peer-reviews/evaluations", async (_req, res) => {
+  app.get("/api/peer-reviews/evaluations", requireAuth, async (_req, res) => {
     try {
       const reviews = await storage.getAllPeerReviews();
       const rows = reviews.map(r => ({
@@ -2181,11 +2198,11 @@ I will now provide the papers.`;
     }
   });
 
-  app.get("/api/peer-reviews/:id", async (req, res) => {
+  app.get("/api/peer-reviews/:id", optionalAuth, async (req, res) => {
     try {
       const review = await storage.getPeerReviewById(req.params.id);
       if (!review) return res.status(404).json({ error: "Peer review not found" });
-      return res.json(review);
+      return res.json(sanitizeBlindReview(review, !!(req as any).user));
     } catch (err: any) {
       console.error("Error fetching peer review:", err);
       return res.status(500).json({ error: "Internal server error" });
@@ -2313,7 +2330,9 @@ I will now provide the papers.`;
       const isModelBlind = !!modelBlind;
       const defaultPrompt = getPeerReviewPrompt(effectivePersona);
       const effectivePrompt = prompt || defaultPrompt;
-      const effectiveOrchestratorName = orchestratorName || buildConventionName(resolvedModel, effectivePersona, isModelBlind);
+      const effectiveOrchestratorName = orchestratorName
+        ? withMbSuffix(orchestratorName, isModelBlind)
+        : buildConventionName(resolvedModel, effectivePersona, isModelBlind);
       const includeEthics = !!includeEthicsCoauthor;
 
       // Reserve all reviews up front (status "pending") so their locks are taken
@@ -2473,7 +2492,9 @@ I will now provide the papers.`;
       const isModelBlind = !!modelBlind;
       const defaultPrompt = getPeerReviewPrompt(effectivePersona);
       const effectivePrompt = prompt || defaultPrompt;
-      const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", effectivePersona, isModelBlind);
+      const effectiveOrchestratorName = orchestratorName
+        ? withMbSuffix(orchestratorName, isModelBlind)
+        : buildConventionName(modelName || "", effectivePersona, isModelBlind);
       const includeEthics = !!includeEthicsCoauthor;
 
       const parsed = insertPeerReviewSchema.safeParse({
@@ -2617,6 +2638,7 @@ I will now provide the papers.`;
                 paperTitle: data.paperTitle || null,
                 singlePaperPrompt: H_SINGLE_PAPER_PROMPT,
                 modelConfig: { ...modelConfig, modelName: resolvedModel },
+                modelBlind: isModelBlind,
                 emitEvent: async (phase, msg) => {
                   try { await storage.createResearchEvent({ source: ethicsAgentName, agentId: "H", phase, message: msg }); } catch {}
                 },

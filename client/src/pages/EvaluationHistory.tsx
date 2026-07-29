@@ -56,14 +56,17 @@ export default function EvaluationHistory() {
   const [evaluatorFilter, setEvaluatorFilter] = useState<string>("all");
   const [targetFilter, setTargetFilter] = useState<string>("all");
 
-  const { data: rows, isLoading, isError } = useQuery<EvaluationRow[]>({
+  const { data: rows, isLoading, isError, error } = useQuery<EvaluationRow[]>({
     queryKey: ["/api/peer-reviews/evaluations"],
     queryFn: async () => {
-      const res = await fetch("/api/peer-reviews/evaluations");
+      const res = await fetch("/api/peer-reviews/evaluations", { credentials: "include" });
+      if (res.status === 401) throw new Error("unauthorized");
       if (!res.ok) throw new Error("Failed to load evaluation history");
       return res.json();
     },
+    retry: (count, err) => (err as Error).message !== "unauthorized" && count < 2,
   });
+  const isUnauthorized = isError && (error as Error)?.message === "unauthorized";
 
   const evaluatorModels = useMemo(() => Array.from(new Set((rows || []).map(r => r.evaluatorModel).filter(Boolean))) as string[], [rows]);
   const targetModels = useMemo(() => Array.from(new Set((rows || []).map(r => r.targetModel || "(unknown)"))), [rows]);
@@ -148,7 +151,12 @@ export default function EvaluationHistory() {
           <Loader2 className="w-4 h-4 animate-spin" /> Loading evaluations…
         </div>
       )}
-      {isError && <p className="text-sm font-mono text-red-400 py-12">Couldn't load the evaluation history.</p>}
+      {isUnauthorized && (
+        <p className="text-sm font-mono text-muted-foreground py-12" data-testid="text-evaluations-signin">
+          Evaluation analysis data is restricted — please sign in to view it.
+        </p>
+      )}
+      {isError && !isUnauthorized && <p className="text-sm font-mono text-red-400 py-12">Couldn't load the evaluation history.</p>}
 
       {!isLoading && !isError && (
         <>

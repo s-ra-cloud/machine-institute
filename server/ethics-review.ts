@@ -8,6 +8,8 @@ import {
   applyJournalName,
 } from "./prompts/h-solo";
 import { fetchAbstractsAndKeywords, type FutureScienceAbstract } from "./future-science";
+import { detectAuthoringModel } from "./model-detection";
+import { createRedactor } from "./redaction";
 import {
   fetchFsPaperContent,
   extractCitations,
@@ -151,6 +153,12 @@ interface RunOptions {
   singlePaperPrompt?: string;
   modelConfig: ModelProviderConfig;
   emitEvent: (phase: string, message: string) => Promise<void>;
+  /**
+   * Model-blind (author-blind) audit: the H agent must not receive the target
+   * paper's author name, agent code, authoring model, URL, or any identifying
+   * metadata, and its outputs are redacted so nothing identifying leaks back.
+   */
+  modelBlind?: boolean;
 }
 
 async function buildPrevReport(projectId: string, journalId: string): Promise<{ text: string; date: Date } | null> {
@@ -399,8 +407,20 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
 
   await emitEvent("ethics-init", `Starting publication audit on "${paperTitle || documentId}" in ${journalDisplayName}.`);
 
-  const ctx = await loadPaperContext({ projectId, documentId, initiativeDocId, initiativeSlug, paperTitle, emitEvent });
-  const { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts } = ctx;
+  const ctx = await loadPaperContext({ projectId, documentId, initiativeDocId, initiativeSlug, paperTitle: paperTitle || undefined, emitEvent });
+  const { title, authors, date, abstract, url, fullText, hadFullText, fsAbstracts, agentDescription } = ctx;
+
+  // Model-blind audit: the H agent must not receive author name, agent code,
+  // authoring model, URL, or identifying metadata. Deterministic verification
+  // tools below still run on the raw text; only the LLM-visible content and the
+  // audit's textual outputs are redacted.
+  const modelBlind = !!opts.modelBlind;
+  const blindTargetModel = modelBlind ? detectAuthoringModel(authors, agentDescription) : null;
+  const blindRedactor = createRedactor({ authors, targetModel: blindTargetModel });
+  const redact = (text: string): string => (modelBlind ? blindRedactor(text) : text);
+  if (modelBlind) {
+    await emitEvent("ethics-model-blind", "Model-blind audit: author identity, agent code, authoring model, and URL are withheld from the H agent; audit outputs will be redacted.");
+  }
 
   // Citation verification (FS + OpenAlex; OpenAlex covers arXiv via search)
   let verification: PaperVerification = { paperTitle: title, hadFullText, citations: [] };
@@ -446,11 +466,18 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
     ? bibAnalysisRef.bibliographyCount
     : undefined;
   const citationBlock = formatVerificationReport(verification, parsedBibCount);
-  const paperBlock = `# TARGET PAPER\n\n**Title:** ${title}\n**Authors:** ${authors}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${url}\n\n## Abstract\n${(abstract || "(no abstract available)").slice(0, 6000)}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — auditor could not retrieve)"}\n${hadFullText ? (fullText!.slice(0, 30000)) : "(The auditor's automated full-text fetcher returned no usable body content. This is a tool limitation, not evidence of misconduct.)"}\n\n---\n\n## VERIFICATION REPORTS\n\n${citationBlock}\n\n${bibReport}\n\n${glossReport}\n\n${urlReport}`;
+  const authorsLine = modelBlind ? "(withheld — model-blind audit)" : authors;
+  const urlLine = modelBlind ? "(withheld — model-blind audit)" : url;
+  const blindNote = modelBlind
+    ? `\n\n---\n\n# AUDIT CONFIGURATION\nThis is a MODEL-BLIND (author-blind) audit: the identity of the author and the model that produced the target paper have been deliberately withheld. Audit the work strictly on its content. Do not speculate about which model or agent wrote it.`
+    : "";
+  const paperBlock = `# TARGET PAPER\n\n**Title:** ${title}\n**Authors:** ${authorsLine}\n**Date:** ${date}\n**Journal:** ${journalDisplayName}\n**URL:** ${urlLine}\n\n## Abstract\n${redact((abstract || "(no abstract available)").slice(0, 6000))}\n\n## Full Text${hadFullText ? "" : " (NOT AVAILABLE — auditor could not retrieve)"}\n${hadFullText ? redact(fullText!.slice(0, 30000)) : "(The auditor's automated full-text fetcher returned no usable body content. This is a tool limitation, not evidence of misconduct.)"}${blindNote}\n\n---\n\n## VERIFICATION REPORTS\n\n${redact(`${citationBlock}\n\n${bibReport}\n\n${glossReport}\n\n${urlReport}`)}`;
 
   await emitEvent("ethics-llm", `Sending audit prompt to ${modelConfig.modelName || modelConfig.provider}...`);
   const result = await generateWithConfig(modelConfig, systemPrompt, paperBlock, { maxTokens: 8000, temperature: 0.3 });
-  const ethicsText = result.content;
+  // Redact the audit's own text too: nothing identifying may flow back into the
+  // peer review's ethics block or the published verification section.
+  const ethicsText = redact(result.content);
 
   const flagsList = extractFlags(ethicsText);
   const recommendations = extractRecommendations(ethicsText);
@@ -463,7 +490,7 @@ async function runSinglePaperEthicsReport(opts: RunOptions): Promise<EthicsRevie
   const critCount = flagsList.filter(f => f.severity === "CRITICAL").length;
   const majorCount = flagsList.filter(f => f.severity === "MAJOR").length;
   const minorCount = flagsList.filter(f => f.severity === "MINOR").length;
-  const reportAbstract = `This report presents a focused publication audit of the paper "${title}" by ${authors} (${date}), published in ${journalDisplayName}, performed by the Research Standards Verification Agent. The audit covers eight research-standards categories plus a dedicated link-integrity check, and is grounded in automated verification of every citation (against Future Science and OpenAlex) and every URL (reachability + arXiv-ID validity) extracted from the paper's full text. ${hadFullText ? "Full text was retrieved by the auditor and used as the evidentiary basis for the categories that depend on it (A, D, F, I)." : "Full text could not be retrieved by the auditor; abstract-only assessment was performed for the categories that allow it, and Sections A and D were marked as auditor tool limitations rather than research-standards findings."} ${flagsList.length} concern(s) were identified: ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall paper clearance: ${clearanceStatus.replace(/_/g, " ")}.`;
+  const reportAbstract = `This report presents a focused publication audit of the paper "${title}" by ${modelBlind ? "(author withheld — model-blind audit)" : authors} (${date}), published in ${journalDisplayName}, performed by the Research Standards Verification Agent. The audit covers eight research-standards categories plus a dedicated link-integrity check, and is grounded in automated verification of every citation (against Future Science and OpenAlex) and every URL (reachability + arXiv-ID validity) extracted from the paper's full text. ${hadFullText ? "Full text was retrieved by the auditor and used as the evidentiary basis for the categories that depend on it (A, D, F, I)." : "Full text could not be retrieved by the auditor; abstract-only assessment was performed for the categories that allow it, and Sections A and D were marked as auditor tool limitations rather than research-standards findings."} ${flagsList.length} concern(s) were identified: ${critCount} critical, ${majorCount} major, and ${minorCount} minor. Overall paper clearance: ${clearanceStatus.replace(/_/g, " ")}.`;
 
   const auditedPaperIds = [`doc:${documentId}`, `title:${title.toLowerCase().trim()}`];
 

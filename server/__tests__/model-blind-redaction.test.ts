@@ -178,6 +178,50 @@ describe("model-blind peer review — LLM input redaction", () => {
     expect(ethicsBlock).toContain("[withheld]");
   });
 
+  it("keeps the final published review (incl. H verification section) free of identifying info when modelBlind=true", async () => {
+    // LLM echoes bait back — the final-text safety net must strip it.
+    generateWithConfigMock.mockImplementation(async () => ({
+      content:
+        "## Review Summary\nSolid work by MachInstit CS45bR-N1, clearly written by Claude Sonnet 4.5 (a.k.a. ClaudeSonnet45, claude_sonnet-4.5).\n\nRecommendation: Accept\n",
+    }));
+
+    const out = await runPeerReview({
+      ...baseOpts,
+      modelBlind: true,
+      ethicsPromise: Promise.resolve(makeEthics()),
+    });
+
+    // Verification section is present…
+    expect(out.reviewText).toContain("Research Standards Verification");
+    // …and neither it nor the review body reintroduces identity — including
+    // model-name spelling variants.
+    expectNoLeak(out.reviewText);
+    expect(out.reviewText).not.toMatch(/claude[\s._/-]*sonnet[\s._/-]*4[\s._/-]*5/i);
+    expectNoLeak(out.reviewAbstract);
+    expect(out.reviewText).toContain("[withheld]");
+
+    // targetModel is still recorded internally for analysis.
+    expect(out.targetModel).toBe(DETECTED_MODEL);
+  });
+
+  it("never names the detected model in emitted research events when modelBlind=true (events are publicly readable)", async () => {
+    captureUserInput();
+    const events: string[] = [];
+
+    await runPeerReview({
+      ...baseOpts,
+      modelBlind: true,
+      emitEvent: async (_phase: string, msg: string) => { events.push(msg); },
+    });
+
+    expect(events.length).toBeGreaterThan(0);
+    for (const msg of events) {
+      expectNoLeak(msg);
+    }
+    // The event trail still records THAT a model was identified, just not which.
+    expect(events.some(m => /identified from metadata and recorded internally/i.test(m))).toBe(true);
+  });
+
   it("control: non-blind reviews DO communicate author and detected model to the evaluator", async () => {
     const calls = captureUserInput();
 

@@ -14,6 +14,7 @@ import {
 } from "./prompts/peer-review";
 import type { EthicsReviewOutput } from "./ethics-review";
 import { detectAuthoringModel } from "./model-detection";
+import { createRedactor } from "./redaction";
 
 export interface PeerReviewOutput {
   reviewText: string;
@@ -126,38 +127,25 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   // of blind mode; only COMMUNICATED to the evaluator in non-blind mode.
   const modelBlind = !!opts.modelBlind;
   const targetModel = detectAuthoringModel(authors, agentDescription);
-  if (targetModel) {
-    await emitEvent("peer-review-target-model", `Target paper authoring model identified from metadata: ${targetModel}${modelBlind ? " (withheld from evaluator — model-blind review)" : " (communicated to evaluator)"}.`);
+  // Research events are publicly readable — in blind mode the event must not
+  // name the detected model (or it would leak the blinded identity).
+  if (modelBlind) {
+    await emitEvent("peer-review-target-model", targetModel
+      ? "Target paper authoring model identified from metadata and recorded internally (withheld from evaluator and telemetry — model-blind review)."
+      : "No authoring model could be identified from the target paper's metadata (model-blind review).");
+  } else if (targetModel) {
+    await emitEvent("peer-review-target-model", `Target paper authoring model identified from metadata: ${targetModel} (communicated to evaluator).`);
   } else {
     await emitEvent("peer-review-target-model", "No authoring model could be identified from the target paper's metadata.");
   }
 
   // In model-blind mode, withhold author identity (which encodes the model by
   // convention) and any detected model info from everything the evaluator sees.
-  // Redaction is token-based and case-insensitive: full author names AND each
-  // distinctive name token (e.g. "Autointerp", "CS45bR-N1") are stripped, so
-  // surname-only or reformatted mentions in the abstract/full text are caught.
-  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const redactionTargets: string[] = [];
-  if (authors) {
-    for (const name of authors.split(/[,;]/).map(s => s.trim()).filter(Boolean)) {
-      if (name.length >= 4) redactionTargets.push(name);
-      for (const token of name.split(/\s+/)) {
-        if (token.length >= 4 && !/^(the|and|of|for)$/i.test(token)) redactionTargets.push(token);
-      }
-    }
-  }
-  if (targetModel) redactionTargets.push(targetModel);
-  // Longest first so full names are replaced before their tokens.
-  redactionTargets.sort((a, b) => b.length - a.length);
-  const redactAuthors = (text: string): string => {
-    if (!modelBlind || redactionTargets.length === 0) return text;
-    let out = text;
-    for (const target of redactionTargets) {
-      out = out.replace(new RegExp(escapeRe(target), "gi"), "[withheld]");
-    }
-    return out;
-  };
+  // Shared redactor: strips full author names, name tokens (e.g. "Autointerp",
+  // "CS45bR-N1"), and model-name spelling variants ("GPT-5"/"GPT 5"/"GPT5"/
+  // "OpenAI GPT-5", etc.), case-insensitively.
+  const redactor = createRedactor({ authors, targetModel });
+  const redactAuthors = (text: string): string => (modelBlind ? redactor(text) : text);
 
   const authorsLine = modelBlind ? "(withheld — model-blind review)" : authors;
   const modelLine = !modelBlind
@@ -225,21 +213,27 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
   // findings — regardless of what the LLM chose to write about it.
   let finalReviewText = reviewText;
   if (ethicsResult) {
-    const verificationSection = buildVerificationSection({
+    // The verification section is built from the H audit, which can quote
+    // author/model-identifying details — redact it in model-blind mode so no
+    // identity is reintroduced into the published review.
+    const verificationSection = redactAuthors(buildVerificationSection({
       clearanceStatus: ethicsResult.clearanceStatus,
       clearanceStatement: ethicsResult.clearanceStatement,
       flags: ethicsResult.flagsList,
       recommendations: ethicsResult.recommendations,
-    });
+    }));
     finalReviewText = `${reviewText.trimEnd()}\n\n---\n\n${verificationSection}\n`;
   }
+  // Final safety net: nothing identifying may survive into the published
+  // review text in model-blind mode (the LLM echoing bait, etc.).
+  finalReviewText = redactAuthors(finalReviewText);
 
   // Build a substantive abstract that summarises the review's actual findings.
   // The reviewer is instructed to emit a leading "## Review Summary" section; we
   // parse it out (no extra model call) and fall back to a deterministic summary
   // composed from the recommendation + extracted revisions when it is absent.
   const reviewSummary = extractReviewSummary(reviewText);
-  const reviewAbstract = buildPeerReviewAbstract({
+  const reviewAbstract = redactAuthors(buildPeerReviewAbstract({
     title,
     persona,
     recommendation: recommendationParsed,
@@ -247,7 +241,7 @@ export async function runPeerReview(opts: RunPeerReviewOptions): Promise<PeerRev
     majorRevisions,
     minorRevisions,
     ethicsSummary,
-  });
+  }));
 
   // Derive meaningful Future Science keywords from the audited paper itself.
   const paperKeywords = fsAbstracts.find((a) => a.documentId === documentId)?.keywords ?? [];

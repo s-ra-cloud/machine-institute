@@ -56,6 +56,9 @@ const storageMock = {
   async getPeerReviewsByBatchId(batchId: string): Promise<FakeReview[]> {
     return Array.from(fakeDb.rows.values()).filter((r) => r.batchId === batchId);
   },
+  async getAllPeerReviews(): Promise<FakeReview[]> {
+    return Array.from(fakeDb.rows.values());
+  },
   async getReviewedPaperPersonasForJournal(_journalId: string) {
     return [] as Array<{ documentId: string; persona: string; modelName: string | null }>;
   },
@@ -90,7 +93,11 @@ vi.mock("../auth", () => ({
     req.user = { id, email: req.headers["x-test-user-email"] || "" };
     next();
   },
-  optionalAuth: (_req: any, _res: any, next: any) => next(),
+  optionalAuth: (req: any, _res: any, next: any) => {
+    const id = req.headers["x-test-user-id"];
+    if (id) req.user = { id, email: req.headers["x-test-user-email"] || "" };
+    next();
+  },
   adminAuth: (_req: any, _res: any, next: any) => next(),
   requireSession: (_req: any, _res: any, next: any) => next(),
 }));
@@ -259,6 +266,116 @@ describe("MB suffix — batch path", () => {
     for (const row of fakeDb.rows.values()) {
       expect(row.orchestratorName).toBe("MachInstit G5aR-N1");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Custom orchestrator names still get the MB suffix
+// ---------------------------------------------------------------------------
+describe("MB suffix — custom orchestrator name", () => {
+  it("appends MB to a custom orchestrator name on the single path", async () => {
+    const res = await post("/api/peer-reviews", {
+      persona: "bR",
+      modelName: "claude-sonnet-4-5",
+      documentId: "doc-1",
+      modelBlind: true,
+      orchestratorName: "Custom Orchestrator X1",
+    });
+    expect(res.status).toBe(201);
+    const review = await res.json();
+    expect(review.orchestratorName).toBe("Custom Orchestrator X1MB");
+  });
+
+  it("appends MB to a custom orchestrator name on the batch path (without doubling an existing MB)", async () => {
+    fsAbstracts = [paper(1), paper(2)];
+    const res = await post("/api/peer-reviews/batch", {
+      persona: "aR",
+      modelName: "gpt-5",
+      count: 2,
+      modelBlind: true,
+      orchestratorName: "Custom BatchRunner MB",
+    });
+    expect(res.status).toBe(201);
+    for (const row of fakeDb.rows.values()) {
+      expect(row.orchestratorName).toBe("Custom BatchRunner MB");
+      expect(row.orchestratorName.endsWith("MBMB")).toBe(false);
+    }
+  });
+
+  it("leaves a custom orchestrator name untouched when modelBlind is off", async () => {
+    const res = await post("/api/peer-reviews", {
+      persona: "bR",
+      modelName: "claude-sonnet-4-5",
+      documentId: "doc-3",
+      orchestratorName: "Custom Orchestrator X1",
+    });
+    expect(res.status).toBe(201);
+    const review = await res.json();
+    expect(review.orchestratorName).toBe("Custom Orchestrator X1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Access control on analysis data
+// ---------------------------------------------------------------------------
+describe("model-blind analysis data access control", () => {
+  function get(path: string, headers: Record<string, string> = {}) {
+    return fetch(`${baseUrl}${path}`, { headers: { "x-forwarded-for": nextIp(), ...headers } });
+  }
+
+  it("rejects unauthenticated access to /api/peer-reviews/evaluations", async () => {
+    const res = await get("/api/peer-reviews/evaluations");
+    expect(res.status).toBe(401);
+  });
+
+  it("allows authenticated access to /api/peer-reviews/evaluations with targetModel data", async () => {
+    fakeDb.rows.set("r1", {
+      id: "r1", journalId: "mirror", documentId: "doc-1", persona: "bR",
+      modelName: "gpt-5", status: "completed", orchestratorName: "MachInstit G5bR-N1MB",
+      modelBlind: true, targetModel: "Claude Sonnet 4.5",
+    } as FakeReview);
+
+    const res = await get("/api/peer-reviews/evaluations", USER_A);
+    expect(res.status).toBe(200);
+    const rows = await res.json();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].targetModel).toBe("Claude Sonnet 4.5");
+    expect(rows[0].modelBlind).toBe(true);
+  });
+
+  it("hides targetModel of blind reviews from unauthenticated callers on public list and detail endpoints", async () => {
+    fakeDb.rows.set("r-blind", {
+      id: "r-blind", journalId: "mirror", documentId: "doc-1", persona: "bR",
+      modelName: "gpt-5", status: "completed", orchestratorName: null,
+      modelBlind: true, targetModel: "Claude Sonnet 4.5",
+      // Trace fields carry the real convention-coded author — must be hidden too.
+      sourceTrace: { paperUsed: { title: "T", authors: "MachInstit CS45bR-N1", date: "2026-05-01", documentId: "doc-1" } },
+      promptTrace: { userInput: "raw prompt containing MachInstit CS45bR-N1" },
+    } as FakeReview);
+    fakeDb.rows.set("r-open", {
+      id: "r-open", journalId: "mirror", documentId: "doc-2", persona: "bR",
+      modelName: "gpt-5", status: "completed", orchestratorName: null,
+      modelBlind: false, targetModel: "GPT-4o",
+    } as FakeReview);
+
+    // Unauthenticated: blind review's targetModel is withheld, non-blind stays.
+    const anonList = await (await get("/api/peer-reviews")).json();
+    const anonBlind = anonList.find((r: any) => r.id === "r-blind");
+    expect(anonBlind.targetModel).toBeNull();
+    // Trace fields (which embed the convention-coded author) are hidden too.
+    expect(anonBlind.sourceTrace).toBeNull();
+    expect(anonBlind.promptTrace).toBeNull();
+    expect(anonList.find((r: any) => r.id === "r-open").targetModel).toBe("GPT-4o");
+    const anonDetail = await (await get("/api/peer-reviews/r-blind")).json();
+    expect(anonDetail.targetModel).toBeNull();
+    expect(anonDetail.sourceTrace).toBeNull();
+    expect(anonDetail.promptTrace).toBeNull();
+    expect(JSON.stringify(anonDetail)).not.toMatch(/CS45bR-N1/);
+
+    // Authenticated: full data.
+    const authDetail = await (await get("/api/peer-reviews/r-blind", USER_A)).json();
+    expect(authDetail.targetModel).toBe("Claude Sonnet 4.5");
+    expect(authDetail.sourceTrace).not.toBeNull();
   });
 });
 
