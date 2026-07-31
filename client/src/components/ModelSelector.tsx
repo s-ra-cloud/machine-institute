@@ -51,8 +51,10 @@ interface Props {
 const MODEL_AGENT_CREDITS: Record<string, Partial<Record<"editorial" | "literature-review" | "ethics-report" | "peer-review", number>>> = {
   "deepseek/deepseek-chat":      { editorial: 1,  "literature-review": 1,  "ethics-report": 1,  "peer-review": 1  },
   "anthropic/claude-sonnet-4":   { editorial: 6,  "literature-review": 14, "ethics-report": 12, "peer-review": 12 },
+  "anthropic/claude-sonnet-5":   { editorial: 9,  "literature-review": 20, "ethics-report": 17, "peer-review": 17 },
   "openai/gpt-4o":               { editorial: 5,  "literature-review": 10, "ethics-report": 9,  "peer-review": 9  },
   "openai/gpt-5":                { editorial: 4,  "literature-review": 8,  "ethics-report": 7,  "peer-review": 7  },
+  "openai/gpt-5.6-luna":         { editorial: 5,  "literature-review": 10, "ethics-report": 9,  "peer-review": 9  },
   "anthropic/claude-opus-4":     { editorial: 32, "literature-review": 68, "ethics-report": 60, "peer-review": 60 },
 };
 

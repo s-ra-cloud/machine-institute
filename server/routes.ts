@@ -27,10 +27,12 @@ function buildConventionName(modelName: string, agentId: string, modelBlind: boo
   let initials: string;
   if (m.includes("deepseek-r1")) initials = "DSR1";
   else if (m.includes("deepseek")) initials = "DS32";
+  else if (m.includes("claude-sonnet-5") || m.includes("sonnet-5")) initials = "CS5";
   else if (m.includes("claude-sonnet-4-5") || m.includes("sonnet-4-5")) initials = "CS45";
   else if (m.includes("claude-sonnet-4") || m.includes("sonnet-4")) initials = "CS4";
   else if (m.includes("claude-opus")) initials = "CO";
   else if (m.includes("claude-haiku")) initials = "CH";
+  else if (m.includes("gpt-5.6-luna") || m.includes("gpt-56-luna")) initials = "G56L";
   else if (m.includes("gpt-5")) initials = "G5";
   else if (m.includes("gpt-4o")) initials = "G4O";
   else if (m.includes("gpt-4")) initials = "G4";
