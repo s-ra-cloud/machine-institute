@@ -50,6 +50,41 @@ function withMbSuffix(name: string, modelBlind: boolean): string {
   return `${trimmed}MB`;
 }
 
+/**
+ * Builds the agent description that is always sent to Future Science.
+ * Stamps the resolved model, agent role/persona, and provider mode so the
+ * FS catalogue always carries full provenance, even when no custom description
+ * was supplied.  Any user-supplied text is appended after the config block.
+ */
+function buildFsAgentDescription(opts: {
+  model: string;
+  agentId: string;
+  providerMode?: "platform" | "byoc" | string | null;
+  modelBlind?: boolean;
+  userDescription?: string | null;
+}): string {
+  const ROLE_LABELS: Record<string, string> = {
+    bR:  "Balanced Reviewer",
+    aR:  "Adversarial Reviewer",
+    iR:  "Interpretive Reviewer",
+    rR:  "Rigorous Reviewer",
+    bLR: "Literature Reviewer",
+    H:   "Research Standards Verification Agent",
+  };
+  const role     = ROLE_LABELS[opts.agentId] || opts.agentId;
+  const provider = opts.providerMode === "byoc"
+    ? "BYOC (user-supplied key)"
+    : "Machine Institute Platform (via OpenRouter)";
+  const parts = [
+    `Agent: ${opts.agentId} (${role})`,
+    `Model: ${opts.model}`,
+    `Provider: ${provider}`,
+  ];
+  if (opts.modelBlind) parts.push("Model-blind evaluation: true");
+  const base = parts.join(". ");
+  return opts.userDescription ? `${base}. ${opts.userDescription}` : base;
+}
+
 // Map publication-audit flags to Future Science revision arrays:
 // CRITICAL + MAJOR flags become majorRevisions, MINOR flags become
 // minorRevisions. Each flag summary is the revision description.
@@ -1800,7 +1835,7 @@ I will now provide the papers.`;
             keywords: submissionKeywords,
             agentName: robotAgentName,
             orchestratorName: humanOrchestratorName,
-            agentDescription: data.agentDescription,
+            agentDescription: buildFsAgentDescription({ model: model, agentId: data.agentId || "bLR", providerMode: config.providerMode, userDescription: data.agentDescription }),
           });
 
           if (subResult) {
@@ -1981,7 +2016,7 @@ I will now provide the papers.`;
         initiativeDocId,
         initiativeSlug: report.journalId,
         orchestratorName: humanOrchestratorName,
-        agentDescription: report.agentDescription || undefined,
+        agentDescription: buildFsAgentDescription({ model: report.modelName || "", agentId: report.agentId || "H", providerMode: report.providerMode, userDescription: report.agentDescription }),
         linkOriginalContribution,
         majorRevisions: ethicsMajor,
         minorRevisions: ethicsMinor,
@@ -2606,7 +2641,7 @@ I will now provide the papers.`;
             prompt3: H_SOLO_REPORT_CHUNK_3_PROMPT,
             userId: data.userId || null,
             orchestratorName: data.orchestratorName || null,
-            agentDescription: "Research Standards Verification Agent (H) operating in peer-review co-author mode.",
+            agentDescription: buildFsAgentDescription({ model: resolvedModel, agentId: "H", providerMode: modelConfig.providerMode, userDescription: "Research Standards Verification Agent (H) operating in peer-review co-author mode." }),
             modelProvider: modelConfig.provider,
             modelName: resolvedModel,
             providerMode: modelConfig.providerMode,
@@ -2750,7 +2785,7 @@ I will now provide the papers.`;
             initiativeDocId,
             initiativeSlug: data.journalId,
             orchestratorName: humanOrchestratorName,
-            agentDescription: data.agentDescription || undefined,
+            agentDescription: buildFsAgentDescription({ model: resolvedModel, agentId: persona, providerMode: modelConfig.providerMode, modelBlind: isModelBlind, userDescription: data.agentDescription }),
             linkOriginalContribution,
             ethicsCoauthorName: includeEthicsCoauthor && result.ethicsUsed ? ethicsAgentName : undefined,
             majorRevisions: result.majorRevisions,
@@ -2875,7 +2910,7 @@ I will now provide the papers.`;
         initiativeDocId,
         initiativeSlug: review.journalId,
         orchestratorName: humanOrchestratorName,
-        agentDescription: review.agentDescription || undefined,
+        agentDescription: buildFsAgentDescription({ model: review.modelName || "", agentId: review.persona || "bR", providerMode: review.providerMode, modelBlind: !!review.modelBlind, userDescription: review.agentDescription }),
         linkOriginalContribution,
         ethicsCoauthorName: ethicsAgentName,
         majorRevisions: republishMajor,
@@ -2987,7 +3022,7 @@ I will now provide the papers.`;
         keywords,
         agentName: robotAgentName,
         orchestratorName: humanOrchestratorName,
-        agentDescription: review.agentDescription || undefined,
+        agentDescription: buildFsAgentDescription({ model: review.modelName || "", agentId: review.agentId || "bLR", providerMode: review.providerMode, userDescription: review.agentDescription }),
       });
 
       if (!subResult) {
@@ -3290,7 +3325,7 @@ I will now provide the papers.`;
             initiativeDocId,
             initiativeSlug: data.journalId,
             orchestratorName: humanOrchestratorName,
-            agentDescription: data.agentDescription || undefined,
+            agentDescription: buildFsAgentDescription({ model: resolvedModel, agentId: data.agentId || "H", providerMode: modelConfig.providerMode, userDescription: data.agentDescription }),
             linkOriginalContribution,
             majorRevisions: ethicsMajor,
             minorRevisions: ethicsMinor,
@@ -4056,7 +4091,7 @@ Pick a fresh perspective, a different subset of papers, or an underexplored them
             initiativeSlug: "mirror",
             metadata: {
               orchestratorName: editorial?.orchestratorName || undefined,
-              agentDescription: editorial?.agentDescription || undefined,
+              agentDescription: buildFsAgentDescription({ model: model, agentId: editorial?.agentId || "editorial-agent", providerMode: config.providerMode, userDescription: editorial?.agentDescription }),
               promptUsed: effectiveSystemPrompt,
               topic: effectiveTopic,
               modelProvider: editorial?.modelProvider || config.provider,
