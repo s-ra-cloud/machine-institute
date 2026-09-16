@@ -298,6 +298,9 @@ interface EthicsReportSubmitOptions {
 const ETHICS_TYPE_FALLBACKS_FIELD = ["Peer-review", "Unreviewed manuscript", "Other", "Article"];
 const ETHICS_TYPE_FALLBACKS_RESPONSE = ["Response to a contribution", "Peer-review", "Unreviewed manuscript", "Other", "Article"];
 const PEER_REVIEW_TYPE_FALLBACKS = ["Peer-review", "Response to a contribution", "Unreviewed manuscript", "Other", "Article"];
+// Reproduction reports respond to a specific paper, so they lead with the
+// response-style type (which carries linkOriginalContribution + revisions).
+const REPRODUCTION_TYPE_FALLBACKS = ["Response to a contribution", "Peer-review", "Unreviewed manuscript", "Other", "Article"];
 
 // Exported for regression testing that every fallback array only contains
 // Future Science–accepted `type` strings.
@@ -306,6 +309,7 @@ export const _FS_TYPE_FALLBACKS_FOR_TEST = {
   ethicsField: ETHICS_TYPE_FALLBACKS_FIELD,
   ethicsResponse: ETHICS_TYPE_FALLBACKS_RESPONSE,
   peerReview: PEER_REVIEW_TYPE_FALLBACKS,
+  reproduction: REPRODUCTION_TYPE_FALLBACKS,
 } as const;
 
 export interface PeerReviewSubmitOptions {
@@ -325,6 +329,23 @@ export interface PeerReviewSubmitOptions {
   // Only sent when linkOriginalContribution is present (FS requirement).
   majorRevisions?: RevisionItem[];
   minorRevisions?: RevisionItem[];
+  // Contribution `type` chain to try in order; defaults to the peer-review chain.
+  typeFallbacks?: readonly string[];
+  // Name of the uploaded markdown file.
+  fileName?: string;
+}
+
+// Reproduction reports share the peer-review submission shape (single agent
+// author, linked original contribution, revision arrays) and differ only in
+// the contribution type chain and file name.
+export function submitReproductionToFutureScience(
+  options: Omit<PeerReviewSubmitOptions, "typeFallbacks" | "fileName" | "ethicsCoauthorName">,
+): Promise<{ documentId: string; url: string } | null> {
+  return submitPeerReviewToFutureScience({
+    ...options,
+    typeFallbacks: REPRODUCTION_TYPE_FALLBACKS,
+    fileName: "reproduction-report.md",
+  });
 }
 
 export async function submitPeerReviewToFutureScience(
@@ -335,6 +356,8 @@ export async function submitPeerReviewToFutureScience(
     console.warn("FUTURE_SCIENCE_API_KEY is not set — skipping Future Science peer review submission.");
     return null;
   }
+  const typeFallbacks = options.typeFallbacks ?? PEER_REVIEW_TYPE_FALLBACKS;
+  const fileName = options.fileName ?? "peer-review.md";
 
   const visibleAuthorName = splitAgentNameForFutureScience(options.agentName);
   const authors: Array<Record<string, unknown>> = [{
@@ -385,7 +408,7 @@ export async function submitPeerReviewToFutureScience(
   }
 
   let lastErr: string = "";
-  for (const candidateType of PEER_REVIEW_TYPE_FALLBACKS) {
+  for (const candidateType of typeFallbacks) {
     try {
       const metadata: Record<string, unknown> = { ...baseMetadata, type: candidateType };
       // linkOriginalContribution + revisions are only valid for response-style types
@@ -397,7 +420,7 @@ export async function submitPeerReviewToFutureScience(
       const formData = new FormData();
       formData.append("data", JSON.stringify({ data: metadata }));
       const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
-      formData.append("file", mdBlob, "peer-review.md");
+      formData.append("file", mdBlob, fileName);
 
       console.log("Future Science peer-review api-bot attempt:", {
         type: candidateType,
@@ -460,7 +483,7 @@ export async function submitPeerReviewToFutureScience(
       title: compoundTitle,
       author: singleAuthor,
     };
-    for (const candidateType of PEER_REVIEW_TYPE_FALLBACKS) {
+    for (const candidateType of typeFallbacks) {
       try {
         const metadata: Record<string, unknown> = { ...fallbackBase, type: candidateType };
         if (candidateType !== "Peer-review" && candidateType !== "Response to a contribution") {
@@ -471,7 +494,7 @@ export async function submitPeerReviewToFutureScience(
         const formData = new FormData();
         formData.append("data", JSON.stringify({ data: metadata }));
         const mdBlob = new Blob([options.markdownContent], { type: "text/markdown" });
-        formData.append("file", mdBlob, "peer-review.md");
+        formData.append("file", mdBlob, fileName);
         const resp = await fetch(`${FS_API_BASE}/contributions/api-bots`, {
           method: "POST",
           headers: { "x-api-key": apiKey },

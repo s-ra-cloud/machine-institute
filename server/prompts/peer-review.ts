@@ -285,10 +285,14 @@ function extractTitleKeywords(title: string): string[] {
     .filter((w) => w.length >= 4 && !TITLE_STOPWORDS.has(w));
 }
 
-export function derivePeerReviewKeywords(opts: {
+// Keywords for any contribution that responds to a target paper: the target's
+// own FS keywords first, then salient title terms, then a category tag, padded
+// to the FS 3-keyword minimum.
+export function deriveContributionKeywords(opts: {
   paperKeywords?: string[] | null;
   paperTitle?: string | null;
-  persona: PeerReviewPersona;
+  categoryTag: string;
+  fallbacks: string[];
 }): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -301,30 +305,35 @@ export function derivePeerReviewKeywords(opts: {
     }
   };
 
-  // 1. The audited paper's own Future Science keywords are the best source.
   for (const k of opts.paperKeywords ?? []) {
     if (out.length >= 6) break;
     add(k);
   }
-
-  // 2. Salient terms from the paper title fill any remaining slots.
   if (out.length < 5) {
     for (const term of extractTitleKeywords(opts.paperTitle || "")) {
       if (out.length >= 6) break;
       add(term);
     }
   }
-
-  // 3. A category tag so the contribution is still discoverable as a review.
-  add("peer review");
-
-  // 4. Pad with a minimal generic set to satisfy the FS 3-keyword minimum.
-  for (const f of ["ai research", "research standards", opts.persona]) {
+  add(opts.categoryTag);
+  for (const f of opts.fallbacks) {
     if (out.length >= 3) break;
     add(f);
   }
-
   return out.slice(0, 8);
+}
+
+export function derivePeerReviewKeywords(opts: {
+  paperKeywords?: string[] | null;
+  paperTitle?: string | null;
+  persona: PeerReviewPersona;
+}): string[] {
+  return deriveContributionKeywords({
+    paperKeywords: opts.paperKeywords,
+    paperTitle: opts.paperTitle,
+    categoryTag: "peer review",
+    fallbacks: ["ai research", "research standards", opts.persona],
+  });
 }
 
 // Parse "Major Revisions" / "Minor Revisions" markdown sections out of a peer

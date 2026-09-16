@@ -261,4 +261,206 @@ export const PER_USER_PLATFORM_LIMITS: Record<string, { max: number; windowMs: n
   "literature-review": { max: 10, windowMs: 24 * 60 * 60 * 1000 },
   "ethics-report": { max: 5, windowMs: 24 * 60 * 60 * 1000 },
   "peer-review": { max: 5, windowMs: 24 * 60 * 60 * 1000 },
+  reproduction: { max: 2, windowMs: 24 * 60 * 60 * 1000 },
 };
+
+// ---------------------------------------------------------------------------
+// Tool-using agent loop (OpenAI-compatible function calling)
+// ---------------------------------------------------------------------------
+
+export interface ToolSpec {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface ToolCallRecord {
+  index: number;
+  name: string;
+  args: Record<string, unknown>;
+  result: string;
+  durationMs: number;
+  error: boolean;
+}
+
+export interface ToolLoopOptions {
+  maxToolCalls: number;
+  /** Absolute epoch-ms deadline after which the agent is told to wrap up. */
+  deadlineMs: number;
+  maxTokens?: number;
+  temperature?: number;
+  maxToolResultChars?: number;
+  contextCharBudget?: number;
+  onToolCall?: (record: ToolCallRecord) => Promise<void> | void;
+  onRound?: (round: number, assistantText: string | null) => Promise<void> | void;
+}
+
+export interface ToolLoopResult {
+  content: string;
+  toolCalls: ToolCallRecord[];
+  rounds: number;
+  stoppedBy: "model" | "tool-budget" | "deadline" | "round-cap";
+}
+
+const ELIDED_TOOL_OUTPUT = "[earlier tool output elided to fit the context window — re-run the tool if you need it again]";
+const KEEP_RECENT_TOOL_MESSAGES = 8;
+
+function messageChars(m: { content?: unknown }): number {
+  return typeof m.content === "string" ? m.content.length : JSON.stringify(m.content ?? "").length;
+}
+
+// Drop the bodies of the oldest tool results once the transcript outgrows the
+// model's context window, keeping the most recent ones intact.
+function compactMessages(messages: Array<Record<string, unknown>>, budgetChars: number): void {
+  let total = messages.reduce((n, m) => n + messageChars(m), 0);
+  if (total <= budgetChars) return;
+  const toolIdx = messages.map((m, i) => (m.role === "tool" ? i : -1)).filter(i => i >= 0);
+  const candidates = toolIdx.slice(0, Math.max(0, toolIdx.length - KEEP_RECENT_TOOL_MESSAGES));
+  for (const i of candidates) {
+    const m = messages[i];
+    if (m.content === ELIDED_TOOL_OUTPUT) continue;
+    total -= messageChars(m) - ELIDED_TOOL_OUTPUT.length;
+    m.content = ELIDED_TOOL_OUTPUT;
+    if (total <= budgetChars) break;
+  }
+}
+
+function truncateToolResult(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, Math.floor(max * 0.7))}\n\n[... ${s.length - max} chars truncated ...]\n\n${s.slice(-Math.floor(max * 0.3))}`;
+}
+
+export async function runToolLoop(
+  config: ModelProviderConfig,
+  systemPrompt: string,
+  userMessage: string,
+  tools: ToolSpec[],
+  execute: (name: string, args: Record<string, unknown>) => Promise<string>,
+  options: ToolLoopOptions,
+): Promise<ToolLoopResult> {
+  if (config.provider === "anthropic" && config.providerMode === "byoc") {
+    throw new Error("Tool-using agents require an OpenAI-compatible provider (platform, OpenAI, or OpenRouter). Anthropic BYOC is not supported for this workflow yet.");
+  }
+  const client = createLLMClient(config);
+  if (!client) throw new Error(`Could not create LLM client for provider: ${config.provider}`);
+  const model = resolveModelName(config);
+  const maxTokens = options.maxTokens ?? 8000;
+  const temperature = options.temperature ?? 0.2;
+  const maxToolResultChars = options.maxToolResultChars ?? 12_000;
+  const contextBudget = options.contextCharBudget ?? Math.floor(getContextWindow(config) * 3.0);
+
+  const messages: Array<Record<string, unknown>> = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userMessage },
+  ];
+  const toolDefs = tools.map(t => ({
+    type: "function" as const,
+    function: { name: t.name, description: t.description, parameters: t.parameters },
+  }));
+
+  const toolCalls: ToolCallRecord[] = [];
+  const maxRounds = options.maxToolCalls * 2 + 5;
+  let stoppedBy: ToolLoopResult["stoppedBy"] = "model";
+  let forceFinal = false;
+
+  for (let round = 1; round <= maxRounds; round++) {
+    const budgetExhausted = toolCalls.length >= options.maxToolCalls;
+    const pastDeadline = Date.now() >= options.deadlineMs;
+    if (!forceFinal && (budgetExhausted || pastDeadline)) {
+      forceFinal = true;
+      stoppedBy = budgetExhausted ? "tool-budget" : "deadline";
+      messages.push({
+        role: "user",
+        content: budgetExhausted
+          ? "STOP: your tool-call budget is exhausted. Do not call any more tools. Write your final logbook now, based strictly on the tool outputs you have already seen. Any claim you could not finish testing must be recorded as inconclusive in the logbook."
+          : "STOP: the time budget is exhausted. Do not call any more tools. Write your final logbook now, based strictly on the tool outputs you have already seen. Any claim you could not finish testing must be recorded as inconclusive in the logbook.",
+      });
+    }
+    compactMessages(messages, contextBudget);
+
+    let completion: any;
+    try {
+      completion = await client.chat.completions.create(
+        {
+          model,
+          messages: messages as any,
+          ...(forceFinal ? {} : { tools: toolDefs as any, tool_choice: "auto" as const }),
+          max_tokens: maxTokens,
+          temperature,
+        },
+        { timeout: 600_000 },
+      );
+    } catch (err: any) {
+      const status = err?.status ?? err?.statusCode ?? "unknown";
+      const body = err?.error ?? err?.message ?? String(err);
+      console.error(`[ToolLoop] API request failed — model=${model} round=${round} status=${status}:`, JSON.stringify(body));
+      throw new Error(`LLM request failed (${status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
+    }
+    if (completion?.error) {
+      throw new Error(`LLM API error: ${completion.error.message || JSON.stringify(completion.error)}`);
+    }
+    const msg = completion.choices?.[0]?.message;
+    if (!msg) throw new Error("LLM returned no message.");
+
+    const calls: Array<{ id: string; function: { name: string; arguments: string } }> =
+      (msg.tool_calls || []).filter((c: any) => c?.type === "function" && c.function?.name);
+    const assistantText: string | null = typeof msg.content === "string" && msg.content.trim() ? msg.content : null;
+    messages.push({
+      role: "assistant",
+      content: assistantText ?? "",
+      ...(calls.length ? { tool_calls: calls } : {}),
+    });
+    await options.onRound?.(round, assistantText);
+
+    if (calls.length === 0) {
+      return { content: assistantText ?? "", toolCalls, rounds: round, stoppedBy };
+    }
+
+    for (const call of calls) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+      } catch {
+        args = { _raw: call.function.arguments };
+      }
+      const started = Date.now();
+      let result: string;
+      let error = false;
+      if (toolCalls.length >= options.maxToolCalls) {
+        result = "Tool budget exhausted — this call was not executed. Write your final logbook.";
+        error = true;
+      } else {
+        try {
+          result = await execute(call.function.name, args);
+        } catch (err) {
+          result = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
+          error = true;
+        }
+      }
+      result = truncateToolResult(result ?? "", maxToolResultChars);
+      const record: ToolCallRecord = {
+        index: toolCalls.length + 1,
+        name: call.function.name,
+        args,
+        result,
+        durationMs: Date.now() - started,
+        error,
+      };
+      toolCalls.push(record);
+      await options.onToolCall?.(record);
+      messages.push({ role: "tool", tool_call_id: call.id, content: result });
+    }
+  }
+
+  // Round cap reached with the model still calling tools: force one last
+  // tool-free turn so a logbook is always produced.
+  stoppedBy = "round-cap";
+  messages.push({ role: "user", content: "STOP: the round limit is reached. Do not call any more tools. Write your final logbook now." });
+  compactMessages(messages, contextBudget);
+  const finalCompletion: any = await client.chat.completions.create(
+    { model, messages: messages as any, max_tokens: maxTokens, temperature },
+    { timeout: 600_000 },
+  );
+  const finalText = finalCompletion?.choices?.[0]?.message?.content;
+  return { content: typeof finalText === "string" ? finalText : "", toolCalls, rounds: maxRounds + 1, stoppedBy };
+}

@@ -3,7 +3,8 @@ import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
 import { useAuth } from "@/lib/auth";
-import { ModelSelector, type ModelConfig, estimatePerRunCredits } from "@/components/ModelSelector";
+import { ModelSelector, type ModelConfig, type GenerationCostType, estimatePerRunCredits } from "@/components/ModelSelector";
+import { PaperPicker } from "@/components/PaperPicker";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
@@ -23,14 +24,45 @@ import {
   FlaskConical,
 } from "lucide-react";
 
-type GenerationType = "editorial" | "literature-review" | "ethics-report" | "peer-review" | "peer-review-batch";
+type GenerationType = "editorial" | "literature-review" | "ethics-report" | "peer-review" | "peer-review-batch" | "reproduce";
 
 interface GenerationConfigResponse {
   platformModels?: Array<{ provider: string; model: string; label: string; maxFullTextPapers?: number }>;
   byocProviders?: Array<{ id: string; label: string; defaultModel: string; maxFullTextPapers?: number }>;
+  reproduction?: { gpuOptions: string[]; defaultGpu: string; sandboxConfigured: boolean; hfTokenConfigured: boolean };
 }
 
 interface PeerPromptResponse { prompt: string }
+
+interface ReproductionRecord {
+  id: string;
+  projectId: string;
+  agentId: string;
+  journalId: string;
+  documentId: string;
+  paperTitle: string | null;
+  gpu: string;
+  judgeModelName: string | null;
+  reportTitle: string | null;
+  reportAbstract: string | null;
+  overallVerdict: string | null;
+  claimsCount: number | null;
+  verifiedCount: number | null;
+  falsifiedCount: number | null;
+  toyCount: number | null;
+  inconclusiveCount: number | null;
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+  orchestratorName: string | null;
+  modelProvider: string | null;
+  modelName: string | null;
+  providerMode: string | null;
+  publishedDocumentId: string | null;
+  promptTrace: string | null;
+  sourceTrace: string | null;
+  topic?: string | null;
+}
 
 interface PeerReviewRecord {
   id: string;
@@ -167,6 +199,14 @@ const labWorkflowCards = [
     locked: false,
   },
   {
+    id: "reproduce",
+    title: "Reproduce a publication",
+    description: "Re-run a paper's shipped code and data in a GPU sandbox, then have a judge model grade each result verified / falsified / toy / inconclusive — as in the ICML reproduction hackathon.",
+    icon: FlaskConical,
+    status: "Available",
+    locked: false,
+  },
+  {
     id: "revise-publication",
     title: "Revise a peer reviewed publication",
     description: "Use reviewer feedback to produce a revised publication draft.",
@@ -257,6 +297,15 @@ export default function GenerationDashboard() {
   const [peerPrompt, setPeerPrompt] = useState<string>("");
   const [peerPromptsExpanded, setPeerPromptsExpanded] = useState(false);
   const [batchCount, setBatchCount] = useState<number>(3);
+  const [reproSelectedDocId, setReproSelectedDocId] = useState<string>("");
+  const [reproSelectedTitle, setReproSelectedTitle] = useState<string>("");
+  const [reproPickerQuery, setReproPickerQuery] = useState<string>("");
+  const [reproGpu, setReproGpu] = useState<string>("A10G");
+  // "" means the judge uses the same model as the reproducer.
+  const [reproJudgeModel, setReproJudgeModel] = useState<string>("");
+  const [reproPrompt, setReproPrompt] = useState<string>("");
+  const [reproJudgePrompt, setReproJudgePrompt] = useState<string>("");
+  const [reproPromptsExpanded, setReproPromptsExpanded] = useState(false);
   // Persist the active batch id so the progress panel survives page reloads
   // (the batch itself is persisted server-side and survives restarts).
   const [activeBatchId, setActiveBatchIdState] = useState<string | null>(() => {
@@ -338,6 +387,7 @@ export default function GenerationDashboard() {
     iR: "Innovation-focused Peer Reviewer agent emphasising originality, novelty, and positioning of a single submitted paper.",
     aR: "Adversarial Peer Reviewer agent stress-testing every claim, assumption and methodology of a single submitted paper.",
     rR: "Rigorous Peer Reviewer agent applying strict methodological scrutiny — statistical correctness, experimental design validity, reproducibility — to a single submitted paper.",
+    P: "Reproduction Agent that re-runs a paper's shipped code and data in an isolated GPU sandbox, keeps a full logbook, and has a separate judge model grade each core result as verified, falsified, toy, or inconclusive.",
   };
 
   const activeRoleCode =
@@ -349,7 +399,9 @@ export default function GenerationDashboard() {
           ? "H"
           : activeType === "peer-review"
             ? peerPersona
-            : "O";
+            : activeType === "reproduce"
+              ? "P"
+              : "O";
 
   const agentDescription = AGENT_DESCRIPTIONS[activeRoleCode] ?? AGENT_DESCRIPTIONS.O;
 
@@ -535,6 +587,96 @@ export default function GenerationDashboard() {
     },
   });
 
+  const { data: defaultReproPrompts } = useQuery<{ reproducerPrompt: string; judgePrompt: string }>({
+    queryKey: ["/api/reproductions/default-prompts"],
+    queryFn: async () => {
+      const res = await fetch("/api/reproductions/default-prompts");
+      return res.json();
+    },
+    enabled: activeType === "reproduce",
+  });
+
+  interface ReproAvailablePaper { documentId: string; title: string; authors: string; date: string; url: string; lockedModels: string[]; reproducedModels: string[] }
+  const { data: reproAvailableData, isFetching: reproPapersFetching, isError: reproPapersError, refetch: refetchReproPapers } = useQuery<{ papers: ReproAvailablePaper[] }>({
+    queryKey: ["/api/reproductions/available-papers", selectedJournal],
+    queryFn: async () => {
+      const res = await fetch(`/api/reproductions/available-papers?journalId=${encodeURIComponent(selectedJournal)}`);
+      if (!res.ok) throw new Error("Failed to load papers");
+      return res.json();
+    },
+    enabled: activeType === "reproduce",
+  });
+  const reproPapersLoading = reproPapersFetching && !reproAvailableData;
+
+  const { data: reproStatus } = useQuery<RateLimitStatus>({
+    queryKey: ["/api/generation/rate-limit-status", "reproduction"],
+    queryFn: async () => {
+      const res = await fetch("/api/generation/rate-limit-status");
+      const data = await res.json();
+      return data["reproduction"] as RateLimitStatus;
+    },
+    enabled: authenticated,
+    refetchInterval: 10000,
+  });
+
+  const { data: recentReproductions } = useQuery<ReproductionRecord[]>({
+    queryKey: ["/api/reproductions-all"],
+    queryFn: async () => {
+      const res = await fetch("/api/reproductions");
+      return res.json();
+    },
+    enabled: authenticated,
+    refetchInterval: 8000,
+  });
+
+  const deleteReproductionMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/reproductions/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete reproduction");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reproductions-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reproductions/available-papers"] });
+    },
+  });
+
+  const generateReproductionMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/reproductions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: selectedJournal,
+          journalId: selectedJournal,
+          documentId: reproSelectedDocId,
+          paperTitle: reproSelectedTitle,
+          gpu: reproGpu,
+          reproducerPrompt: reproPrompt || undefined,
+          judgePrompt: reproJudgePrompt || undefined,
+          judgeModelName: reproJudgeModel || undefined,
+          orchestratorName: orchestratorName || undefined,
+          agentDescription: agentDescription || undefined,
+          providerMode: modelConfig.providerMode,
+          modelProvider: modelConfig.provider,
+          modelName: modelConfig.modelName,
+          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to start reproduction");
+      }
+      return res.json();
+    },
+    onSuccess: (data: { id?: string }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reproductions-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reproductions/available-papers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
+      if (data?.id) navigate(`/reproductions/${data.id}`);
+    },
+  });
+
   const { data: ethicsStatus } = useQuery<RateLimitStatus>({
     queryKey: ["/api/generation/rate-limit-status", "ethics-report"],
     queryFn: async () => {
@@ -561,7 +703,15 @@ export default function GenerationDashboard() {
     if ((activeType === "peer-review" || activeType === "peer-review-batch") && defaultPeerPrompts) {
       setPeerPrompt(defaultPeerPrompts.prompt);
     }
-  }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, defaultEthicsPrompts, defaultPeerPrompts, reviewMode, peerPersona]);
+    if (activeType === "reproduce" && defaultReproPrompts) {
+      if (!reproPrompt) setReproPrompt(defaultReproPrompts.reproducerPrompt);
+      if (!reproJudgePrompt) setReproJudgePrompt(defaultReproPrompts.judgePrompt);
+    }
+  }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, defaultEthicsPrompts, defaultPeerPrompts, defaultReproPrompts, reviewMode, peerPersona]);
+
+  useEffect(() => {
+    if (generationConfig?.reproduction?.defaultGpu) setReproGpu(generationConfig.reproduction.defaultGpu);
+  }, [generationConfig?.reproduction?.defaultGpu]);
 
   useEffect(() => {
     if (user?.displayName) {
@@ -777,6 +927,7 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/literature-reviews-all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ethics-reports-all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reproductions-all"] });
     },
   });
 
@@ -826,6 +977,15 @@ export default function GenerationDashboard() {
     peerSelectedDocId.length > 0 && peerPrompt.trim().length > 0 &&
     (modelConfig.providerMode === "byoc" || peerStatus?.remaining === null || (peerStatus?.remaining ?? 1) > 0);
 
+  const reproIsPending = generateReproductionMutation.isPending;
+  const hasGeneratingRepro = recentReproductions?.some(r => r.status === "pending" || r.status === "generating");
+  const reproConfig = generationConfig?.reproduction;
+  const reproAnthropicByoc = modelConfig.providerMode === "byoc" && modelConfig.provider === "anthropic";
+  const canSubmitRepro = !reproIsPending && !hasGeneratingRepro && byocReady && !reproAnthropicByoc &&
+    reproSelectedDocId.length > 0 && reproPrompt.trim().length > 0 && reproJudgePrompt.trim().length > 0 &&
+    reproConfig?.sandboxConfigured !== false &&
+    (reproStatus?.remaining === null || (reproStatus?.remaining ?? 1) > 0);
+
   const batchIsPending = generatePeerBatchMutation.isPending;
   const eligibleCount = eligibleCountData?.eligibleCount ?? null;
   const batchRunning = !!activeBatchId && batchStatus && !batchStatus.complete;
@@ -841,10 +1001,10 @@ export default function GenerationDashboard() {
     <ModelSelector
       value={modelConfig}
       onChange={setModelConfig}
-      rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : activeType === "peer-review" ? peerStatus : activeType === "peer-review-batch" ? null : reviewStatus}
-      limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "publication audit generations" : activeType === "peer-review" ? "peer review generations" : "review generations"}
+      rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : activeType === "peer-review" ? peerStatus : activeType === "reproduce" ? reproStatus : activeType === "peer-review-batch" ? null : reviewStatus}
+      limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "publication audit generations" : activeType === "peer-review" ? "peer review generations" : activeType === "reproduce" ? "reproduction runs" : "review generations"}
       hasPlatformAccess={hasPlatformAccess}
-      activeType={(activeType === "peer-review-batch" ? "peer-review" : activeType) as "editorial" | "literature-review" | "ethics-report" | "peer-review"}
+      activeType={(activeType === "peer-review-batch" ? "peer-review" : activeType === "reproduce" ? "reproduction" : activeType) as GenerationCostType}
       costMultiplier={(activeType === "peer-review" || activeType === "peer-review-batch") && peerIncludeEthics ? 2 : 1}
     />
   );
@@ -948,7 +1108,9 @@ export default function GenerationDashboard() {
                                     ? reviewStatus
                                     : workflow.id === "peer-review"
                                       ? peerStatus
-                                      : null;
+                                      : workflow.id === "reproduce"
+                                        ? reproStatus
+                                        : null;
                               if (!cardStatus) return null;
                               return (
                                 <span className="text-[10px] font-mono text-muted-foreground/50" data-testid={`text-uses-remaining-${workflow.id}`}>
@@ -983,6 +1145,11 @@ export default function GenerationDashboard() {
                                   setPeerSelectedDocId("");
                                   setPeerSelectedTitle("");
                                   setPeerPickerQuery("");
+                                } else if (workflow.id === "reproduce") {
+                                  setActiveType("reproduce");
+                                  setReproSelectedDocId("");
+                                  setReproSelectedTitle("");
+                                  setReproPickerQuery("");
                                 } else if (workflow.id === "semi-autonomous-cycle") {
                                   setActiveType("peer-review-batch");
                                   // Keep any persisted activeBatchId so batch
@@ -1043,6 +1210,8 @@ export default function GenerationDashboard() {
                       <><BookOpen className="w-5 h-5 text-primary" /> Generate Peer Review</>
                     ) : activeType === "peer-review-batch" ? (
                       <><RotateCcw className="w-5 h-5 text-primary" /> Semi-autonomous research cycle</>
+                    ) : activeType === "reproduce" ? (
+                      <><FlaskConical className="w-5 h-5 text-primary" /> Reproduce a publication</>
                     ) : (
                       <><BookOpen className="w-5 h-5 text-primary" /> Generate Literature Review</>
                     )}
@@ -1056,6 +1225,8 @@ export default function GenerationDashboard() {
                       ? "Run a structured 3-part peer review of a single submitted paper. Each persona (basic / innovation / adversarial) can review a paper once. Optionally add the H Research Standards Verification Agent as a parallel co-author."
                       : activeType === "peer-review-batch"
                       ? "Produce a batch of peer reviews. Pick how many to run — papers not yet reviewed by the selected persona + model are chosen at random and reviewed one after another."
+                      : activeType === "reproduce"
+                      ? "The Reproduction Agent (P) reads the paper and every supplementary file the authors shipped, re-runs their code on a GPU sandbox, keeps a full logbook, and a separate judge grades each core result verified / falsified / toy / inconclusive. The report is published on Future Science as a response to the original paper."
                       : "Configure and generate a literature review on a specific research question."}
                   </p>
                 </div>
@@ -1247,12 +1418,6 @@ export default function GenerationDashboard() {
                 {(activeType === "peer-review" || activeType === "peer-review-batch") && (() => {
                   const isBatch = activeType === "peer-review-batch";
                   const papers = peerAvailableData?.papers || [];
-                  const filtered = peerPickerQuery.trim()
-                    ? papers.filter(p =>
-                        p.title.toLowerCase().includes(peerPickerQuery.toLowerCase()) ||
-                        p.authors.toLowerCase().includes(peerPickerQuery.toLowerCase())
-                      )
-                    : papers;
                   return (
                     <>
                       <div>
@@ -1390,99 +1555,26 @@ export default function GenerationDashboard() {
                             </button>
                           )}
                         </div>
-                        <input
-                          type="text"
-                          value={peerPickerQuery}
-                          onChange={(e) => setPeerPickerQuery(e.target.value)}
-                          placeholder="Search papers by title or author..."
-                          className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
-                          data-testid="input-peer-paper-search"
-                        />
-                        {peerPapersLoading && (
-                          <div className="space-y-1.5" data-testid="progress-peer-papers">
-                            <div className="h-1 w-full bg-border/30 progress-indeterminate" />
-                            <p className="text-[10px] font-mono text-muted-foreground/50">
-                              Loading the Mirror catalogue from Future Science… this can take up to a minute.
-                            </p>
-                          </div>
-                        )}
-                        <div className="border border-border/40 max-h-72 overflow-y-auto" data-testid="list-peer-available-papers">
-                          {filtered.length === 0 && (
-                            <p className="text-xs font-mono text-muted-foreground/50 p-4">
-                              {peerPapersLoading ? (
-                                "Loading available papers…"
-                              ) : peerPapersError ? (
-                                <span>
-                                  Couldn't load papers from Future Science.{" "}
-                                  <button
-                                    type="button"
-                                    onClick={() => refetchPeerPapers()}
-                                    className="text-primary underline underline-offset-2"
-                                    data-testid="button-retry-peer-papers"
-                                  >
-                                    Retry
-                                  </button>
-                                </span>
-                              ) : papers.length === 0 ? (
-                                "No papers available for this journal yet."
-                              ) : (
-                                "No papers match this search."
-                              )}
-                            </p>
+                        <PaperPicker
+                          papers={papers}
+                          loading={peerPapersLoading}
+                          error={peerPapersError}
+                          onRetry={() => refetchPeerPapers()}
+                          query={peerPickerQuery}
+                          onQueryChange={setPeerPickerQuery}
+                          selectedDocId={peerSelectedDocId}
+                          selectedTitle={peerSelectedTitle}
+                          onSelect={(p) => { setPeerSelectedDocId(p.documentId); setPeerSelectedTitle(p.title); }}
+                          isLocked={(p) => p.lockedCombos?.includes(`${peerPersona}:${modelConfig.modelName || ""}`) ?? false}
+                          lockLabel={peerPersona}
+                          renderBadges={(p) => p.reviewedPersonas.length > 0 && (
+                            <span className="text-[9px] font-mono text-muted-foreground/60 border border-border/30 px-2 py-0.5">
+                              {p.reviewedPersonas.join(", ")}
+                            </span>
                           )}
-                          {filtered.map((p) => {
-                            const isSelected = p.documentId === peerSelectedDocId;
-                            const isLockedForPersona = p.lockedCombos?.includes(`${peerPersona}:${modelConfig.modelName || ""}`) ?? false;
-                            return (
-                              <button
-                                key={p.documentId}
-                                onClick={() => {
-                                  if (isLockedForPersona) return;
-                                  setPeerSelectedDocId(p.documentId);
-                                  setPeerSelectedTitle(p.title);
-                                }}
-                                disabled={isLockedForPersona}
-                                className={`w-full text-left px-4 py-3 border-b border-border/20 last:border-b-0 transition-colors ${
-                                  isSelected ? "bg-primary/15 border-l-2 border-l-primary" : isLockedForPersona ? "bg-muted/10 opacity-50 cursor-not-allowed" : "hover:bg-muted/10 cursor-pointer"
-                                }`}
-                                data-testid={`peer-paper-option-${p.documentId}`}
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0 flex-1">
-                                    <p className="text-sm text-foreground/90 truncate">{p.title}</p>
-                                    <p className="text-[10px] font-mono text-muted-foreground/60 mt-1 truncate">
-                                      {p.authors || "(unknown)"} · {p.date}
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-1 flex-shrink-0">
-                                    {p.reviewedPersonas.length > 0 && (
-                                      <span className="text-[9px] font-mono text-muted-foreground/60 border border-border/30 px-2 py-0.5">
-                                        {p.reviewedPersonas.join(", ")}
-                                      </span>
-                                    )}
-                                    {isLockedForPersona && (
-                                      <span className="text-[9px] font-mono text-yellow-400/80 border border-yellow-400/30 px-2 py-0.5 flex items-center gap-1">
-                                        <Lock className="w-3 h-3" /> {peerPersona}
-                                      </span>
-                                    )}
-                                    {isSelected && !isLockedForPersona && (
-                                      <span className="text-[9px] font-mono text-primary border border-primary/40 px-2 py-0.5">Selected</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <p className="text-[10px] font-mono text-muted-foreground/50">
-                          A paper is locked for the selected persona + model combination. Switch to a different model to review the same paper again with {peerPersona}.
-                        </p>
-                        {peerSelectedDocId && (
-                          <div className="border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-mono" data-testid="text-peer-selected-paper">
-                            <span className="text-muted-foreground/60">Selected: </span>
-                            <span className="text-foreground/90">{peerSelectedTitle || peerSelectedDocId}</span>
-                          </div>
-                        )}
+                          hint={<>A paper is locked for the selected persona + model combination. Switch to a different model to review the same paper again with {peerPersona}.</>}
+                          testIdPrefix="peer"
+                        />
                       </div>
                       )}
 
@@ -1513,6 +1605,156 @@ export default function GenerationDashboard() {
                               className="w-full h-40 bg-background border border-border/50 px-4 py-3 text-xs text-foreground/70 resize-none focus:outline-none focus:border-primary/50 font-mono"
                               data-testid="input-peer-prompt"
                             />
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {activeType === "reproduce" && (() => {
+                  const papers = reproAvailableData?.papers || [];
+                  const currentModel = modelConfig.modelName || "";
+                  const platformModels = generationConfig?.platformModels || [];
+                  const gpuOptions = reproConfig?.gpuOptions || ["T4", "A10G", "A100", "H100"];
+                  return (
+                    <>
+                      <div className="grid md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                            Sandbox GPU
+                          </label>
+                          <select
+                            value={reproGpu}
+                            onChange={(e) => setReproGpu(e.target.value)}
+                            className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
+                            data-testid="select-repro-gpu"
+                          >
+                            {gpuOptions.map(g => <option key={g} value={g}>{g}</option>)}
+                          </select>
+                          <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
+                            Modal GPU sandbox, billed to the institute. A10G (24 GB) fits 8B models in fp16; pick A100/H100 for larger models. Budget: 100 tool calls, 2 h wall-clock, 15 min per command.
+                          </p>
+                          {reproConfig && !reproConfig.sandboxConfigured && (
+                            <p className="text-[10px] font-mono text-red-400 mt-2" data-testid="text-repro-sandbox-missing">
+                              Sandbox not configured: MODAL_TOKEN_ID / MODAL_TOKEN_SECRET are missing on the server.
+                            </p>
+                          )}
+                          {reproConfig && reproConfig.sandboxConfigured && !reproConfig.hfTokenConfigured && (
+                            <p className="text-[10px] font-mono text-yellow-400 mt-2" data-testid="text-repro-hf-missing">
+                              HF_TOKEN is not set — gated Hugging Face models (e.g. Llama 3) cannot be downloaded; those results will come back inconclusive.
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
+                            Judge model
+                          </label>
+                          {modelConfig.providerMode === "platform" ? (
+                            <select
+                              value={reproJudgeModel}
+                              onChange={(e) => setReproJudgeModel(e.target.value)}
+                              className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
+                              data-testid="select-repro-judge-model"
+                            >
+                              <option value="">Same as reproduction agent</option>
+                              {platformModels.map(m => <option key={m.model} value={m.model}>{m.label}</option>)}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              value={reproJudgeModel}
+                              onChange={(e) => setReproJudgeModel(e.target.value)}
+                              placeholder="Same as reproduction agent"
+                              className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
+                              data-testid="input-repro-judge-model"
+                            />
+                          )}
+                          <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
+                            A separate model reads the agent's logbook and every command output, then issues verified / falsified / toy / inconclusive per result (in the ICML hackathon, GLM-5.2 played this role). Uses the same provider and key as the reproduction agent.
+                          </p>
+                          {reproAnthropicByoc && (
+                            <p className="text-[10px] font-mono text-red-400 mt-2" data-testid="text-repro-anthropic-unsupported">
+                              The reproduction agent needs tool calling through an OpenAI-compatible API — choose OpenAI or OpenRouter for BYOC.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block">
+                          3. Pick a paper to reproduce
+                        </label>
+                        <PaperPicker
+                          papers={papers}
+                          loading={reproPapersLoading}
+                          error={reproPapersError}
+                          onRetry={() => refetchReproPapers()}
+                          query={reproPickerQuery}
+                          onQueryChange={setReproPickerQuery}
+                          selectedDocId={reproSelectedDocId}
+                          selectedTitle={reproSelectedTitle}
+                          onSelect={(p) => { setReproSelectedDocId(p.documentId); setReproSelectedTitle(p.title); }}
+                          isLocked={(p) => p.lockedModels.includes(currentModel)}
+                          lockLabel="this model"
+                          renderBadges={(p) => p.reproducedModels.length > 0 && (
+                            <span className="text-[9px] font-mono text-muted-foreground/60 border border-border/30 px-2 py-0.5" title={p.reproducedModels.join(", ")}>
+                              reproduced ×{p.reproducedModels.length}
+                            </span>
+                          )}
+                          hint="A paper is locked per reproduction-agent model. Switch to a different model to reproduce the same paper again. The agent reads the paper AND every supplementary file shipped on Future Science (README, scripts, raw results, notebooks)."
+                          testIdPrefix="repro"
+                        />
+                      </div>
+
+                      <div className="border border-border/40 bg-muted/5 p-5" data-testid="repro-pipeline">
+                        <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-3">
+                          How a reproduction runs
+                        </p>
+                        <ol className="space-y-1.5 text-[11px] font-mono text-muted-foreground/70 list-decimal list-inside">
+                          <li>Fetch the paper's full text and all supplementary materials from Future Science.</li>
+                          <li>Boot an isolated Modal GPU sandbox (PyTorch + Transformers) and upload the materials.</li>
+                          <li>The agent extracts the paper's core results and registers each one.</li>
+                          <li>It re-runs the authors' scripts, re-derives statistics from raw result files, and scales down to a toy run only when the full experiment is infeasible.</li>
+                          <li>The judge model grades every result from the logbook and command outputs.</li>
+                          <li>The report is published on Future Science as a "Response to a contribution" linked to the original paper; falsified results become major revisions.</li>
+                        </ol>
+                      </div>
+
+                      <div>
+                        <button
+                          onClick={() => setReproPromptsExpanded(!reproPromptsExpanded)}
+                          className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest hover:text-muted-foreground transition-colors mb-2"
+                          data-testid="button-toggle-repro-prompts"
+                        >
+                          {reproPromptsExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          5. Agent &amp; judge prompts (editable)
+                        </button>
+                        {reproPromptsExpanded && (
+                          <div className="space-y-6">
+                            {[
+                              { key: "agent", label: "Reproduction agent prompt", value: reproPrompt, set: setReproPrompt, dflt: defaultReproPrompts?.reproducerPrompt },
+                              { key: "judge", label: "Judge prompt", value: reproJudgePrompt, set: setReproJudgePrompt, dflt: defaultReproPrompts?.judgePrompt },
+                            ].map(p => (
+                              <div key={p.key} className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-mono text-primary/80 uppercase tracking-widest">{p.label}</span>
+                                  <button
+                                    onClick={() => { if (p.dflt) p.set(p.dflt); }}
+                                    className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                                    data-testid={`button-reset-repro-prompt-${p.key}`}
+                                  >
+                                    <RotateCcw className="w-3 h-3" /> Reset
+                                  </button>
+                                </div>
+                                <textarea
+                                  value={p.value}
+                                  onChange={(e) => p.set(e.target.value)}
+                                  className="w-full h-48 bg-background border border-border/50 px-4 py-3 text-xs text-foreground/70 resize-none focus:outline-none focus:border-primary/50 font-mono"
+                                  data-testid={`input-repro-prompt-${p.key}`}
+                                />
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -1783,6 +2025,7 @@ export default function GenerationDashboard() {
                         else if (activeType === "ethics-report") generateEthicsMutation.mutate();
                         else if (activeType === "peer-review") generatePeerReviewMutation.mutate();
                         else if (activeType === "peer-review-batch") generatePeerBatchMutation.mutate();
+                        else if (activeType === "reproduce") generateReproductionMutation.mutate();
                         else generateReviewMutation.mutate();
                       }}
                       disabled={
@@ -1790,15 +2033,18 @@ export default function GenerationDashboard() {
                         : activeType === "ethics-report" ? !canSubmitEthics
                         : activeType === "peer-review" ? !canSubmitPeer
                         : activeType === "peer-review-batch" ? !canSubmitBatch
+                        : activeType === "reproduce" ? !canSubmitRepro
                         : !canSubmitReview
                       }
                       className="px-8 py-3 bg-primary text-white font-mono text-sm tracking-widest hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(124,58,237,0.2)] hover:shadow-[0_0_30px_rgba(124,58,237,0.4)] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none flex items-center gap-2"
                       data-testid="button-generate"
                     >
-                      {(editorialIsPending || reviewIsPending || ethicsIsPending || peerIsPending || batchIsPending) ? (
+                      {(editorialIsPending || reviewIsPending || ethicsIsPending || peerIsPending || batchIsPending || reproIsPending) ? (
                         <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</>
                       ) : activeType === "peer-review-batch" ? (
                         <><RotateCcw className="w-4 h-4" /> Produce {batchCount} peer review{batchCount === 1 ? "" : "s"}</>
+                      ) : activeType === "reproduce" ? (
+                        <><FlaskConical className="w-4 h-4" /> Reproduce</>
                       ) : (
                         <>{activeType === "editorial" ? <PenTool className="w-4 h-4" /> : activeType === "ethics-report" ? <Info className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />} Generate</>
                       )}
@@ -1864,9 +2110,14 @@ export default function GenerationDashboard() {
                       Peer review submitted — 3-part review in progress{peerIncludeEthics ? " with parallel ethics co-author" : ""}.
                     </p>
                   )}
-                  {(generateEditorialMutation.isError || generateReviewMutation.isError || generateEthicsMutation.isError || generatePeerReviewMutation.isError || generatePeerBatchMutation.isError) && (
+                  {generateReproductionMutation.isSuccess && (
+                    <p className="text-[10px] font-mono text-green-400 mt-3" data-testid="text-success-repro">
+                      Reproduction started — the GPU sandbox is booting. Runs can take up to two hours; the report page updates automatically.
+                    </p>
+                  )}
+                  {(generateEditorialMutation.isError || generateReviewMutation.isError || generateEthicsMutation.isError || generatePeerReviewMutation.isError || generatePeerBatchMutation.isError || generateReproductionMutation.isError) && (
                     <p className="text-[10px] font-mono text-red-400 mt-3" data-testid="text-error">
-                      {((generateEditorialMutation.error || generateReviewMutation.error || generateEthicsMutation.error || generatePeerReviewMutation.error || generatePeerBatchMutation.error) as Error)?.message}
+                      {((generateEditorialMutation.error || generateReviewMutation.error || generateEthicsMutation.error || generatePeerReviewMutation.error || generatePeerBatchMutation.error || generateReproductionMutation.error) as Error)?.message}
                     </p>
                   )}
                 </div>
@@ -1882,7 +2133,7 @@ export default function GenerationDashboard() {
                   Evaluation history →
                 </Link>
               </div>
-              {isAdmin && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0) + (recentEthics?.length ?? 0) + (recentPeerReviews?.length ?? 0)) > 0 && (
+              {isAdmin && ((recentEditorials?.length ?? 0) + (recentReviews?.length ?? 0) + (recentEthics?.length ?? 0) + (recentPeerReviews?.length ?? 0) + (recentReproductions?.length ?? 0)) > 0 && (
                 <button
                   onClick={() => {
                     if (confirm("Clear all generation history? This cannot be undone.")) {
@@ -2219,7 +2470,92 @@ export default function GenerationDashboard() {
                 </div>
               ))}
 
-              {(!recentEditorials?.length && !recentReviews?.length && !recentEthics?.length && !recentPeerReviews?.length) && (
+              {(recentReproductions || []).slice(0, 5).map((run) => (
+                <div key={run.id} className="border border-border/40 bg-muted/5 p-5" data-testid={`card-repro-${run.id}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <FlaskConical className="w-4 h-4 text-primary/60" />
+                      <span className="text-[10px] font-mono text-primary uppercase tracking-widest">Reproduction (P)</span>
+                      <StatusBadge status={run.status} />
+                      {run.overallVerdict && (
+                        <span className={`text-[10px] font-mono px-2 py-0.5 border capitalize ${
+                          run.overallVerdict === "falsified" ? "text-red-400 border-red-400/30" :
+                          run.overallVerdict.startsWith("verified") || run.overallVerdict === "partially verified" ? "text-green-400 border-green-400/30" :
+                          run.overallVerdict === "toy" ? "text-blue-300 border-blue-300/30" :
+                          "text-yellow-400 border-yellow-400/30"
+                        }`} data-testid={`badge-verdict-${run.id}`}>
+                          {run.overallVerdict}
+                        </span>
+                      )}
+                      {run.status === "completed" && run.claimsCount !== null && (
+                        <span className="text-[10px] font-mono text-muted-foreground/60">
+                          {run.verifiedCount ?? 0}/{run.claimsCount} verified · {run.falsifiedCount ?? 0} falsified
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-mono text-muted-foreground/60 border border-border/30 px-2 py-0.5">{run.gpu}</span>
+                      {run.modelName && (
+                        <span className="text-[10px] font-mono text-muted-foreground/60 border border-border/30 px-2 py-0.5" data-testid={`text-model-${run.id}`}>
+                          {run.modelName}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono text-muted-foreground/40">
+                        {new Date(run.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </div>
+                  <h3 className="font-heading font-semibold mb-1">
+                    <Link href={`/reproductions/${run.id}`} className="hover:text-primary transition-colors">
+                      {run.reportTitle || run.paperTitle || run.documentId}
+                    </Link>
+                  </h3>
+
+                  {(run.status === "pending" || run.status === "generating") && (
+                    <div className="flex items-center gap-2 mt-3 text-xs font-mono text-primary/50">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Running in GPU sandbox — this can take up to two hours...</span>
+                    </div>
+                  )}
+
+                  {run.status === "completed" && (
+                    <div className="mt-3 flex items-center gap-4">
+                      <Link
+                        href={`/reproductions/${run.id}`}
+                        className="text-[10px] font-mono text-primary hover:underline flex items-center gap-1"
+                        data-testid={`link-view-repro-${run.id}`}
+                      >
+                        View full report <ExternalLink className="w-3 h-3" />
+                      </Link>
+                      <button
+                        onClick={() => setShowMetadata(showMetadata === run.id ? null : run.id)}
+                        className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                        data-testid={`button-metadata-${run.id}`}
+                      >
+                        <Info className="w-3 h-3" />
+                        {showMetadata === run.id ? "Hide" : "Show"} metadata
+                      </button>
+                    </div>
+                  )}
+                  {showMetadata === run.id && <MetadataPanel record={run} />}
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        if (confirm("Delete this reproduction? The paper becomes reproducible again with this model. This cannot be undone.")) {
+                          deleteReproductionMutation.mutate(run.id);
+                        }
+                      }}
+                      disabled={deleteReproductionMutation.isPending}
+                      className="mt-3 text-[10px] font-mono text-muted-foreground/30 hover:text-red-400 transition-colors disabled:opacity-40"
+                      data-testid={`button-delete-repro-${run.id}`}
+                    >
+                      Delete reproduction
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {(!recentEditorials?.length && !recentReviews?.length && !recentEthics?.length && !recentPeerReviews?.length && !recentReproductions?.length) && (
                 <div className="text-center py-12 border border-border/30 bg-muted/5">
                   <p className="text-muted-foreground font-mono text-sm">No generations yet.</p>
                   <p className="text-[10px] font-mono text-muted-foreground/40 mt-2">

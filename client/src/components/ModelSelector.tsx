@@ -35,9 +35,11 @@ interface Props {
   rateLimitInfo?: { remaining: number | null; resetAt: number | null; count?: number } | null;
   limitLabel?: string;
   hasPlatformAccess?: boolean;
-  activeType?: "editorial" | "literature-review" | "ethics-report" | "peer-review";
+  activeType?: GenerationCostType;
   costMultiplier?: number;
 }
+
+export type GenerationCostType = "editorial" | "literature-review" | "ethics-report" | "peer-review" | "reproduction";
 
 // Per-generation credit cost estimates (1 credit ≈ $0.01 USD).
 // Derived from observed token usage on this stack:
@@ -45,17 +47,19 @@ interface Props {
 //   - Literature Rev.:  ~15k input + ~6k output tokens (corpus + synthesis)
 //   - Ethics Report:    ~15k input + ~5k output tokens (full paper + verifier blocks)
 //   - Peer Review:      ~15k input + ~5k output tokens (3 chunks, similar profile)
+//   - Reproduction:     agentic loop, up to 100 tool rounds × ~30k input tokens
+//                       + judge pass (LLM only — GPU sandbox time is billed separately)
 // Combined with OpenRouter pass-through pricing per 1M tokens
 // (DeepSeek Chat $0.27/$1.10, Claude Sonnet 4 $3/$15, GPT-4o $2.50/$10,
 //  GPT-5 $1.25/$10, Claude Opus 4 $15/$75).
-const MODEL_AGENT_CREDITS: Record<string, Partial<Record<"editorial" | "literature-review" | "ethics-report" | "peer-review", number>>> = {
-  "deepseek/deepseek-chat":      { editorial: 1,  "literature-review": 1,  "ethics-report": 1,  "peer-review": 1  },
-  "anthropic/claude-sonnet-4":   { editorial: 6,  "literature-review": 14, "ethics-report": 12, "peer-review": 12 },
-  "anthropic/claude-sonnet-5":   { editorial: 9,  "literature-review": 20, "ethics-report": 17, "peer-review": 17 },
-  "openai/gpt-4o":               { editorial: 5,  "literature-review": 10, "ethics-report": 9,  "peer-review": 9  },
-  "openai/gpt-5":                { editorial: 4,  "literature-review": 8,  "ethics-report": 7,  "peer-review": 7  },
-  "openai/gpt-5.6-luna":         { editorial: 5,  "literature-review": 10, "ethics-report": 9,  "peer-review": 9  },
-  "anthropic/claude-opus-4":     { editorial: 32, "literature-review": 68, "ethics-report": 60, "peer-review": 60 },
+const MODEL_AGENT_CREDITS: Record<string, Partial<Record<GenerationCostType, number>>> = {
+  "deepseek/deepseek-chat":      { editorial: 1,  "literature-review": 1,  "ethics-report": 1,  "peer-review": 1,  reproduction: 15  },
+  "anthropic/claude-sonnet-4":   { editorial: 6,  "literature-review": 14, "ethics-report": 12, "peer-review": 12, reproduction: 150 },
+  "anthropic/claude-sonnet-5":   { editorial: 9,  "literature-review": 20, "ethics-report": 17, "peer-review": 17, reproduction: 210 },
+  "openai/gpt-4o":               { editorial: 5,  "literature-review": 10, "ethics-report": 9,  "peer-review": 9,  reproduction: 110 },
+  "openai/gpt-5":                { editorial: 4,  "literature-review": 8,  "ethics-report": 7,  "peer-review": 7,  reproduction: 90  },
+  "openai/gpt-5.6-luna":         { editorial: 5,  "literature-review": 10, "ethics-report": 9,  "peer-review": 9,  reproduction: 110 },
+  "anthropic/claude-opus-4":     { editorial: 32, "literature-review": 68, "ethics-report": 60, "peer-review": 60, reproduction: 700 },
 };
 
 function formatCostBadge(modelKey: string, activeType?: Props["activeType"], multiplier: number = 1): string | null {

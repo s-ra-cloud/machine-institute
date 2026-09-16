@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, type EthicsReport, type InsertEthicsReport, type PeerReview, type InsertPeerReview, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys, ethicsReports, peerReviews } from "@shared/schema";
+import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, type EthicsReport, type InsertEthicsReport, type PeerReview, type InsertPeerReview, type Reproduction, type InsertReproduction, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys, ethicsReports, peerReviews, reproductions } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, gte, lt, lte, inArray, and, notInArray, ne } from "drizzle-orm";
 
@@ -83,6 +83,15 @@ export interface IStorage {
   deleteAllPeerReviews(): Promise<void>;
   getReviewedPaperPersonasForJournal(journalId: string): Promise<Array<{ documentId: string; persona: string; modelName: string | null }>>;
   resetPeerReviewLocksForJournal(journalId: string): Promise<number>;
+
+  createReproduction(run: InsertReproduction): Promise<Reproduction | null>;
+  getReproductionById(id: string): Promise<Reproduction | undefined>;
+  getReproductionsByProject(projectId: string): Promise<Reproduction[]>;
+  getAllReproductions(): Promise<Reproduction[]>;
+  updateReproduction(id: string, updates: Partial<Reproduction>): Promise<Reproduction>;
+  deleteReproduction(id: string): Promise<void>;
+  deleteAllReproductions(): Promise<void>;
+  getReproducedPapersForJournal(journalId: string): Promise<Array<{ documentId: string; modelName: string | null; status: string }>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -513,6 +522,48 @@ export class DatabaseStorage implements IStorage {
     const result = await db.delete(peerReviews)
       .where(and(eq(peerReviews.journalId, journalId), ne(peerReviews.status, "completed")));
     return (result as any).rowCount ?? 0;
+  }
+
+  async createReproduction(run: InsertReproduction): Promise<Reproduction | null> {
+    try {
+      const [created] = await db.insert(reproductions).values(run).returning();
+      return created;
+    } catch (err: any) {
+      if (err?.code === "23505") return null;
+      throw err;
+    }
+  }
+
+  async getReproductionById(id: string): Promise<Reproduction | undefined> {
+    const [row] = await db.select().from(reproductions).where(eq(reproductions.id, id));
+    return row;
+  }
+
+  async getReproductionsByProject(projectId: string): Promise<Reproduction[]> {
+    return db.select().from(reproductions).where(eq(reproductions.projectId, projectId)).orderBy(desc(reproductions.createdAt));
+  }
+
+  async getAllReproductions(): Promise<Reproduction[]> {
+    return db.select().from(reproductions).orderBy(desc(reproductions.createdAt));
+  }
+
+  async updateReproduction(id: string, updates: Partial<Reproduction>): Promise<Reproduction> {
+    const [updated] = await db.update(reproductions).set(updates).where(eq(reproductions.id, id)).returning();
+    return updated;
+  }
+
+  async deleteReproduction(id: string): Promise<void> {
+    await db.delete(reproductions).where(eq(reproductions.id, id));
+  }
+
+  async deleteAllReproductions(): Promise<void> {
+    await db.delete(reproductions);
+  }
+
+  async getReproducedPapersForJournal(journalId: string): Promise<Array<{ documentId: string; modelName: string | null; status: string }>> {
+    return db.select({ documentId: reproductions.documentId, modelName: reproductions.modelName, status: reproductions.status })
+      .from(reproductions)
+      .where(and(eq(reproductions.journalId, journalId), ne(reproductions.status, "failed")));
   }
 
   async getAuditedPaperIdsForJournal(journalId: string): Promise<string[]> {
