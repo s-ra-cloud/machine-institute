@@ -569,7 +569,10 @@ export default function GenerationDashboard() {
     queryKey: ["/api/peer-reviews-all"],
     queryFn: async () => {
       const res = await fetch("/api/peer-reviews");
-      return res.json();
+      if (!res.ok) throw new Error("Failed to load peer reviews");
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("Invalid peer review response");
+      return data;
     },
     enabled: authenticated,
     refetchInterval: 8000,
@@ -623,7 +626,10 @@ export default function GenerationDashboard() {
     queryKey: ["/api/reproductions-all"],
     queryFn: async () => {
       const res = await fetch("/api/reproductions");
-      return res.json();
+      if (!res.ok) throw new Error("Failed to load reproductions");
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("Invalid reproduction response");
+      return data;
     },
     enabled: authenticated,
     refetchInterval: 8000,
@@ -723,7 +729,10 @@ export default function GenerationDashboard() {
     queryKey: ["/api/editorials"],
     queryFn: async () => {
       const res = await fetch("/api/editorials");
-      return res.json();
+      if (!res.ok) throw new Error("Failed to load editorials");
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("Invalid editorial response");
+      return data;
     },
     enabled: authenticated,
     refetchInterval: 8000,
@@ -733,7 +742,10 @@ export default function GenerationDashboard() {
     queryKey: ["/api/ethics-reports-all"],
     queryFn: async () => {
       const res = await fetch("/api/ethics-reports");
-      return res.json();
+      if (!res.ok) throw new Error("Failed to load ethics reports");
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("Invalid ethics report response");
+      return data;
     },
     enabled: authenticated,
     refetchInterval: 8000,
@@ -743,7 +755,10 @@ export default function GenerationDashboard() {
     queryKey: ["/api/literature-reviews-all"],
     queryFn: async () => {
       const res = await fetch("/api/literature-reviews");
-      return res.json();
+      if (!res.ok) throw new Error("Failed to load literature reviews");
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("Invalid literature review response");
+      return data;
     },
     enabled: authenticated,
     refetchInterval: 8000,
