@@ -19,7 +19,6 @@ PORT = "5000"
 [deployment]
 deploymentTarget = "autoscale"
 build = ["bash", "script/deploy-build.sh"]
-publicDir = "dist/public"
 run = ["node", "dist/index.cjs"]
 
 [workflows]
