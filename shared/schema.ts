@@ -438,3 +438,95 @@ export const insertPeerReviewSchema = createInsertSchema(peerReviews).omit({
 
 export type InsertPeerReview = z.infer<typeof insertPeerReviewSchema>;
 export type PeerReview = typeof peerReviews.$inferSelect;
+
+export const reproductions = pgTable("reproductions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: text("project_id").notNull(),
+  agentId: text("agent_id").notNull().default("P"),
+  journalId: text("journal_id").notNull().default("mirror"),
+  documentId: text("document_id").notNull(),
+  paperTitle: text("paper_title"),
+  gpu: text("gpu").notNull().default("A10G"),
+  // The reproducer (tool-using agent) runs on modelName; the judge that grades
+  // its logbook can be a different model, as in the ICML reproduction hackathon.
+  judgeModelProvider: text("judge_model_provider"),
+  judgeModelName: text("judge_model_name"),
+  prompt1: text("prompt1").notNull(),
+  prompt2: text("prompt2").notNull(),
+  contentMarkdown: text("content_markdown"),
+  contentHtml: text("content_html"),
+  logbookMarkdown: text("logbook_markdown"),
+  reportTitle: text("report_title"),
+  reportAbstract: text("report_abstract"),
+  overallVerdict: text("overall_verdict"),
+  verdictsJson: text("verdicts_json"),
+  claimsCount: integer("claims_count"),
+  verifiedCount: integer("verified_count"),
+  falsifiedCount: integer("falsified_count"),
+  toyCount: integer("toy_count"),
+  inconclusiveCount: integer("inconclusive_count"),
+  toolCallsCount: integer("tool_calls_count"),
+  sandboxId: text("sandbox_id"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  userId: text("user_id"),
+  orchestratorName: text("orchestrator_name"),
+  agentDescription: text("agent_description"),
+  modelProvider: text("model_provider"),
+  modelName: text("model_name"),
+  providerMode: text("provider_mode"),
+  publishedDocumentId: text("published_document_id"),
+  promptTrace: text("prompt_trace"),
+  sourceTrace: text("source_trace"),
+}, (table) => ({
+  // A paper is locked per reproducer model by non-failed runs, mirroring the
+  // peer-review lock: the same paper can be reproduced again with another model.
+  uniquePaperModel: uniqueIndex("reproductions_journal_doc_model_uniq")
+    .on(table.journalId, table.documentId, table.modelName)
+    .where(sql`status <> 'failed'`),
+}));
+
+export const insertReproductionSchema = createInsertSchema(reproductions).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+  contentMarkdown: true,
+  contentHtml: true,
+  logbookMarkdown: true,
+  reportTitle: true,
+  reportAbstract: true,
+  overallVerdict: true,
+  verdictsJson: true,
+  claimsCount: true,
+  verifiedCount: true,
+  falsifiedCount: true,
+  toyCount: true,
+  inconclusiveCount: true,
+  toolCallsCount: true,
+  sandboxId: true,
+  status: true,
+}).extend({
+  projectId: z.string().min(1),
+  agentId: z.string().min(1).default("P"),
+  journalId: z.string().min(1),
+  documentId: z.string().min(1),
+  paperTitle: z.string().nullable().optional(),
+  gpu: z.string().min(1),
+  judgeModelProvider: z.string().nullable().optional(),
+  judgeModelName: z.string().nullable().optional(),
+  prompt1: z.string().min(1),
+  prompt2: z.string().min(1),
+  userId: z.string().nullable().optional(),
+  orchestratorName: z.string().nullable().optional(),
+  agentDescription: z.string().nullable().optional(),
+  modelProvider: z.string().nullable().optional(),
+  modelName: z.string().nullable().optional(),
+  providerMode: z.string().nullable().optional(),
+  publishedDocumentId: z.string().nullable().optional(),
+  promptTrace: z.string().nullable().optional(),
+  sourceTrace: z.string().nullable().optional(),
+});
+
+export type InsertReproduction = z.infer<typeof insertReproductionSchema>;
+export type Reproduction = typeof reproductions.$inferSelect;

@@ -21,69 +21,14 @@ import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
 import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, getReadingBudget, READING_BUDGET, type ModelProviderConfig } from "./model-service";
 import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, fetchAbstractsAndKeywordsCached, extractTrendsAndGaps, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
-
-function buildConventionName(modelName: string, agentId: string, modelBlind: boolean = false): string {
-  const m = (modelName || "").toLowerCase();
-  let initials: string;
-  if (m.includes("deepseek-r1")) initials = "DSR1";
-  else if (m.includes("deepseek")) initials = "DS32";
-  else if (m.includes("claude-sonnet-5") || m.includes("sonnet-5")) initials = "CS5";
-  else if (m.includes("claude-sonnet-4-5") || m.includes("sonnet-4-5")) initials = "CS45";
-  else if (m.includes("claude-sonnet-4") || m.includes("sonnet-4")) initials = "CS4";
-  else if (m.includes("claude-opus")) initials = "CO";
-  else if (m.includes("claude-haiku")) initials = "CH";
-  else if (m.includes("gpt-5.6-luna") || m.includes("gpt-56-luna")) initials = "G56L";
-  else if (m.includes("gpt-5")) initials = "G5";
-  else if (m.includes("gpt-4o")) initials = "G4O";
-  else if (m.includes("gpt-4")) initials = "G4";
-  else initials = "ML";
-  // Model-blind reviews are flagged with an MB suffix at the end of the
-  // evaluator's configuration code (e.g. "MachInstit CS45bR-N1MB").
-  return `MachInstit ${initials}${agentId}-N1${modelBlind ? "MB" : ""}`;
-}
-
-// Ensures the MB (model-blind) suffix on an evaluator code, including
-// user-supplied custom orchestrator names.
-function withMbSuffix(name: string, modelBlind: boolean): string {
-  const trimmed = name.trim();
-  if (!modelBlind || !trimmed || trimmed.endsWith("MB")) return trimmed;
-  return `${trimmed}MB`;
-}
-
-/**
- * Builds the agent description that is always sent to Future Science.
- * Stamps the resolved model, agent role/persona, and provider mode so the
- * FS catalogue always carries full provenance, even when no custom description
- * was supplied.  Any user-supplied text is appended after the config block.
- */
-function buildFsAgentDescription(opts: {
-  model: string;
-  agentId: string;
-  providerMode?: "platform" | "byoc" | string | null;
-  modelBlind?: boolean;
-  userDescription?: string | null;
-}): string {
-  const ROLE_LABELS: Record<string, string> = {
-    bR:  "Balanced Reviewer",
-    aR:  "Adversarial Reviewer",
-    iR:  "Interpretive Reviewer",
-    rR:  "Rigorous Reviewer",
-    bLR: "Literature Reviewer",
-    H:   "Research Standards Verification Agent",
-  };
-  const role     = ROLE_LABELS[opts.agentId] || opts.agentId;
-  const provider = opts.providerMode === "byoc"
-    ? "BYOC (user-supplied key)"
-    : "Machine Institute Platform (via OpenRouter)";
-  const parts = [
-    `Agent: ${opts.agentId} (${role})`,
-    `Model: ${opts.model}`,
-    `Provider: ${provider}`,
-  ];
-  if (opts.modelBlind) parts.push("Model-blind evaluation: true");
-  const base = parts.join(". ");
-  return opts.userDescription ? `${base}. ${opts.userDescription}` : base;
-}
+import { submitReproductionToFutureScience } from "./future-science";
+import { buildConventionName, withMbSuffix, buildFsAgentDescription } from "./agent-naming";
+import { INITIATIVE_DOC_IDS, JOURNAL_DISPLAY_NAMES, INITIATIVE_SLUGS, getJournalDisplayName, resolveJournalId } from "./journals";
+import { fetchJournalPaperCatalogue } from "./paper-catalogue";
+import { runReproduction } from "./reproduce";
+import { REPRODUCER_PROMPT, JUDGE_PROMPT, verdictsToRevisions, type ClaimVerdict } from "./prompts/reproduce";
+import { GPU_OPTIONS, DEFAULT_GPU, resolveGpu, isModalConfigured } from "./modal-sandbox";
+import { insertReproductionSchema, type Reproduction } from "@shared/schema";
 
 // Map publication-audit flags to Future Science revision arrays:
 // CRITICAL + MAJOR flags become majorRevisions, MINOR flags become
@@ -542,24 +487,8 @@ export async function registerRoutes(
     }
   });
 
-  const INITIATIVE_DOC_IDS: Record<string, string> = {
-    "mirror": "efyjiy34s5lgbx2gr50k5h9l",
-  };
-
-  const JOURNAL_DISPLAY_NAMES: Record<string, string> = {
-    "mirror": "Mirror — An Automated Journal of AI Interpretability",
-  };
-
-  function getJournalDisplayName(journalId: string): string {
-    return JOURNAL_DISPLAY_NAMES[journalId] || journalId;
-  }
-
   const INITIATIVE_INSTITUTIONS: Record<string, string[]> = {
     "mirror": ["Machine Institute"],
-  };
-
-  const INITIATIVE_SLUGS: Record<string, string> = {
-    "mirror": "mirror",
   };
 
   const ROLE_CODES: Record<string, string> = {
@@ -945,6 +874,17 @@ I will now provide the papers.`;
         chunks: 3,
         ethicsCoauthorDefault: true,
       },
+      reproduction: {
+        defaultJournalId: "mirror",
+        availableJournals: Object.keys(INITIATIVE_DOC_IDS),
+        roleCode: "P",
+        agentNamePattern: "MachInstit <ModelCode>P-N1",
+        gpuOptions: GPU_OPTIONS,
+        defaultGpu: DEFAULT_GPU,
+        sandboxConfigured: isModalConfigured(),
+        hfTokenConfigured: !!(process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN),
+        verdicts: ["verified", "falsified", "toy", "inconclusive"],
+      },
     });
   });
 
@@ -967,6 +907,7 @@ I will now provide the papers.`;
       await storage.deleteAllEditorials();
       await storage.deleteAllEthicsReports();
       await storage.deleteAllPeerReviews();
+      await storage.deleteAllReproductions();
       return res.json({ success: true });
     } catch (err: any) {
       console.error("Error clearing generation history:", err);
@@ -980,52 +921,24 @@ I will now provide the papers.`;
       const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
       const isPlatformMember = PLATFORM_ACCESS_EMAILS.includes(user.email);
 
+      const resourceTypes = Object.keys(PER_USER_PLATFORM_LIMITS);
       if (isPlatformMember) {
-        return res.json({
-          editorial: { remaining: null, max: null, resetAt: null },
-          "literature-review": { remaining: null, max: null, resetAt: null },
-          "ethics-report": { remaining: null, max: null, resetAt: null },
-          "peer-review": { remaining: null, max: null, resetAt: null },
-        });
+        return res.json(Object.fromEntries(resourceTypes.map(t => [t, { remaining: null, max: null, resetAt: null }])));
       }
 
-      const editorialLimit = await storage.getUserRateLimit(user.id, "editorial");
-      const reviewLimit = await storage.getUserRateLimit(user.id, "literature-review");
-      const ethicsLimit = await storage.getUserRateLimit(user.id, "ethics-report");
-      const peerLimit = await storage.getUserRateLimit(user.id, "peer-review");
-      const editorialConfig = PER_USER_PLATFORM_LIMITS["editorial"];
-      const reviewConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
-      const ethicsConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
-      const peerConfig = PER_USER_PLATFORM_LIMITS["peer-review"];
-
       const now = Date.now();
-      const editorialRemaining = editorialLimit
-        ? (now - editorialLimit.windowStart.getTime() >= editorialConfig.windowMs
-          ? editorialConfig.max
-          : Math.max(0, editorialConfig.max - editorialLimit.count))
-        : editorialConfig.max;
-      const reviewRemaining = reviewLimit
-        ? (now - reviewLimit.windowStart.getTime() >= reviewConfig.windowMs
-          ? reviewConfig.max
-          : Math.max(0, reviewConfig.max - reviewLimit.count))
-        : reviewConfig.max;
-      const ethicsRemaining = ethicsLimit
-        ? (now - ethicsLimit.windowStart.getTime() >= ethicsConfig.windowMs
-          ? ethicsConfig.max
-          : Math.max(0, ethicsConfig.max - ethicsLimit.count))
-        : ethicsConfig.max;
-      const peerRemaining = peerLimit
-        ? (now - peerLimit.windowStart.getTime() >= peerConfig.windowMs
-          ? peerConfig.max
-          : Math.max(0, peerConfig.max - peerLimit.count))
-        : peerConfig.max;
-
-      return res.json({
-        editorial: { remaining: editorialRemaining, max: editorialConfig.max, resetAt: editorialLimit ? editorialLimit.windowStart.getTime() + editorialConfig.windowMs : null },
-        "literature-review": { remaining: reviewRemaining, max: reviewConfig.max, resetAt: reviewLimit ? reviewLimit.windowStart.getTime() + reviewConfig.windowMs : null },
-        "ethics-report": { remaining: ethicsRemaining, max: ethicsConfig.max, resetAt: ethicsLimit ? ethicsLimit.windowStart.getTime() + ethicsConfig.windowMs : null },
-        "peer-review": { remaining: peerRemaining, max: peerConfig.max, resetAt: peerLimit ? peerLimit.windowStart.getTime() + peerConfig.windowMs : null },
-      });
+      const out: Record<string, { remaining: number; max: number; resetAt: number | null }> = {};
+      for (const type of resourceTypes) {
+        const config = PER_USER_PLATFORM_LIMITS[type];
+        const limit = await storage.getUserRateLimit(user.id, type);
+        const windowExpired = !limit || now - limit.windowStart.getTime() >= config.windowMs;
+        out[type] = {
+          remaining: windowExpired ? config.max : Math.max(0, config.max - limit!.count),
+          max: config.max,
+          resetAt: limit ? limit.windowStart.getTime() + config.windowMs : null,
+        };
+      }
+      return res.json(out);
     } catch (err: any) {
       return res.status(500).json({ error: "Internal server error" });
     }
@@ -2076,38 +1989,17 @@ I will now provide the papers.`;
     reviewedPersonas: string[]; lockedCombos: string[];
   }
 
-  // Shared computation for the peer-review paper catalogue: fetches the journal's
-  // Future Science corpus + project papers, filters out the institute's own
-  // generated publications, and annotates each with which persona+model combos
-  // already have a (non-failed) review. Reused by the single picker, the
-  // batch eligible-count endpoint, and the batch runner so the "already
-  // reviewed" logic lives in exactly one place.
+  // Peer-review view of the shared journal catalogue: each paper annotated with
+  // which persona+model combos already have a (non-failed) review. Reused by
+  // the single picker, the batch eligible-count endpoint, and the batch runner
+  // so the "already reviewed" logic lives in exactly one place.
   async function getPeerAvailablePapers(journalId: string): Promise<{ initiativeSlug: string; papers: PeerAvailablePaper[] } | null> {
-    const initiativeDocId = INITIATIVE_DOC_IDS[journalId];
-    if (!initiativeDocId) return null;
-    const initiativeSlug = INITIATIVE_SLUGS[journalId] || journalId;
-
-    const [fsData, reviewedRows, projectPapers] = await Promise.all([
-      fetchAbstractsAndKeywordsCached([], initiativeDocId).catch(() => ({ abstracts: [] as any[] })),
+    const [catalogue, reviewedRows] = await Promise.all([
+      fetchJournalPaperCatalogue(journalId),
       storage.getReviewedPaperPersonasForJournal(journalId),
-      storage.getProjectPapers(journalId),
     ]);
+    if (!catalogue) return null;
 
-    const isOwnPublication = (title: string, authors: string): boolean => {
-      const t = (title || "").toLowerCase().trim();
-      const a = (authors || "").toLowerCase();
-      if (t.startsWith("single-paper ethics audit") || t.startsWith("publication audit")) return true;
-      if (t.startsWith("field ethics report") || t.startsWith("publication audit field report")) return true;
-      if (t.startsWith("literature review:")) return true;
-      if (t.startsWith("editorial:")) return true;
-      if (t.startsWith("basic peer review:") || t.startsWith("adversarial peer review:") || t.startsWith("innovation peer review:") || t.startsWith("rigorous peer review:")) return true;
-      if (/machinstit\s+\S+(h|ber|blr|alr|o|br|ar|ir|rr)-n\d/.test(a)) return true;
-      return false;
-    };
-
-    // Build two maps per documentId:
-    //   reviewedPersonas: Set<persona>   — for the display badge (which personas have any review)
-    //   lockedCombos: Set<"persona:model"> — for model-aware lock check
     const reviewedPersonasMap = new Map<string, Set<string>>();
     const lockedCombosMap = new Map<string, Set<string>>();
     for (const r of reviewedRows) {
@@ -2117,39 +2009,12 @@ I will now provide the papers.`;
       lockedCombosMap.get(r.documentId)!.add(`${r.persona}:${r.modelName || ""}`);
     }
 
-    const seen = new Set<string>();
-    const out: PeerAvailablePaper[] = [];
-    for (const a of fsData.abstracts) {
-      const key = a.documentId;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      if (isOwnPublication(a.title, a.authors)) continue;
-      out.push({
-        documentId: a.documentId,
-        title: a.title,
-        authors: a.authors,
-        date: a.date,
-        url: `https://future-science.org/${initiativeSlug}/${a.documentId}`,
-        reviewedPersonas: Array.from(reviewedPersonasMap.get(a.documentId) || []),
-        lockedCombos: Array.from(lockedCombosMap.get(a.documentId) || []),
-      });
-    }
-    for (const p of projectPapers) {
-      if (!p.sourceDocumentId || seen.has(p.sourceDocumentId)) continue;
-      seen.add(p.sourceDocumentId);
-      if (isOwnPublication(p.title, p.authors)) continue;
-      out.push({
-        documentId: p.sourceDocumentId,
-        title: p.title,
-        authors: p.authors,
-        date: p.date,
-        url: p.url || `https://future-science.org/${initiativeSlug}/${p.sourceDocumentId}`,
-        reviewedPersonas: Array.from(reviewedPersonasMap.get(p.sourceDocumentId) || []),
-        lockedCombos: Array.from(lockedCombosMap.get(p.sourceDocumentId) || []),
-      });
-    }
-    out.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-    return { initiativeSlug, papers: out };
+    const papers: PeerAvailablePaper[] = catalogue.papers.map(p => ({
+      ...p,
+      reviewedPersonas: Array.from(reviewedPersonasMap.get(p.documentId) || []),
+      lockedCombos: Array.from(lockedCombosMap.get(p.documentId) || []),
+    }));
+    return { initiativeSlug: catalogue.initiativeSlug, papers };
   }
 
   app.get("/api/peer-reviews/available-papers", async (req, res) => {
@@ -2926,6 +2791,392 @@ I will now provide the papers.`;
   });
 
   // ============ END PEER REVIEW ROUTES ============
+
+  // ============ REPRODUCTION ROUTES ============
+  // The reproduction agent (P) re-runs a paper's shipped code in a Modal GPU
+  // sandbox and a separate judge model grades its logbook. Sandbox compute is
+  // billed to the institute's Modal account, so launching is restricted to the
+  // platform allowlist regardless of LLM provider mode.
+
+  const REPRODUCTION_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
+  const reproductionRateLimit = new Map<string, number>();
+
+  app.get("/api/reproductions/default-prompts", (_req, res) => {
+    res.json({ reproducerPrompt: REPRODUCER_PROMPT, judgePrompt: JUDGE_PROMPT });
+  });
+
+  app.get("/api/reproductions/status", optionalAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const limitConfig = PER_USER_PLATFORM_LIMITS["reproduction"];
+      if (!user) return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
+      const currentLimit = await storage.getUserRateLimit(user.id, "reproduction");
+      if (!currentLimit || Date.now() - currentLimit.windowStart.getTime() >= limitConfig.windowMs) {
+        return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
+      }
+      return res.json({
+        remaining: Math.max(0, limitConfig.max - currentLimit.count),
+        resetAt: currentLimit.windowStart.getTime() + limitConfig.windowMs,
+        count: currentLimit.count,
+      });
+    } catch (err: any) {
+      console.error("Error getting reproduction status:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Journal catalogue annotated with which reproducer models already hold a
+  // (non-failed) run per paper, and which completed.
+  app.get("/api/reproductions/available-papers", async (req, res) => {
+    try {
+      const journalId = (req.query.journalId as string | undefined) || "mirror";
+      const [catalogue, rows] = await Promise.all([
+        fetchJournalPaperCatalogue(journalId),
+        storage.getReproducedPapersForJournal(journalId),
+      ]);
+      if (!catalogue) return res.status(400).json({ error: "Unknown journal." });
+      const locked = new Map<string, Set<string>>();
+      const completed = new Map<string, Set<string>>();
+      for (const r of rows) {
+        const model = r.modelName || "";
+        if (!locked.has(r.documentId)) locked.set(r.documentId, new Set());
+        locked.get(r.documentId)!.add(model);
+        if (r.status === "completed") {
+          if (!completed.has(r.documentId)) completed.set(r.documentId, new Set());
+          completed.get(r.documentId)!.add(model);
+        }
+      }
+      res.json({
+        papers: catalogue.papers.map(p => ({
+          ...p,
+          lockedModels: Array.from(locked.get(p.documentId) || []),
+          reproducedModels: Array.from(completed.get(p.documentId) || []),
+        })),
+      });
+    } catch (err: any) {
+      console.error("Error listing reproduction available papers:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/reproductions", optionalAuth, async (req, res) => {
+    try {
+      const projectId = req.query.projectId as string | undefined;
+      const runs = projectId ? await storage.getReproductionsByProject(projectId) : await storage.getAllReproductions();
+      return res.json(runs);
+    } catch (err: any) {
+      console.error("Error fetching reproductions:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/reproductions/:id", optionalAuth, async (req, res) => {
+    try {
+      const run = await storage.getReproductionById(String(req.params.id));
+      if (!run) return res.status(404).json({ error: "Reproduction not found" });
+      return res.json(run);
+    } catch (err: any) {
+      console.error("Error fetching reproduction:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/reproductions/:id", adminAuth, async (req, res) => {
+    try {
+      await storage.deleteReproduction(String(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error deleting reproduction:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/reproductions", requireAuth, async (req, res) => {
+    try {
+      const {
+        projectId, journalId, documentId, paperTitle, gpu,
+        reproducerPrompt, judgePrompt,
+        modelProvider, modelName, providerMode, byocApiKey,
+        judgeModelProvider, judgeModelName,
+        orchestratorName, agentDescription,
+      } = req.body;
+
+      const VALID_PROVIDER_MODES = ["platform", "byoc"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
+      if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
+      if (judgeModelProvider && !VALID_PROVIDERS.includes(judgeModelProvider)) return res.status(400).json({ error: "Invalid judgeModelProvider." });
+      if (!documentId || typeof documentId !== "string") return res.status(400).json({ error: "documentId is required." });
+
+      const user = (req as any).user;
+      if (!REPRODUCTION_ACCESS_EMAILS.includes(user.email)) {
+        return res.status(403).json({ error: "Reproduction runs use the institute's GPU sandbox and are restricted to institute members." });
+      }
+      if (!isModalConfigured()) {
+        return res.status(503).json({ error: "Reproduction sandboxes are not configured. MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are missing." });
+      }
+      const isPlatform = providerMode !== "byoc";
+      if (isPlatform && !process.env.OPENROUTER_API_KEY) {
+        return res.status(503).json({ error: "Platform model generation is not configured. OPENROUTER_API_KEY is missing." });
+      }
+      if (!isPlatform) {
+        if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
+        if ((modelProvider || "openrouter") === "anthropic") {
+          return res.status(400).json({ error: "The reproduction agent needs tool calling through an OpenAI-compatible API. Use OpenAI or OpenRouter for BYOC." });
+        }
+        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
+        if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
+        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
+      }
+      {
+        const limitConfig = PER_USER_PLATFORM_LIMITS["reproduction"];
+        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "reproduction", limitConfig.max, limitConfig.windowMs);
+        if (!rateCheck.allowed) return res.status(429).json({ error: `Reproduction limit reached (${limitConfig.max} per 24 hours). Try again later.` });
+      }
+      {
+        const clientIp = req.ip || "unknown";
+        const last = reproductionRateLimit.get(clientIp) || 0;
+        if (Date.now() - last < 30000) return res.status(429).json({ error: "Please wait at least 30 seconds between reproduction requests." });
+        reproductionRateLimit.set(clientIp, Date.now());
+      }
+
+      const effectiveJournalId = resolveJournalId(journalId);
+      const modelConfig: ModelProviderConfig = {
+        providerMode: isPlatform ? "platform" : "byoc",
+        provider: modelProvider || "openrouter",
+        modelName: modelName || "",
+        apiKey: isPlatform ? undefined : byocApiKey,
+      };
+      const resolvedModel = resolveModelName(modelConfig);
+      // The judge shares the reproducer's provider mode and key; in BYOC mode it
+      // must therefore use the same provider as the key it was given.
+      const judgeConfig: ModelProviderConfig = {
+        providerMode: modelConfig.providerMode,
+        provider: isPlatform ? (judgeModelProvider || modelConfig.provider) : modelConfig.provider,
+        modelName: judgeModelName || resolvedModel,
+        apiKey: modelConfig.apiKey,
+      };
+
+      const existing = await storage.getReproducedPapersForJournal(effectiveJournalId);
+      if (existing.some(r => r.documentId === documentId && r.modelName === resolvedModel)) {
+        return res.status(409).json({ error: "This paper already has a reproduction run with this model. Select a different model to reproduce it again." });
+      }
+
+      const parsed = insertReproductionSchema.safeParse({
+        projectId: projectId || effectiveJournalId,
+        agentId: "P",
+        journalId: effectiveJournalId,
+        documentId,
+        paperTitle: paperTitle || null,
+        gpu: resolveGpu(gpu),
+        judgeModelProvider: judgeConfig.provider,
+        judgeModelName: judgeConfig.modelName,
+        prompt1: reproducerPrompt || REPRODUCER_PROMPT,
+        prompt2: judgePrompt || JUDGE_PROMPT,
+        userId: user?.id || null,
+        orchestratorName: orchestratorName || buildConventionName(resolvedModel, "P"),
+        agentDescription: agentDescription || null,
+        modelProvider: modelConfig.provider,
+        modelName: resolvedModel,
+        providerMode: modelConfig.providerMode,
+      });
+      if (!parsed.success) return res.status(400).json({ error: fromZodError(parsed.error).message });
+
+      const run = await storage.createReproduction(parsed.data);
+      if (!run) return res.status(409).json({ error: "This paper already has a reproduction run with this model." });
+      res.status(201).json(run);
+
+      generateReproductionBackground(run.id, parsed.data, modelConfig, judgeConfig).catch(err => {
+        console.error("Background reproduction failed:", err);
+      });
+    } catch (err: any) {
+      console.error("Error creating reproduction:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  async function generateReproductionBackground(
+    reproductionId: string,
+    data: { projectId: string; journalId: string; documentId: string; paperTitle?: string | null; gpu: string; prompt1: string; prompt2: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
+    modelConfig: ModelProviderConfig,
+    judgeConfig: ModelProviderConfig,
+  ) {
+    const initiativeDocId = INITIATIVE_DOC_IDS[data.journalId] || INITIATIVE_DOC_IDS["mirror"];
+    if (modelConfig.providerMode === "byoc" && !modelConfig.apiKey && data.userId) {
+      const stored = getEphemeralKey(data.userId, modelConfig.provider);
+      if (stored) {
+        modelConfig.apiKey = stored;
+        judgeConfig.apiKey = stored;
+      }
+    }
+    const resolvedModel = resolveModelName(modelConfig);
+    const robotAgentName = buildConventionName(resolvedModel, "P");
+    const gpu = resolveGpu(data.gpu);
+
+    async function emit(phase: string, message: string) {
+      try {
+        await storage.createResearchEvent({ source: robotAgentName, agentId: "P", phase, message });
+      } catch (e) {
+        console.error(`[Reproduction ${reproductionId}] Failed to emit event:`, e);
+      }
+    }
+
+    try {
+      await storage.updateReproduction(reproductionId, { status: "generating" });
+      const result = await runReproduction({
+        reproductionId,
+        projectId: data.projectId,
+        journalId: data.journalId,
+        initiativeDocId,
+        initiativeSlug: INITIATIVE_SLUGS[data.journalId] || data.journalId,
+        journalDisplayName: getJournalDisplayName(data.journalId),
+        documentId: data.documentId,
+        paperTitle: data.paperTitle || null,
+        reproducerPrompt: data.prompt1,
+        judgePrompt: data.prompt2,
+        modelConfig: { ...modelConfig, modelName: resolvedModel },
+        judgeModelConfig: judgeConfig,
+        gpu,
+        emitEvent: emit,
+      });
+
+      const safeHtml = sanitizeHtml(markdownToHtml(result.markdown));
+      const promptTrace = JSON.stringify({
+        reproducerPrompt: data.prompt1,
+        judgePrompt: data.prompt2,
+        model: resolvedModel, provider: modelConfig.provider, providerMode: modelConfig.providerMode,
+        judgeModel: judgeConfig.modelName, judgeProvider: judgeConfig.provider,
+        gpu,
+        timestamp: new Date().toISOString(),
+      });
+      const sourceTrace = JSON.stringify({
+        journalId: data.journalId,
+        documentId: data.documentId,
+        paperUsed: result.paperUsed,
+        materials: result.materials,
+        sandboxId: result.sandboxId,
+        toolCalls: result.toolCallCount,
+        stoppedBy: result.stoppedBy,
+        keywords: result.keywords,
+      });
+      const updates: Partial<Reproduction> = {
+        contentMarkdown: result.markdown,
+        contentHtml: safeHtml,
+        logbookMarkdown: result.logbook,
+        reportTitle: result.title,
+        reportAbstract: result.abstract,
+        overallVerdict: result.overall,
+        verdictsJson: JSON.stringify(result.results),
+        claimsCount: result.counts.total,
+        verifiedCount: result.counts.verified,
+        falsifiedCount: result.counts.falsified,
+        toyCount: result.counts.toy,
+        inconclusiveCount: result.counts.inconclusive,
+        toolCallsCount: result.toolCallCount,
+        sandboxId: result.sandboxId,
+        promptTrace,
+        sourceTrace,
+        status: "completed",
+        completedAt: new Date(),
+      };
+
+      if (!process.env.FUTURE_SCIENCE_API_KEY) {
+        await emit("fs-submission-skipped", "Future Science submission skipped: FUTURE_SCIENCE_API_KEY is not configured.");
+      } else {
+        try {
+          const humanOrchestratorName = data.orchestratorName && data.orchestratorName !== robotAgentName ? data.orchestratorName : undefined;
+          const revisions = verdictsToRevisions(result.results);
+          const subResult = await submitReproductionToFutureScience({
+            title: result.title,
+            markdownContent: result.markdown,
+            abstract: result.abstract,
+            keywords: result.keywords,
+            agentName: robotAgentName,
+            initiativeDocId,
+            initiativeSlug: data.journalId,
+            orchestratorName: humanOrchestratorName,
+            agentDescription: buildFsAgentDescription({
+              model: resolvedModel, agentId: "P", providerMode: modelConfig.providerMode,
+              extra: [`Judge model: ${judgeConfig.modelName}`, `Sandbox: Modal ${gpu}`],
+              userDescription: data.agentDescription,
+            }),
+            linkOriginalContribution: `https://future-science.org/${data.journalId}/${data.documentId}`,
+            majorRevisions: revisions.major,
+            minorRevisions: revisions.minor,
+          });
+          if (subResult) {
+            updates.publishedDocumentId = subResult.documentId;
+            await emit("fs-submission-success", `Reproduction report submitted to Future Science. Document ID: ${subResult.documentId}`);
+          } else {
+            await emit("fs-submission-failed", "Future Science submission failed (non-fatal).");
+          }
+        } catch (err) {
+          await emit("fs-submission-failed", `Future Science submission failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        }
+      }
+
+      await storage.updateReproduction(reproductionId, updates);
+      await emit("reproduction-completed", `Reproduction completed — overall verdict: ${result.overall} (${result.counts.verified}/${result.counts.total} verified).`);
+    } catch (err: any) {
+      console.error(`[Reproduction ${reproductionId}] Generation failed:`, err);
+      const safeError = (err?.message || "Unknown error").replace(/[<>&"']/g, "");
+      await emit("failure", `Reproduction failed: ${safeError}`);
+      await storage.updateReproduction(reproductionId, {
+        status: "failed",
+        contentHtml: `<p>Reproduction failed: ${safeError}</p>`,
+      });
+    }
+  }
+
+  app.post("/api/reproductions/:id/republish", adminAuth, async (req, res) => {
+    try {
+      const run = await storage.getReproductionById(String(req.params.id));
+      if (!run) return res.status(404).json({ error: "Reproduction not found." });
+      if (run.status !== "completed") return res.status(400).json({ error: `Reproduction is not completed (status: ${run.status}).` });
+      if (!run.contentMarkdown || !run.reportTitle || !run.reportAbstract) return res.status(400).json({ error: "Reproduction is missing content/title/abstract." });
+      if (!process.env.FUTURE_SCIENCE_API_KEY) return res.status(500).json({ error: "FUTURE_SCIENCE_API_KEY is not configured." });
+
+      const initiativeDocId = INITIATIVE_DOC_IDS[run.journalId] || INITIATIVE_DOC_IDS["mirror"];
+      const robotAgentName = buildConventionName(run.modelName || "", "P");
+      const humanOrchestratorName = run.orchestratorName && run.orchestratorName !== robotAgentName ? run.orchestratorName : undefined;
+      let results: ClaimVerdict[] = [];
+      try { results = JSON.parse(run.verdictsJson || "[]"); } catch {}
+      const revisions = verdictsToRevisions(results);
+      let keywords: string[] = [];
+      try {
+        const src = run.sourceTrace ? JSON.parse(run.sourceTrace) : null;
+        if (Array.isArray(src?.keywords)) keywords = src.keywords.filter((k: unknown): k is string => typeof k === "string");
+      } catch {}
+      if (keywords.length < 3) keywords = ["reproduction", "reproducibility", "ai research"];
+
+      const subResult = await submitReproductionToFutureScience({
+        title: run.reportTitle,
+        markdownContent: run.contentMarkdown,
+        abstract: run.reportAbstract,
+        keywords,
+        agentName: robotAgentName,
+        initiativeDocId,
+        initiativeSlug: run.journalId,
+        orchestratorName: humanOrchestratorName,
+        agentDescription: buildFsAgentDescription({
+          model: run.modelName || "", agentId: "P", providerMode: run.providerMode,
+          extra: [`Judge model: ${run.judgeModelName || run.modelName || ""}`, `Sandbox: Modal ${run.gpu}`],
+          userDescription: run.agentDescription,
+        }),
+        linkOriginalContribution: `https://future-science.org/${run.journalId}/${run.documentId}`,
+        majorRevisions: revisions.major,
+        minorRevisions: revisions.minor,
+      });
+      if (!subResult) return res.status(502).json({ error: "Future Science rejected all fallback types." });
+      await storage.updateReproduction(run.id, { publishedDocumentId: subResult.documentId });
+      res.json({ success: true, documentId: subResult.documentId, url: subResult.url });
+    } catch (err: any) {
+      console.error("Error republishing reproduction:", err);
+      res.status(500).json({ error: err?.message || "Internal server error" });
+    }
+  });
+
+  // ============ END REPRODUCTION ROUTES ============
 
   // Admin: delete a single literature review
   app.delete("/api/literature-reviews/:id", adminAuth, async (req, res) => {
