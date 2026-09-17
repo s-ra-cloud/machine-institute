@@ -18,7 +18,7 @@ import OpenAI from "openai";
 import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
-import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, PER_USER_PLATFORM_LIMITS, getReadingBudget, READING_BUDGET, type ModelProviderConfig } from "./model-service";
+import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, getReadingBudget, READING_BUDGET, type ModelProviderConfig } from "./model-service";
 import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, fetchAbstractsAndKeywordsCached, extractTrendsAndGaps, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 import { submitReproductionToFutureScience } from "./future-science";
@@ -843,7 +843,7 @@ I will now provide the papers.`;
         ...p,
         maxFullTextPapers: getReadingBudget({ providerMode: "byoc", provider: p.id, modelName: "" }).maxFullTextPapers,
       })),
-      limits: PER_USER_PLATFORM_LIMITS,
+      limits: {},
       defaultTopics: {
         editorial: "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability",
         "literature-review": "Autonomous AI research agents and their role in scientific discovery",
@@ -916,35 +916,14 @@ I will now provide the papers.`;
   });
 
   app.get("/api/generation/rate-limit-status", requireAuth, async (req: Request, res: Response) => {
-    try {
-      const user = (req as any).user;
-      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
-      const isPlatformMember = PLATFORM_ACCESS_EMAILS.includes(user.email);
-
-      const resourceTypes = Object.keys(PER_USER_PLATFORM_LIMITS);
-      if (isPlatformMember) {
-        return res.json(Object.fromEntries(resourceTypes.map(t => [t, { remaining: null, max: null, resetAt: null }])));
-      }
-
-      const now = Date.now();
-      const out: Record<string, { remaining: number; max: number; resetAt: number | null }> = {};
-      for (const type of resourceTypes) {
-        const config = PER_USER_PLATFORM_LIMITS[type];
-        const limit = await storage.getUserRateLimit(user.id, type);
-        const windowExpired = !limit || now - limit.windowStart.getTime() >= config.windowMs;
-        out[type] = {
-          remaining: windowExpired ? config.max : Math.max(0, config.max - limit!.count),
-          max: config.max,
-          resetAt: limit ? limit.windowStart.getTime() + config.windowMs : null,
-        };
-      }
-      return res.json(out);
-    } catch (err: any) {
-      return res.status(500).json({ error: "Internal server error" });
-    }
+    return res.json({
+      editorial: { remaining: null, max: null, resetAt: null },
+      "literature-review": { remaining: null, max: null, resetAt: null },
+      "ethics-report": { remaining: null, max: null, resetAt: null },
+      "peer-review": { remaining: null, max: null, resetAt: null },
+      reproduction: { remaining: null, max: null, resetAt: null },
+    });
   });
-
-  const reviewRateLimit = new Map<string, number>();
 
   app.post("/api/literature-reviews", requireAuth, async (req, res) => {
     try {
@@ -987,13 +966,6 @@ I will now provide the papers.`;
         if (!process.env.OPENROUTER_API_KEY) {
           return res.status(503).json({ error: "Literature review generation is not configured. OPENROUTER_API_KEY is missing." });
         }
-        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-          const limitConfig = PER_USER_PLATFORM_LIMITS["literature-review"];
-          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "literature-review", limitConfig.max, limitConfig.windowMs);
-          if (!rateCheck.allowed) {
-            return res.status(429).json({ error: `Review generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
-          }
-        }
       }
 
       if (providerMode === "byoc") {
@@ -1005,15 +977,6 @@ I will now provide the papers.`;
           return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         }
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
-      }
-
-      if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-        const clientIp = req.ip || "unknown";
-        const lastRequest = reviewRateLimit.get(clientIp) || 0;
-        if (Date.now() - lastRequest < 30000) {
-          return res.status(429).json({ error: "Please wait at least 30 seconds between review requests." });
-        }
-        reviewRateLimit.set(clientIp, Date.now());
       }
 
       const defaultPrompt = (agentId && agentId.includes("aLR")) ? DEFAULT_ALR_PROMPT : DEFAULT_BLR_PROMPT;
@@ -1784,8 +1747,6 @@ I will now provide the papers.`;
     }
   }
 
-  const ethicsRateLimit = new Map<string, number>();
-
   app.get("/api/ethics-reports/default-prompts", (req, res) => {
     const journalIdRaw = (req.query.journalId as string | undefined) || "";
     const substitution = journalIdRaw && JOURNAL_DISPLAY_NAMES[journalIdRaw]
@@ -1955,25 +1916,7 @@ I will now provide the papers.`;
   // ============ PEER REVIEW ROUTES ============
 
   app.get("/api/peer-reviews/status", optionalAuth, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
-      const limitConfig = PER_USER_PLATFORM_LIMITS["peer-review"];
-      if (!user) return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
-      if (PLATFORM_ACCESS_EMAILS.includes(user.email)) return res.json({ remaining: null, resetAt: null, count: 0 });
-      const currentLimit = await storage.getUserRateLimit(user.id, "peer-review");
-      if (!currentLimit) return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
-      const elapsed = Date.now() - currentLimit.windowStart.getTime();
-      if (elapsed >= limitConfig.windowMs) return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
-      return res.json({
-        remaining: Math.max(0, limitConfig.max - currentLimit.count),
-        resetAt: currentLimit.windowStart.getTime() + limitConfig.windowMs,
-        count: currentLimit.count,
-      });
-    } catch (err: any) {
-      console.error("Error getting peer-review status:", err);
-      return res.status(500).json({ error: "Internal server error" });
-    }
+    return res.json({ remaining: null, resetAt: null, count: 0 });
   });
 
   app.get("/api/peer-reviews/default-prompts", (req, res) => {
@@ -2121,13 +2064,9 @@ I will now provide the papers.`;
     }
   });
 
-  const peerReviewRateLimit = new Map<string, number>();
-
   // Batch peer-review runs (semi-autonomous cycle) are grouped by the
   // persisted `batchId` column on peer_reviews, so batch progress is derived
   // entirely from the DB and survives server restarts.
-  const peerReviewBatchRateLimit = new Map<string, number>();
-
   function shuffleInPlace<T>(arr: T[]): T[] {
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -2172,21 +2111,12 @@ I will now provide the papers.`;
       if (isPlatform && !process.env.OPENROUTER_API_KEY) {
         return res.status(503).json({ error: "Peer review generation is not configured. OPENROUTER_API_KEY is missing." });
       }
-      // NOTE: batch runs intentionally bypass the per-user 5/24h platform cap.
-      // Platform mode is already restricted to the allowlist above.
       if (providerMode === "byoc") {
         if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
         const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
         if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
-      {
-        const clientIp = req.ip || "unknown";
-        const last = peerReviewBatchRateLimit.get(clientIp) || 0;
-        if (Date.now() - last < 30000) return res.status(429).json({ error: "Please wait at least 30 seconds between batch runs." });
-        peerReviewBatchRateLimit.set(clientIp, Date.now());
-      }
-
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
 
       const modelConfig: ModelProviderConfig = {
@@ -2357,9 +2287,6 @@ I will now provide the papers.`;
       }
       if (isPlatform) {
         if (!process.env.OPENROUTER_API_KEY) return res.status(503).json({ error: "Peer review generation is not configured. OPENROUTER_API_KEY is missing." });
-        const limitConfig = PER_USER_PLATFORM_LIMITS["peer-review"];
-        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "peer-review", limitConfig.max, limitConfig.windowMs);
-        if (!rateCheck.allowed) return res.status(429).json({ error: `Peer review generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
       }
       if (providerMode === "byoc") {
         if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
@@ -2367,13 +2294,6 @@ I will now provide the papers.`;
         if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
-      {
-        const clientIp = req.ip || "unknown";
-        const last = peerReviewRateLimit.get(clientIp) || 0;
-        if (Date.now() - last < 30000) return res.status(429).json({ error: "Please wait at least 30 seconds between peer review requests." });
-        peerReviewRateLimit.set(clientIp, Date.now());
-      }
-
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
       if (!documentId || typeof documentId !== "string") return res.status(400).json({ error: "documentId is required." });
 
@@ -2799,30 +2719,12 @@ I will now provide the papers.`;
   // platform allowlist regardless of LLM provider mode.
 
   const REPRODUCTION_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
-  const reproductionRateLimit = new Map<string, number>();
-
   app.get("/api/reproductions/default-prompts", (_req, res) => {
     res.json({ reproducerPrompt: REPRODUCER_PROMPT, judgePrompt: JUDGE_PROMPT });
   });
 
   app.get("/api/reproductions/status", optionalAuth, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      const limitConfig = PER_USER_PLATFORM_LIMITS["reproduction"];
-      if (!user) return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
-      const currentLimit = await storage.getUserRateLimit(user.id, "reproduction");
-      if (!currentLimit || Date.now() - currentLimit.windowStart.getTime() >= limitConfig.windowMs) {
-        return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
-      }
-      return res.json({
-        remaining: Math.max(0, limitConfig.max - currentLimit.count),
-        resetAt: currentLimit.windowStart.getTime() + limitConfig.windowMs,
-        count: currentLimit.count,
-      });
-    } catch (err: any) {
-      console.error("Error getting reproduction status:", err);
-      return res.status(500).json({ error: "Internal server error" });
-    }
+    return res.json({ remaining: null, resetAt: null, count: 0 });
   });
 
   // Journal catalogue annotated with which reproducer models already hold a
@@ -2928,18 +2830,6 @@ I will now provide the papers.`;
         if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
       }
-      {
-        const limitConfig = PER_USER_PLATFORM_LIMITS["reproduction"];
-        const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "reproduction", limitConfig.max, limitConfig.windowMs);
-        if (!rateCheck.allowed) return res.status(429).json({ error: `Reproduction limit reached (${limitConfig.max} per 24 hours). Try again later.` });
-      }
-      {
-        const clientIp = req.ip || "unknown";
-        const last = reproductionRateLimit.get(clientIp) || 0;
-        if (Date.now() - last < 30000) return res.status(429).json({ error: "Please wait at least 30 seconds between reproduction requests." });
-        reproductionRateLimit.set(clientIp, Date.now());
-      }
-
       const effectiveJournalId = resolveJournalId(journalId);
       const modelConfig: ModelProviderConfig = {
         providerMode: isPlatform ? "platform" : "byoc",
@@ -3373,13 +3263,6 @@ I will now provide the papers.`;
         if (!process.env.OPENROUTER_API_KEY) {
           return res.status(503).json({ error: "Ethics report generation is not configured. OPENROUTER_API_KEY is missing." });
         }
-        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-          const limitConfig = PER_USER_PLATFORM_LIMITS["ethics-report"];
-          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "ethics-report", limitConfig.max, limitConfig.windowMs);
-          if (!rateCheck.allowed) {
-            return res.status(429).json({ error: `Ethics report generation limit reached (${limitConfig.max} per 24 hours). Try again later.` });
-          }
-        }
       }
 
       if (providerMode === "byoc") {
@@ -3389,15 +3272,6 @@ I will now provide the papers.`;
           return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
         }
         await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
-      }
-
-      if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-        const clientIp = req.ip || "unknown";
-        const last = ethicsRateLimit.get(clientIp) || 0;
-        if (Date.now() - last < 30000) {
-          return res.status(429).json({ error: "Please wait at least 30 seconds between ethics report requests." });
-        }
-        ethicsRateLimit.set(clientIp, Date.now());
       }
 
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
@@ -3686,34 +3560,7 @@ List every cited paper in Chicago author-date bibliography format:
   });
 
   app.get("/api/editorials/status", optionalAuth, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      const PLATFORM_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
-      if (!user) {
-        const limitConfig = PER_USER_PLATFORM_LIMITS["editorial"];
-        return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
-      }
-      if (PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-        return res.json({ remaining: null, resetAt: null, count: 0 });
-      }
-      const limitConfig = PER_USER_PLATFORM_LIMITS["editorial"];
-      const currentLimit = await storage.getUserRateLimit(user.id, "editorial");
-      if (!currentLimit) {
-        return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
-      }
-      const elapsed = Date.now() - currentLimit.windowStart.getTime();
-      if (elapsed >= limitConfig.windowMs) {
-        return res.json({ remaining: limitConfig.max, resetAt: null, count: 0 });
-      }
-      return res.json({
-        remaining: Math.max(0, limitConfig.max - currentLimit.count),
-        resetAt: currentLimit.windowStart.getTime() + limitConfig.windowMs,
-        count: currentLimit.count,
-      });
-    } catch (err: any) {
-      console.error("Error getting editorial status:", err);
-      return res.status(500).json({ error: "Internal server error" });
-    }
+    return res.json({ remaining: null, resetAt: null, count: 0 });
   });
 
   app.delete("/api/editorials", async (req, res) => {
@@ -3781,15 +3628,6 @@ List every cited paper in Chicago author-date bibliography format:
       if (isPlatform) {
         if (!process.env.OPENROUTER_API_KEY) {
           return res.status(503).json({ error: "Editorial generation is not configured. OPENROUTER_API_KEY is missing." });
-        }
-        if (!PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-          const limitConfig = PER_USER_PLATFORM_LIMITS["editorial"];
-          const rateCheck = await storage.checkAndIncrementRateLimit(user.id, "editorial", limitConfig.max, limitConfig.windowMs);
-          if (!rateCheck.allowed) {
-            return res.status(429).json({
-              error: `Editorial generation limit reached (${limitConfig.max} per 24 hours). Try again later.`,
-            });
-          }
         }
       }
 

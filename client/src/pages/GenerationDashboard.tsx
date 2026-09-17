@@ -981,16 +981,12 @@ export default function GenerationDashboard() {
   const hasGeneratingPeer = recentPeerReviews?.some(r => r.status === "pending" || r.status === "generating");
 
   const byocReady = modelConfig.providerMode === "byoc" ? !!modelConfig.keyValidated : true;
-  const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && byocReady &&
-    (modelConfig.providerMode === "byoc" || editorialStatus?.remaining === null || (editorialStatus?.remaining ?? 1) > 0);
-  const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && byocReady &&
-    (modelConfig.providerMode === "byoc" || reviewStatus?.remaining === null || (reviewStatus?.remaining ?? 1) > 0);
+  const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && byocReady;
+  const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && byocReady;
   const canSubmitEthics = !ethicsIsPending && !hasGeneratingEthics && byocReady &&
-    ethicsPrompt1.trim().length > 0 && selectedPaperDocId.length > 0 &&
-    (modelConfig.providerMode === "byoc" || ethicsStatus?.remaining === null || (ethicsStatus?.remaining ?? 1) > 0);
+    ethicsPrompt1.trim().length > 0 && selectedPaperDocId.length > 0;
   const canSubmitPeer = !peerIsPending && !hasGeneratingPeer && byocReady &&
-    peerSelectedDocId.length > 0 && peerPrompt.trim().length > 0 &&
-    (modelConfig.providerMode === "byoc" || peerStatus?.remaining === null || (peerStatus?.remaining ?? 1) > 0);
+    peerSelectedDocId.length > 0 && peerPrompt.trim().length > 0;
 
   const reproIsPending = generateReproductionMutation.isPending;
   const hasGeneratingRepro = recentReproductions?.some(r => r.status === "pending" || r.status === "generating");
@@ -998,8 +994,7 @@ export default function GenerationDashboard() {
   const reproAnthropicByoc = modelConfig.providerMode === "byoc" && modelConfig.provider === "anthropic";
   const canSubmitRepro = !reproIsPending && !hasGeneratingRepro && byocReady && !reproAnthropicByoc &&
     reproSelectedDocId.length > 0 && reproPrompt.trim().length > 0 && reproJudgePrompt.trim().length > 0 &&
-    reproConfig?.sandboxConfigured !== false &&
-    (reproStatus?.remaining === null || (reproStatus?.remaining ?? 1) > 0);
+    reproConfig?.sandboxConfigured !== false;
 
   const batchIsPending = generatePeerBatchMutation.isPending;
   const eligibleCount = eligibleCountData?.eligibleCount ?? null;
@@ -1016,8 +1011,6 @@ export default function GenerationDashboard() {
     <ModelSelector
       value={modelConfig}
       onChange={setModelConfig}
-      rateLimitInfo={activeType === "editorial" ? editorialStatus : activeType === "ethics-report" ? ethicsStatus : activeType === "peer-review" ? peerStatus : activeType === "reproduce" ? reproStatus : activeType === "peer-review-batch" ? null : reviewStatus}
-      limitLabel={activeType === "editorial" ? "editorial generations" : activeType === "ethics-report" ? "publication audit generations" : activeType === "peer-review" ? "peer review generations" : activeType === "reproduce" ? "reproduction runs" : "review generations"}
       hasPlatformAccess={hasPlatformAccess}
       activeType={(activeType === "peer-review-batch" ? "peer-review" : activeType === "reproduce" ? "reproduction" : activeType) as GenerationCostType}
       costMultiplier={(activeType === "peer-review" || activeType === "peer-review-batch") && peerIncludeEthics ? 2 : 1}
@@ -1114,25 +1107,6 @@ export default function GenerationDashboard() {
                             <span className={`text-[10px] font-mono uppercase tracking-widest ${isLocked ? "text-primary/40" : "text-primary/70"}`} data-testid={`status-workflow-${workflow.id}`}>
                               {workflow.status}
                             </span>
-                            {!isLocked && (() => {
-                              const cardStatus = workflow.id === "editorial"
-                                ? editorialStatus
-                                : workflow.id === "ethics-citations"
-                                  ? ethicsStatus
-                                  : workflow.id === "literature-review"
-                                    ? reviewStatus
-                                    : workflow.id === "peer-review"
-                                      ? peerStatus
-                                      : workflow.id === "reproduce"
-                                        ? reproStatus
-                                        : null;
-                              if (!cardStatus) return null;
-                              return (
-                                <span className="text-[10px] font-mono text-muted-foreground/50" data-testid={`text-uses-remaining-${workflow.id}`}>
-                                  {cardStatus.remaining === null ? "Unlimited" : cardStatus.remaining} platform uses remaining
-                                </span>
-                              );
-                            })()}
                           </div>
                         </>
                       );

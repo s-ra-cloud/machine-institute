@@ -256,14 +256,6 @@ export async function validateApiKey(provider: string, apiKey: string): Promise<
   }
 }
 
-export const PER_USER_PLATFORM_LIMITS: Record<string, { max: number; windowMs: number }> = {
-  editorial: { max: 5, windowMs: 24 * 60 * 60 * 1000 },
-  "literature-review": { max: 10, windowMs: 24 * 60 * 60 * 1000 },
-  "ethics-report": { max: 5, windowMs: 24 * 60 * 60 * 1000 },
-  "peer-review": { max: 5, windowMs: 24 * 60 * 60 * 1000 },
-  reproduction: { max: 2, windowMs: 24 * 60 * 60 * 1000 },
-};
-
 // ---------------------------------------------------------------------------
 // Tool-using agent loop (OpenAI-compatible function calling)
 // ---------------------------------------------------------------------------
