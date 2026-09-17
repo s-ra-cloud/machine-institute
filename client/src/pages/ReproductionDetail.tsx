@@ -297,6 +297,28 @@ export default function ReproductionDetail() {
             ) : null}
           </FadeIn>
 
+          {run.status === "completed" && run.overallVerdict === "inconclusive"
+            && authenticated && user?.id === run.userId
+            && REPRODUCTION_ACCESS_EMAILS.includes(user.email || "") && (
+            <FadeIn delay={0.31}>
+              <div className="mb-10 border border-yellow-400/20 bg-yellow-400/5 p-6">
+                <p className="text-sm text-yellow-200/80">
+                  This reproduction was inconclusive. You can rerun it with the same model, GPU, and prompts.
+                </p>
+                <Button
+                  onClick={() => { setRetryMessage(null); retryMutation.mutate(); }}
+                  disabled={retryMutation.isPending}
+                  className="mt-4 rounded-none font-mono text-xs"
+                  data-testid="button-rerun-inconclusive-reproduction"
+                >
+                  {retryMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                  {retryMutation.isPending ? "Starting rerun..." : "Rerun reproduction"}
+                </Button>
+                {retryMessage && <p className="mt-3 text-xs font-mono text-red-300" data-testid="text-rerun-error">{retryMessage}</p>}
+              </div>
+            </FadeIn>
+          )}
+
           {run.status === "completed" && run.logbookMarkdown && (
             <FadeIn delay={0.32}>
               <div className="mb-10">

@@ -17,6 +17,8 @@ import {
   type OverallVerdict,
   type VerdictCounts,
   type Verdict,
+  REPRODUCTION_METHODS,
+  REPRODUCTION_BLOCKERS,
 } from "./prompts/reproduce";
 import { deriveContributionKeywords } from "./prompts/peer-review";
 
@@ -105,10 +107,12 @@ export function getReproductionCompletionIssues(input: {
   recordedResults: RecordedResult[];
   toolCalls: readonly {
     name: string;
+    index?: number;
     args?: Record<string, unknown>;
     result?: string;
   }[];
   logbook: string;
+  budgetExhausted?: boolean;
 }): string[] {
   const issues: string[] = [];
   if (input.recordedResults.length === 0) {
@@ -125,6 +129,106 @@ export function getReproductionCompletionIssues(input: {
   );
   if (unsupported.length > 0) {
     issues.push(`${unsupported.length} finalized result${unsupported.length === 1 ? " has" : "s have"} no reproduced value or supporting evidence (${unsupported.map(result => result.id).join(", ")})`);
+  }
+  const finalized = input.recordedResults.filter(result => result.status !== "pending");
+  for (const result of finalized) {
+    if (!result.method) {
+      issues.push(`${result.id} has no reproduction method`);
+      continue;
+    }
+    const referencedCalls = (result.evidenceToolCallIds || [])
+      .map(id => input.toolCalls.find((call, offset) => (call.index ?? offset + 1) === id))
+      .filter((call): call is NonNullable<typeof call> =>
+        Boolean(call) && ["run_command", "read_file", "list_files"].includes(call!.name),
+      );
+    if (referencedCalls.length === 0) {
+      issues.push(`${result.id} does not cite any valid evidence tool calls`);
+      continue;
+    }
+    const evidenceExcerpt = result.evidenceExcerpt?.trim() || "";
+    const genericExcerpt = /^(?:exit code \d+|timed out|success|failed|error)$/i.test(evidenceExcerpt);
+    const excerptCalls = evidenceExcerpt.length >= 4 && !genericExcerpt
+      ? referencedCalls.filter(call => (call.result || "").includes(evidenceExcerpt))
+      : [];
+    if (result.method === "rerun" || result.method === "raw-data-rederived" || result.method === "toy") {
+      const successfulCommand = excerptCalls.some(call =>
+        call.name === "run_command"
+        && Boolean(String(call.args?.command || "").trim())
+        && /^exit code 0\b/.test(call.result || ""),
+      );
+      if (!successfulCommand) {
+        issues.push(`${result.id} method ${result.method} does not quote evidence from a cited successful command`);
+      }
+      const reproducedValue = result.reproducedValue?.trim() || "";
+      if (!reproducedValue || !evidenceExcerpt.includes(reproducedValue)) {
+        issues.push(`${result.id} ${result.status} result does not include its reproduced value in the evidence excerpt`);
+      }
+      if (result.method === "toy" && result.status !== "toy") {
+        issues.push(`${result.id} uses toy method with non-toy status ${result.status}`);
+      }
+      if (result.status === "toy" && result.method !== "toy") {
+        issues.push(`${result.id} has toy status without toy method`);
+      }
+      if (result.method === "raw-data-rederived") {
+        const rawPath = result.rawInputPath?.trim() || "";
+        const rawCall = input.toolCalls.find((call, offset) =>
+          (call.index ?? offset + 1) === result.rawInputToolCallId
+          && call.name === "read_file"
+          && String(call.args?.path || "") === rawPath,
+        );
+        const rawExtension = /\.(?:csv|tsv|jsonl?|parquet|arrow|npy|npz|pt|pkl|pickle)$/i.test(rawPath);
+        const computationNamesInput = referencedCalls.some(call =>
+          call.name === "run_command"
+          && (
+            String(call.args?.command || "").includes(rawPath)
+            || (call.result || "").includes(rawPath)
+          ),
+        );
+        if (!rawCall || !rawExtension || !computationNamesInput) {
+          issues.push(`${result.id} raw-data re-derivation is not tied to a specific raw input read and computation`);
+        }
+      }
+    }
+    if (result.method === "blocked") {
+      const explanation = `${result.evidence || ""} ${result.notes || ""}`;
+      const citesPrematureResourceLimit =
+        /\b(?:ran out of time|not enough time|due to time|time (?:limit|constraint)|prohibitive runtime|runtime (?:limit|constraint)|budget (?:limit|constraint|exhausted)|remaining budget)\b/i
+          .test(explanation);
+      if (!input.budgetExhausted && citesPrematureResourceLimit) {
+        issues.push(`${result.id} cites time or budget as a blocker while useful budget remains`);
+      }
+      if (result.status !== "inconclusive") {
+        issues.push(`${result.id} uses blocked method with non-inconclusive status ${result.status}`);
+      }
+      const blockerOutput = excerptCalls.map(call => call.result || "").join("\n");
+      const blockerMatches = result.blockerKind === "oom"
+        ? /\b(?:out of memory|oom)\b/i.test(blockerOutput) && /\b(?:out of memory|oom|memory)\b/i.test(explanation)
+        : result.blockerKind === "missing-material"
+          ? /\b(?:empty directory or not found|no such file|not found|missing)\b/i.test(blockerOutput)
+            && /\b(?:not shipped|no such file|not found|missing|unavailable)\b/i.test(explanation)
+          : result.blockerKind === "timeout"
+            ? /\b(?:timed out|timeout)\b/i.test(blockerOutput) && /\b(?:timed out|timeout)\b/i.test(explanation)
+            : result.blockerKind === "command-error"
+              ? /^(?:exit code (?!0\b)|Tool error:)/m.test(blockerOutput)
+                && /\b(?:error|failed|failure|syntax|dependency|exception)\b/i.test(explanation)
+              : false;
+      const citedBlocker = excerptCalls.some(call => {
+        const output = call.result || "";
+        if (call.name === "run_command") {
+          return /^(?:TIMED OUT|exit code (?!0\b)|Tool error:)/m.test(output)
+            || /\b(?:out of memory|oom|no such file|not found|missing|permission denied|killed)\b/i.test(output);
+        }
+        return /\b(?:empty directory or not found|no such file|not found|missing)\b/i.test(output);
+      });
+      const systemBudgetBlocker = Boolean(
+        input.budgetExhausted
+        && result.blockerKind === "budget"
+        && /System-enforced (?:deadline|tool-call budget) exhaustion/.test(explanation),
+      );
+      if ((!citedBlocker || !blockerMatches) && !systemBudgetBlocker) {
+        issues.push(`${result.id} blocker category and evidence excerpt do not match cited tool output`);
+      }
+    }
   }
   if (!hasUsableReproductionEvidence(input)) {
     issues.push("no command execution or recorded reproduction evidence exists");
@@ -151,18 +255,45 @@ export function buildReproductionContinuation(input: {
   recordedResults: RecordedResult[];
   toolCalls: readonly {
     name: string;
+    index?: number;
     args?: Record<string, unknown>;
     result?: string;
   }[];
   logbook: string;
+  budgetExhausted?: boolean;
 }): string | null {
   const issues = getReproductionCompletionIssues(input);
   if (issues.length === 0) return null;
   return [
     "You attempted to finish before completing the reproduction.",
     `Unmet requirements: ${issues.join("; ")}.`,
-    "Continue using the available tools now. Perform the reproduction work, update every pending result to verified, falsified, toy, or inconclusive with concrete evidence, then return the complete four-section markdown logbook. Do not stop again until these requirements are satisfied.",
+    "Continue using the available tools now. Perform the reproduction work, then update every result with a valid method and the numbered evidence_tool_call_ids shown in prior tool outputs. Return the complete four-section markdown logbook only after every claim was rerun, independently re-derived, toy-tested, or concretely blocked. Do not stop again until these requirements are satisfied.",
   ].join(" ");
+}
+
+export function finalizeBudgetExhaustedResults(input: {
+  recordedResults: RecordedResult[];
+  toolCalls: readonly ToolCallRecord[];
+  stoppedBy: string;
+}): void {
+  if (input.stoppedBy !== "deadline" && input.stoppedBy !== "tool-budget") return;
+  const evidenceToolCallIds = input.toolCalls
+    .filter(call => call.name === "run_command" && Boolean(String(call.args.command || "").trim()))
+    .map(call => call.index);
+  const reason = input.stoppedBy === "deadline"
+    ? "System-enforced deadline exhaustion"
+    : "System-enforced tool-call budget exhaustion";
+  for (const result of input.recordedResults) {
+    if (result.status !== "pending") continue;
+    result.status = "inconclusive";
+    result.method = "blocked";
+    result.blockerKind = "budget";
+    result.evidenceToolCallIds = evidenceToolCallIds;
+    result.evidence = `${reason} prevented further claim-specific testing.`;
+    result.notes = [result.notes, "Finalized deterministically after the agent reached the enforced resource limit."]
+      .filter(Boolean)
+      .join(" ");
+  }
 }
 
 const TOOLS: ToolSpec[] = [
@@ -214,6 +345,16 @@ const TOOLS: ToolSpec[] = [
         reproduced_value: { type: "string" },
         evidence: { type: "string", description: "Which commands, files, and outputs support this status." },
         notes: { type: "string" },
+        method: { type: "string", enum: [...REPRODUCTION_METHODS], description: "How this result was tested: rerun, raw-data-rederived, toy, or blocked." },
+        evidence_tool_call_ids: {
+          type: "array",
+          items: { type: "integer" },
+          description: "Numbers of prior tool calls that prove this method and result.",
+        },
+        evidence_excerpt: { type: "string", description: "An exact distinctive quote from a cited tool result that proves this claim's outcome or blocker." },
+        blocker_kind: { type: "string", enum: [...REPRODUCTION_BLOCKERS], description: "Required only for blocked: oom, missing-material, command-error, timeout, or budget." },
+        raw_input_tool_call_id: { type: "integer", description: "For raw-data-rederived, the read_file tool call number that opened the raw data." },
+        raw_input_path: { type: "string", description: "For raw-data-rederived, the exact raw data path opened and used by the computation." },
       },
       required: ["id", "claim", "status"],
     },
@@ -315,6 +456,19 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
             ? (statusRaw as Verdict | "pending")
             : "pending";
           const prev = recorded.get(id);
+          const methodRaw = String(args.method || "").trim();
+          const method = (REPRODUCTION_METHODS as readonly string[]).includes(methodRaw)
+            ? (methodRaw as RecordedResult["method"])
+            : prev?.method;
+          const evidenceToolCallIds = Array.isArray(args.evidence_tool_call_ids)
+            ? args.evidence_tool_call_ids
+              .map(value => Number(value))
+              .filter(value => Number.isInteger(value) && value > 0)
+            : prev?.evidenceToolCallIds;
+          const blockerRaw = String(args.blocker_kind || "").trim();
+          const blockerKind = (REPRODUCTION_BLOCKERS as readonly string[]).includes(blockerRaw)
+            ? (blockerRaw as RecordedResult["blockerKind"])
+            : prev?.blockerKind;
           recorded.set(id, {
             id,
             claim,
@@ -323,6 +477,14 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
             reproducedValue: args.reproduced_value !== undefined ? String(args.reproduced_value) : prev?.reproducedValue,
             evidence: args.evidence !== undefined ? String(args.evidence) : prev?.evidence,
             notes: args.notes !== undefined ? String(args.notes) : prev?.notes,
+            method,
+            evidenceToolCallIds,
+            evidenceExcerpt: args.evidence_excerpt !== undefined ? String(args.evidence_excerpt) : prev?.evidenceExcerpt,
+            blockerKind,
+            rawInputToolCallId: args.raw_input_tool_call_id !== undefined
+              ? Number(args.raw_input_tool_call_id)
+              : prev?.rawInputToolCallId,
+            rawInputPath: args.raw_input_path !== undefined ? String(args.raw_input_path) : prev?.rawInputPath,
           });
           const summary = Array.from(recorded.values()).map(r => `${r.id}=${r.status}`).join(", ");
           return `Recorded ${id} as ${status}. Registered results: ${summary}.`;
@@ -372,6 +534,7 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
       deadlineMs: startTime + REPRODUCTION_BUDGET.wallClockMs,
       maxTokens: 8000,
       temperature: 0.2,
+      numberToolResults: true,
       onToolCall: async (rec: ToolCallRecord) => {
         if (rec.name === "run_command") {
           const cmd = String(rec.args.command || "").replace(/\s+/g, " ").slice(0, 140);
@@ -388,6 +551,7 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
           recordedResults: Array.from(recorded.values()),
           toolCalls,
           logbook: assistantText,
+          budgetExhausted: false,
         }),
       maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
     });
@@ -400,6 +564,11 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
   const logbook = toolLoopResult.content;
   const toolCalls = toolLoopResult.toolCalls;
   const recordedList = Array.from(recorded.values());
+  finalizeBudgetExhaustedResults({
+    recordedResults: recordedList,
+    toolCalls,
+    stoppedBy: toolLoopResult.stoppedBy,
+  });
 
   if (!hasUsableReproductionEvidence({ recordedResults: recordedList, toolCalls })) {
     throw new Error(NO_USABLE_REPRODUCTION_EVIDENCE);
@@ -408,6 +577,7 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
     recordedResults: recordedList,
     toolCalls,
     logbook,
+    budgetExhausted: toolLoopResult.stoppedBy === "deadline" || toolLoopResult.stoppedBy === "tool-budget",
   });
   if (completionIssues.length > 0) {
     throw new Error(`The reproduction agent stopped before completing required work: ${completionIssues.join("; ")}.`);

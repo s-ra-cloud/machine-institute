@@ -6,6 +6,10 @@
 
 export const VERDICTS = ["verified", "falsified", "toy", "inconclusive"] as const;
 export type Verdict = (typeof VERDICTS)[number];
+export const REPRODUCTION_METHODS = ["rerun", "raw-data-rederived", "toy", "blocked"] as const;
+export type ReproductionMethod = (typeof REPRODUCTION_METHODS)[number];
+export const REPRODUCTION_BLOCKERS = ["oom", "missing-material", "command-error", "timeout", "budget"] as const;
+export type ReproductionBlocker = (typeof REPRODUCTION_BLOCKERS)[number];
 
 export const OVERALL_VERDICTS = ["verified", "partially verified", "falsified", "toy", "inconclusive"] as const;
 export type OverallVerdict = (typeof OVERALL_VERDICTS)[number];
@@ -25,6 +29,12 @@ export interface RecordedResult {
   reproducedValue?: string;
   evidence?: string;
   notes?: string;
+  method?: ReproductionMethod;
+  evidenceToolCallIds?: number[];
+  evidenceExcerpt?: string;
+  blockerKind?: ReproductionBlocker;
+  rawInputToolCallId?: number;
+  rawInputPath?: string;
 }
 
 export interface ClaimVerdict {
@@ -53,7 +63,7 @@ Follow the methodology of the ICML 2026 reproduction hackathon (Hugging Face × 
 
 2. REPRODUCE. For each result, regenerate it from the shipped code and data. Run the actual scripts in their dependency order (the README usually documents this). Install missing packages with pip, fix paths so scripts find /work/materials and write to /work/results, and rely on HF_TOKEN already being in the environment for gated models. Prefer real, full-scale runs on the GPU. Only if the exact experiment is infeasible here (data not shipped, model too large for the GPU, prohibitive runtime) perform a TOY reproduction — scale down (fewer prompts, fewer seeds, a smaller model from the same family) — and say so explicitly. In addition, re-derive the paper's summary statistics from the shipped raw result files to check that the raw outputs and the paper's text agree with each other.
 
-3. RECORD. Update every result with record_result(...): status verified / falsified / toy / inconclusive, original_value, reproduced_value, evidence (which commands and files produced the numbers), and notes. Never leave a result at "pending" at the end — use inconclusive if you ran out of budget.
+3. RECORD. Update every result with record_result(...): status verified / falsified / toy / inconclusive, original_value, reproduced_value, evidence, notes, method, evidence_tool_call_ids, and evidence_excerpt. The method must be rerun (the shipped experiment was executed), raw-data-rederived (you independently recomputed the statistic from shipped raw rows), toy (you executed a scaled-down reproduction), or blocked (a concrete command/file check demonstrated why the claim cannot be tested). evidence_tool_call_ids must cite the numbered prior tool calls that prove this specific claim, and evidence_excerpt must be an exact distinctive quote from those cited outputs—not a generic exit status. For verified, falsified, and toy results, reproduced_value must appear in the cited command output. raw-data-rederived must also set raw_input_tool_call_id and raw_input_path for the specific data file read, and the computation command/output must identify that path. For blocked, also set blocker_kind to oom, missing-material, command-error, timeout, or budget; it must agree with the cited output and explanation. Merely reading or citing the authors' summary, chart, or precomputed statistic is not a reproduction and is not raw-data re-derivation. Never leave a result at "pending" at the end — use inconclusive only after a real blocker or exhausted budget.
 
 4. LOGBOOK. When you are done — or when told the budget is exhausted — reply (with no further tool calls) with your final LOGBOOK in markdown, with exactly these sections: "## Claims" (the list of results and their final status), "## Reproduction Log" (a chronological account of what you ran, what happened, and what you concluded, citing concrete numbers from tool outputs), "## Discrepancies" (every mismatch between reported and reproduced values, with both numbers), and "## Limitations" (what could not be done and why).
 
@@ -62,6 +72,7 @@ Rules:
 - Do not change the shipped analysis logic except to fix paths, missing imports, or to scale an experiment down; document every edit you make.
 - Respect the per-command timeout: long scripts can be split, run with reduced settings, or launched with nohup and polled.
 - You have a fixed tool-call budget and a wall-clock budget. Plan first (read the README and inspect the results directory), then run the most informative scripts first.
+- Do not cite time or budget as a blocker until the system explicitly tells you that budget is exhausted. If a full run is too long or too large, attempt a smaller toy run or independently recompute the reported statistic from raw rows.
 - Never print secrets or environment variables. Do not use the network except for pip and Hugging Face downloads.`;
 
 export const JUDGE_PROMPT = `You are the Reproduction Judge for the Machine Institute. You receive (1) the paper's title and abstract, (2) the Reproduction Agent's structured results, (3) its final logbook, and (4) the commands it ran with their outputs. Issue one verdict per result, using the ICML reproduction-hackathon scale:

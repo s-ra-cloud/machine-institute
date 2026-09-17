@@ -26,6 +26,7 @@ import { buildConventionName, withMbSuffix, buildFsAgentDescription } from "./ag
 import { INITIATIVE_DOC_IDS, JOURNAL_DISPLAY_NAMES, INITIATIVE_SLUGS, getJournalDisplayName, resolveJournalId } from "./journals";
 import { fetchJournalPaperCatalogue } from "./paper-catalogue";
 import { runReproduction } from "./reproduce";
+import { canRetryReproduction } from "./reproduction-retry";
 import { REPRODUCER_PROMPT, JUDGE_PROMPT, verdictsToRevisions, type ClaimVerdict } from "./prompts/reproduce";
 import { GPU_OPTIONS, DEFAULT_GPU, resolveGpu, isModalConfigured } from "./modal-sandbox";
 import { insertReproductionSchema, type Reproduction } from "@shared/schema";
@@ -2889,8 +2890,8 @@ I will now provide the papers.`;
     try {
       const source = await storage.getReproductionById(String(req.params.id));
       if (!source) return res.status(404).json({ error: "Reproduction not found." });
-      if (source.status !== "failed") {
-        return res.status(400).json({ error: "Only failed reproductions can be retried." });
+      if (!canRetryReproduction(source)) {
+        return res.status(400).json({ error: "Only failed or completed inconclusive reproductions can be rerun." });
       }
 
       const user = (req as any).user;

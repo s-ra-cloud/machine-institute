@@ -283,6 +283,8 @@ export interface ToolLoopOptions {
   temperature?: number;
   maxToolResultChars?: number;
   contextCharBudget?: number;
+  /** Prefix tool messages shown to the model with their stable numeric call ID. */
+  numberToolResults?: boolean;
   onToolCall?: (record: ToolCallRecord) => Promise<void> | void;
   onRound?: (round: number, assistantText: string | null) => Promise<void> | void;
   /**
@@ -320,8 +322,12 @@ function compactMessages(messages: Array<Record<string, unknown>>, budgetChars: 
   for (const i of candidates) {
     const m = messages[i];
     if (m.content === ELIDED_TOOL_OUTPUT) continue;
-    total -= messageChars(m) - ELIDED_TOOL_OUTPUT.length;
-    m.content = ELIDED_TOOL_OUTPUT;
+    const numberedPrefix = typeof m.content === "string"
+      ? m.content.match(/^\[Tool call #\d+\]\n/)?.[0] || ""
+      : "";
+    const replacement = `${numberedPrefix}${ELIDED_TOOL_OUTPUT}`;
+    total -= messageChars(m) - replacement.length;
+    m.content = replacement;
     if (total <= budgetChars) break;
   }
 }
@@ -459,7 +465,13 @@ export async function runToolLoop(
       };
       toolCalls.push(record);
       await options.onToolCall?.(record);
-      messages.push({ role: "tool", tool_call_id: call.id, content: result });
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: options.numberToolResults
+          ? `[Tool call #${record.index}]\n${result}`
+          : result,
+      });
     }
   }
 

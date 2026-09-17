@@ -2565,6 +2565,22 @@ export default function GenerationDashboard() {
                         <Info className="w-3 h-3" />
                         {showMetadata === run.id ? "Hide" : "Show"} metadata
                       </button>
+                      {run.overallVerdict === "inconclusive" && hasPlatformAccess && user?.id === run.userId && (
+                        <button
+                          onClick={() => retryReproductionMutation.mutate(run.id)}
+                          disabled={retryReproductionMutation.isPending && retryReproductionMutation.variables === run.id}
+                          className="text-[10px] font-mono text-yellow-300 hover:underline flex items-center gap-1 disabled:opacity-40"
+                          data-testid={`button-rerun-inconclusive-${run.id}`}
+                        >
+                          {retryReproductionMutation.isPending && retryReproductionMutation.variables === run.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                          Rerun reproduction
+                        </button>
+                      )}
+                      {retryReproductionMutation.isError && retryReproductionMutation.variables === run.id && (
+                        <span className="text-[10px] font-mono text-red-400" data-testid="text-rerun-repro-error">
+                          {retryReproductionMutation.error.message}
+                        </span>
+                      )}
                     </div>
                   )}
                   {showMetadata === run.id && <MetadataPanel record={run} />}

@@ -26,10 +26,12 @@ import {
 } from "../future-science";
 import {
   buildReproductionContinuation,
+  finalizeBudgetExhaustedResults,
   getReproductionCompletionIssues,
   hasUsableReproductionEvidence,
   NO_USABLE_REPRODUCTION_EVIDENCE,
 } from "../reproduce";
+import { canRetryReproduction } from "../reproduction-retry";
 
 const sample: ClaimVerdict[] = [
   { id: "R1", claim: "Cohen's d = 1.25", verdict: "verified", originalValue: "1.25", reproducedValue: "1.24" },
@@ -156,11 +158,15 @@ describe("Reproduction — premature-stop recovery", () => {
         claim: "A quantitative claim",
         status: "inconclusive" as const,
         evidence: "The command failed because the required dataset was not shipped.",
+        method: "blocked" as const,
+        evidenceToolCallIds: [1],
+        evidenceExcerpt: "No such file: dataset.csv",
+        blockerKind: "missing-material" as const,
       }],
       toolCalls: [{
         name: "run_command",
         args: { command: "python reproduce.py" },
-        result: "exit code 1",
+        result: "exit code 1\nNo such file: dataset.csv",
       }],
       logbook: [
         "## Claims",
@@ -185,8 +191,15 @@ describe("Reproduction — premature-stop recovery", () => {
         claim: "A quantitative claim",
         status: "verified",
         reproducedValue: "0.91",
+        method: "rerun",
+        evidenceToolCallIds: [1],
+        evidenceExcerpt: "reproduced=0.91",
       }],
-      toolCalls: [{ name: "run_command" }],
+      toolCalls: [{
+        name: "run_command",
+        args: { command: "python reproduce.py" },
+        result: "exit code 0\nreproduced=0.91",
+      }],
       logbook: "Done.",
     });
 
@@ -201,19 +214,28 @@ describe("Reproduction — premature-stop recovery", () => {
           id: "R1",
           claim: "First claim",
           status: "verified",
+          reproducedValue: "0.91",
           evidence: "results.json",
+          method: "raw-data-rederived",
+          evidenceToolCallIds: [1, 2],
+          evidenceExcerpt: "recomputed=0.91",
+          rawInputToolCallId: 1,
+          rawInputPath: "/work/materials/raw.csv",
         },
         {
           id: "R2",
           claim: "Second claim",
           status: "inconclusive",
+          method: "blocked",
+          evidenceToolCallIds: [1],
+          evidenceExcerpt: "exit code 0",
+          blockerKind: "command-error",
         },
       ],
-      toolCalls: [{
-        name: "run_command",
-        args: { command: "python reproduce.py" },
-        result: "exit code 0",
-      }],
+      toolCalls: [
+        { name: "read_file", args: { path: "/work/materials/raw.csv" }, result: "raw rows" },
+        { name: "run_command", args: { command: "python reproduce.py /work/materials/raw.csv" }, result: "exit code 0\nrecomputed=0.91" },
+      ],
       logbook: [
         "## Claims",
         "R1 verified; R2 inconclusive.",
@@ -235,13 +257,371 @@ describe("Reproduction — premature-stop recovery", () => {
         id: "R1",
         claim: "A claim",
         status: "verified",
+        reproducedValue: "0.91",
         evidence: "results.json",
+        method: "rerun",
+        evidenceToolCallIds: [1],
+        evidenceExcerpt: "reproduced=0.91",
       }],
-      toolCalls: [{ name: "record_result" }],
+      toolCalls: [{
+        name: "run_command",
+        args: { command: "python recompute.py" },
+        result: "exit code 0\nreproduced=0.91",
+      }],
       logbook: "I was asked to write ## Claims and ## Reproduction Log and ## Discrepancies and ## Limitations.",
     });
 
     expect(issues.some(issue => issue.includes("final logbook is missing"))).toBe(true);
+  });
+
+  it("continues the observed early finish when claims were skipped due to time with most budget unused", () => {
+    const toolCalls = Array.from({ length: 18 }, (_, offset) => ({
+      index: offset + 1,
+      name: offset === 4 ? "run_command" : "read_file",
+      args: offset === 4
+        ? { command: "python 05_semantic_subspace.py" }
+        : { path: `/work/materials/file-${offset}.csv` },
+      result: offset === 4
+        ? "exit code 1\nCUDA out of memory"
+        : "author-provided summary data",
+    }));
+    const continuation = buildReproductionContinuation({
+      recordedResults: [
+        {
+          id: "R1",
+          claim: "Semantic subspace intervention",
+          status: "inconclusive",
+          evidence: "CUDA out of memory.",
+          method: "blocked",
+          evidenceToolCallIds: [5],
+          evidenceExcerpt: "CUDA out of memory",
+          blockerKind: "oom",
+        },
+        {
+          id: "R2",
+          claim: "Frozen-world propagation",
+          status: "inconclusive",
+          evidence: "The authors' CSV matches, but the script was not rerun due to time constraints.",
+          method: "blocked",
+          evidenceToolCallIds: [6],
+          evidenceExcerpt: "author-provided summary data",
+          blockerKind: "budget",
+        },
+        {
+          id: "R3",
+          claim: "Output robustness",
+          status: "inconclusive",
+          evidence: "The supplied chart matches, but there was not enough time to rerun it.",
+          method: "blocked",
+          evidenceToolCallIds: [7],
+          evidenceExcerpt: "author-provided summary data",
+          blockerKind: "budget",
+        },
+      ],
+      toolCalls,
+      logbook: [
+        "## Claims", "Three inconclusive claims.",
+        "## Reproduction Log", "One script attempted.",
+        "## Discrepancies", "None measured.",
+        "## Limitations", "Two scripts skipped due to time.",
+      ].join("\n"),
+      budgetExhausted: false,
+    });
+
+    expect(continuation).toContain("R2 cites time or budget as a blocker while useful budget remains");
+    expect(continuation).toContain("R3 cites time or budget as a blocker while useful budget remains");
+  });
+
+  it("accepts a genuine OOM blocker with claim-specific command evidence", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [{
+        id: "R1",
+        claim: "Full-scale intervention",
+        status: "inconclusive",
+        evidence: "The full experiment failed with CUDA out of memory.",
+        method: "blocked",
+        evidenceToolCallIds: [1],
+        evidenceExcerpt: "CUDA out of memory",
+        blockerKind: "oom",
+      }],
+      toolCalls: [{
+        index: 1,
+        name: "run_command",
+        args: { command: "python full_experiment.py" },
+        result: "exit code 1\nCUDA out of memory",
+      }],
+      logbook: [
+        "## Claims", "R1 inconclusive.",
+        "## Reproduction Log", "Attempted the full experiment.",
+        "## Discrepancies", "None measurable.",
+        "## Limitations", "A10G memory was insufficient.",
+      ].join("\n"),
+    });
+
+    expect(issues).toEqual([]);
+  });
+
+  it("accepts an independent raw-data recomputation backed by a successful command", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [{
+        id: "R1",
+        claim: "14 of 18 direct answers changed",
+        status: "verified",
+        originalValue: "14/18",
+        reproducedValue: "14/18",
+        evidence: "Python recomputed the count from raw per-example rows.",
+        method: "raw-data-rederived",
+        evidenceToolCallIds: [1, 2],
+        evidenceExcerpt: "14/18",
+        rawInputToolCallId: 1,
+        rawInputPath: "/work/materials/raw.csv",
+      }],
+      toolCalls: [
+        { index: 1, name: "read_file", args: { path: "/work/materials/raw.csv" }, result: "rows" },
+        { index: 2, name: "run_command", args: { command: "python recompute.py /work/materials/raw.csv" }, result: "exit code 0\n14/18" },
+      ],
+      logbook: [
+        "## Claims", "R1 verified.",
+        "## Reproduction Log", "Recomputed from raw rows.",
+        "## Discrepancies", "None.",
+        "## Limitations", "None.",
+      ].join("\n"),
+    });
+
+    expect(issues).toEqual([]);
+  });
+
+  it("rejects a generic successful exit status as claim evidence", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [{
+        id: "R1",
+        claim: "A quantitative result",
+        status: "inconclusive",
+        evidence: "A command completed.",
+        method: "rerun",
+        evidenceToolCallIds: [1],
+        evidenceExcerpt: "exit code 0",
+      }],
+      toolCalls: [{
+        index: 1,
+        name: "run_command",
+        args: { command: "pip install pandas" },
+        result: "exit code 0",
+      }],
+      logbook: [
+        "## Claims", "R1 inconclusive.",
+        "## Reproduction Log", "Installed a dependency.",
+        "## Discrepancies", "None measured.",
+        "## Limitations", "No experiment run.",
+      ].join("\n"),
+    });
+
+    expect(issues).toContain("R1 method rerun does not quote evidence from a cited successful command");
+  });
+
+  it("rejects a README as the raw input for re-derivation", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [{
+        id: "R1",
+        claim: "A quantitative result",
+        status: "inconclusive",
+        evidence: "Computed a diagnostic.",
+        method: "raw-data-rederived",
+        evidenceToolCallIds: [1, 2],
+        evidenceExcerpt: "diagnostic complete",
+        rawInputToolCallId: 1,
+        rawInputPath: "/work/materials/README.md",
+      }],
+      toolCalls: [
+        { index: 1, name: "read_file", args: { path: "/work/materials/README.md" }, result: "instructions" },
+        {
+          index: 2,
+          name: "run_command",
+          args: { command: "python helper.py /work/materials/README.md" },
+          result: "exit code 0\ndiagnostic complete",
+        },
+      ],
+      logbook: [
+        "## Claims", "R1 inconclusive.",
+        "## Reproduction Log", "Read instructions.",
+        "## Discrepancies", "None measured.",
+        "## Limitations", "No raw data.",
+      ].join("\n"),
+    });
+
+    expect(issues).toContain("R1 raw-data re-derivation is not tied to a specific raw input read and computation");
+  });
+
+  it("does not let two claims reuse output that contains only one reproduced value", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [
+        {
+          id: "R1",
+          claim: "First metric",
+          status: "verified",
+          reproducedValue: "0.91",
+          evidence: "Metrics command.",
+          method: "rerun",
+          evidenceToolCallIds: [1],
+          evidenceExcerpt: "metric_a=0.91",
+        },
+        {
+          id: "R2",
+          claim: "Second metric",
+          status: "verified",
+          reproducedValue: "0.82",
+          evidence: "Metrics command.",
+          method: "rerun",
+          evidenceToolCallIds: [1],
+          evidenceExcerpt: "metric_a=0.91",
+        },
+      ],
+      toolCalls: [{
+        index: 1,
+        name: "run_command",
+        args: { command: "python metric_a.py" },
+        result: "exit code 0\nmetric_a=0.91",
+      }],
+      logbook: [
+        "## Claims", "Two claims.",
+        "## Reproduction Log", "Ran metric A.",
+        "## Discrepancies", "None.",
+        "## Limitations", "Metric B was not run.",
+      ].join("\n"),
+    });
+
+    expect(issues).toContain("R2 verified result does not include its reproduced value in the evidence excerpt");
+  });
+
+  it("does not let an inconclusive rerun reuse unrelated successful output", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [{
+        id: "R2",
+        claim: "A second untested metric",
+        status: "inconclusive",
+        evidence: "A different command completed.",
+        method: "rerun",
+        evidenceToolCallIds: [1],
+        evidenceExcerpt: "metric_a=0.91",
+      }],
+      toolCalls: [{
+        index: 1,
+        name: "run_command",
+        args: { command: "python metric_a.py" },
+        result: "exit code 0\nmetric_a=0.91",
+      }],
+      logbook: [
+        "## Claims", "R2 inconclusive.",
+        "## Reproduction Log", "Ran metric A only.",
+        "## Discrepancies", "None measurable.",
+        "## Limitations", "Metric B was not run.",
+      ].join("\n"),
+    });
+
+    expect(issues).toContain("R2 inconclusive result does not include its reproduced value in the evidence excerpt");
+  });
+
+  it("rejects blocked claims that cite unrelated successful output", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [{
+        id: "R1",
+        claim: "An experiment",
+        status: "inconclusive",
+        evidence: "Could not proceed.",
+        method: "blocked",
+        evidenceToolCallIds: [1],
+        evidenceExcerpt: "accuracy,0.91",
+        blockerKind: "command-error",
+      }],
+      toolCalls: [{
+        index: 1,
+        name: "read_file",
+        args: { path: "/work/materials/summary.csv" },
+        result: "accuracy,0.91",
+      }],
+      logbook: [
+        "## Claims", "R1 inconclusive.",
+        "## Reproduction Log", "Read a summary.",
+        "## Discrepancies", "None.",
+        "## Limitations", "Could not proceed.",
+      ].join("\n"),
+    });
+
+    expect(issues).toContain("R1 blocker category and evidence excerpt do not match cited tool output");
+  });
+
+  it("rejects blocked as a conclusive result method", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [{
+        id: "R1",
+        claim: "An experiment",
+        status: "verified",
+        reproducedValue: "0.91",
+        evidence: "Command failed.",
+        method: "blocked",
+        evidenceToolCallIds: [1],
+        evidenceExcerpt: "dependency failed",
+        blockerKind: "command-error",
+      }],
+      toolCalls: [{
+        index: 1,
+        name: "run_command",
+        args: { command: "python reproduce.py" },
+        result: "exit code 1\ndependency failed",
+      }],
+      logbook: [
+        "## Claims", "R1 verified.",
+        "## Reproduction Log", "Command failed.",
+        "## Discrepancies", "None.",
+        "## Limitations", "Failure.",
+      ].join("\n"),
+    });
+
+    expect(issues).toContain("R1 uses blocked method with non-inconclusive status verified");
+  });
+
+  it("deterministically finalizes pending claims when the deadline is exhausted", () => {
+    const recordedResults = [{
+      id: "R1",
+      claim: "Long-running experiment",
+      status: "pending" as const,
+    }];
+    const toolCalls = [{
+      index: 4,
+      name: "run_command",
+      args: { command: "python long_run.py" },
+      result: "TIMED OUT",
+      durationMs: 900_000,
+      error: true,
+    }];
+
+    finalizeBudgetExhaustedResults({
+      recordedResults,
+      toolCalls,
+      stoppedBy: "deadline",
+    });
+
+    expect(recordedResults[0]).toMatchObject({
+      status: "inconclusive",
+      method: "blocked",
+      evidenceToolCallIds: [4],
+      blockerKind: "budget",
+    });
+    expect(recordedResults[0].evidence).toContain("System-enforced deadline exhaustion");
+  });
+});
+
+describe("Reproduction — rerun eligibility", () => {
+  it("allows failed and completed inconclusive runs", () => {
+    expect(canRetryReproduction({ status: "failed", overallVerdict: null })).toBe(true);
+    expect(canRetryReproduction({ status: "completed", overallVerdict: "inconclusive" })).toBe(true);
+  });
+
+  it("rejects active and conclusive completed runs", () => {
+    expect(canRetryReproduction({ status: "pending", overallVerdict: null })).toBe(false);
+    expect(canRetryReproduction({ status: "generating", overallVerdict: null })).toBe(false);
+    expect(canRetryReproduction({ status: "completed", overallVerdict: "verified" })).toBe(false);
+    expect(canRetryReproduction({ status: "completed", overallVerdict: "falsified" })).toBe(false);
   });
 });
 
@@ -322,6 +702,8 @@ describe("Reproduction — report composition", () => {
       expect(JUDGE_PROMPT).toContain(v);
     }
     expect(REPRODUCER_PROMPT).toContain("## Reproduction Log");
+    expect(REPRODUCER_PROMPT).toContain("evidence_tool_call_ids");
+    expect(REPRODUCER_PROMPT).toContain("raw-data-rederived");
     expect(JUDGE_PROMPT).toContain("```json");
   });
 });

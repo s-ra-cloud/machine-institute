@@ -122,4 +122,69 @@ describe("Tool loop — premature-stop recovery", () => {
     expect(onPrematureStop).not.toHaveBeenCalled();
     expect(createCompletion.mock.calls[0][0].tools).toBeUndefined();
   });
+
+  it("can show stable numeric evidence IDs in tool results", async () => {
+    createCompletion
+      .mockResolvedValueOnce(completion(null, [{
+        id: "call-1",
+        type: "function",
+        function: { name: "run_command", arguments: JSON.stringify({ command: "python test.py" }) },
+      }]))
+      .mockResolvedValueOnce(completion("Done."));
+
+    await runToolLoop(
+      config,
+      "system",
+      "user",
+      [{ name: "run_command", description: "Run", parameters: { type: "object" } }],
+      async () => "exit code 0",
+      {
+        maxToolCalls: 10,
+        deadlineMs: Date.now() + 60_000,
+        numberToolResults: true,
+      },
+    );
+
+    expect(createCompletion.mock.calls[1][0].messages).toContainEqual({
+      role: "tool",
+      tool_call_id: "call-1",
+      content: "[Tool call #1]\nexit code 0",
+    });
+  });
+
+  it("preserves numeric evidence IDs when old tool output is compacted", async () => {
+    let request = 0;
+    createCompletion.mockImplementation(async () => {
+      request++;
+      if (request <= 10) {
+        return completion(null, [{
+          id: `call-${request}`,
+          type: "function",
+          function: { name: "run_command", arguments: JSON.stringify({ command: `python test-${request}.py` }) },
+        }]);
+      }
+      return completion("Done.");
+    });
+
+    await runToolLoop(
+      config,
+      "system",
+      "user",
+      [{ name: "run_command", description: "Run", parameters: { type: "object" } }],
+      async () => `exit code 0\n${"x".repeat(500)}`,
+      {
+        maxToolCalls: 20,
+        deadlineMs: Date.now() + 60_000,
+        numberToolResults: true,
+        contextCharBudget: 1_200,
+      },
+    );
+
+    const finalMessages = createCompletion.mock.calls.at(-1)?.[0].messages;
+    expect(finalMessages).toContainEqual({
+      role: "tool",
+      tool_call_id: "call-1",
+      content: "[Tool call #1]\n[earlier tool output elided to fit the context window — re-run the tool if you need it again]",
+    });
+  });
 });

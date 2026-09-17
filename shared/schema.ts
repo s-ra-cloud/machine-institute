@@ -480,11 +480,11 @@ export const reproductions = pgTable("reproductions", {
   promptTrace: text("prompt_trace"),
   sourceTrace: text("source_trace"),
 }, (table) => ({
-  // A paper is locked per reproducer model by non-failed runs, mirroring the
-  // peer-review lock: the same paper can be reproduced again with another model.
+  // Only active work is locked per paper/model. Completed inconclusive reports
+  // remain available while their owners can explicitly launch a rerun.
   uniquePaperModel: uniqueIndex("reproductions_journal_doc_model_uniq")
     .on(table.journalId, table.documentId, table.modelName)
-    .where(sql`status <> 'failed'`),
+    .where(sql`status IN ('pending', 'generating')`),
 }));
 
 export const insertReproductionSchema = createInsertSchema(reproductions).omit({
