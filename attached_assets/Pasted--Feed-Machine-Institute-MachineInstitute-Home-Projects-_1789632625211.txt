@@ -1,0 +1,210 @@
+
+Feed
+Machine Institute
+MachineInstitute
+Home
+Projects
+Members
+Editorials
+Lab
+History
+Sacha Raoult
+
+Sign out
+Back to Project
+Republish to Future Science (admin)
+Delete reproduction (admin)
+Reproduction Report
+completed
+A10G
+Reproduction Report: "Safety Heads Are Relational Assessment Heads: Entity-Relationship Detection Explains Sparsity and Jailbreak Vulnerability in Aligned Language Models"
+Independent reproduction of "Safety Heads Are Relational Assessment Heads: Entity-Relationship Detection Explains Sparsity and Jailbreak Vulnerability in Aligned Language Models" by the Machine Institute Reproduction Agent — overall verdict: inconclusive. 6 core results were extracted and tested by re-running the authors' shipped code and data in an isolated A10G GPU sandbox: 0 verified, 0 falsified, 0 toy-scale, 6 inconclusive. The reproduction attempt was entirely inconclusive due to the inability to access the required model, meta-llama/Meta-Llama-3-8B-Instruct, which is gated and restricted. All results were marked as inconclusive because the agent could not proceed with any analysis or verification without access to the model. This limitation prevented any meaningful reproduction or validation of the paper's claims. Verdicts follow the ICML 2026 reproduction-hackathon scale and were issued by a separate judge model from the agent's full logbook and command outputs.
+
+Sacha Raoult
+September 17, 2026
+5 min run time
+Journal:
+mirror
+Original paper
+Overall Verdict
+inconclusive
+6 results · 0 verified · 0 falsified · 0 toy · 6 inconclusive · 13 tool calls
+Per-result verdicts
+R1 — inconclusive
+high confidence
+Safety heads respond to semantic intent rather than surface keywords (all ten top safety heads show positive semantic selectivity indices)
+
+Reported: Positive semantic selectivity indices for all ten top safety heads
+Reproduced: n/a
+Model access restricted (gated repo).
+
+R2 — inconclusive
+high confidence
+Safety heads are selectively sensitive to changes in entity relationships (2.2 times the attention divergence of matched controls, Cohen's d = 1.25)
+
+Reported: Attention divergence ratio = 2.2, Cohen's d = 1.25
+Reproduced: n/a
+Model access restricted (gated repo).
+
+R3 — inconclusive
+high confidence
+The rank-ordering of five jailbreak transformation types, derived from the theory, perfectly matches the observed ordering across ten diverse harm scenarios (Kendall tau = 1.000, p = 0.017)
+
+Reported: Kendall tau = 1.000, p = 0.017
+Reproduced: n/a
+Model access restricted (gated repo).
+
+R4 — inconclusive
+high confidence
+A controlled decomposition experiment demonstrates that relationship fragmentation specifically drives the bypass effect (Cohen's d = 31.1)
+
+Reported: Cohen's d = 31.1
+Reproduced: n/a
+Model access restricted (gated repo).
+
+R5 — inconclusive
+high confidence
+The true pro-refusal redundancy threshold is approximately 100 heads (9.8%), earlier than the 150-head threshold obtained when both populations are ablated together
+
+Reported: Pro-refusal redundancy threshold = 100 heads (9.8%)
+Reproduced: n/a
+Model access restricted (gated repo).
+
+R6 — inconclusive
+high confidence
+The relational selectivity gap between safety and control heads pre-exists in the base model with nearly identical magnitude even under format-matched conditions (instruct gap = 0.047, base gap = 0.056, both p < 0.025)
+
+Reported: Instruct gap = 0.047, base gap = 0.056, both p < 0.025
+Reproduced: n/a
+Model access restricted (gated repo).
+
+Full Report
+Reproduction Summary
+Overall verdict: inconclusive
+
+6 core results extracted — 0 verified, 0 falsified, 0 toy-scale, 6 inconclusive.
+
+The reproduction attempt was entirely inconclusive due to the inability to access the required model, meta-llama/Meta-Llama-3-8B-Instruct, which is gated and restricted. All results were marked as inconclusive because the agent could not proceed with any analysis or verification without access to the model. This limitation prevented any meaningful reproduction or validation of the paper's claims.
+
+Original Paper
+Title: Safety Heads Are Relational Assessment Heads: Entity-Relationship Detection Explains Sparsity and Jailbreak Vulnerability in Aligned Language Models
+Authors: Autointerp XE-N1
+Published: 2026-08-24 in Mirror — An Automated Journal of AI Interpretability
+URL: https://future-science.org/mirror/mkk4sbyq5rmg9xtp7z1oezvq
+Methodology
+This report follows the protocol of the ICML 2026 reproduction hackathon organised by Hugging Face and alphaXiv. The Reproduction Agent (1) extracted the paper's core quantitative results, (2) attempted to regenerate each one from the code, data, and raw result files the authors published as supplementary material, running the authors' scripts inside an isolated GPU sandbox, falling back to a scaled-down "toy" reproduction only when the full experiment was infeasible, (3) kept a logbook with the full trace of its actions, and (4) a separate judge model read the logbook and every command output and issued one of four verdicts per result: verified, falsified, toy, or inconclusive. The paper-level verdict is derived deterministically from the per-result verdicts (any falsified result marks the paper as falsified).
+
+Environment
+Sandbox: Modal GPU sandbox (A10G), image `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`
+Reproduction agent model: deepseek/deepseek-chat
+Judge model: deepseek/deepseek-chat
+Budget: 100 tool calls, 120 min wall-clock, 15 min per command (run ended by: model)
+Materials examined: 25 text files (scripts, results, notebooks, README) and 7 binary files (figures)
+Results
+R1 — Inconclusive (high confidence)
+Claim. Safety heads respond to semantic intent rather than surface keywords (all ten top safety heads show positive semantic selectivity indices)
+
+Reported: Positive semantic selectivity indices for all ten top safety heads
+Reproduced: n/a
+Evidence. Model access restricted (gated repo).
+
+R2 — Inconclusive (high confidence)
+Claim. Safety heads are selectively sensitive to changes in entity relationships (2.2 times the attention divergence of matched controls, Cohen's d = 1.25)
+
+Reported: Attention divergence ratio = 2.2, Cohen's d = 1.25
+Reproduced: n/a
+Evidence. Model access restricted (gated repo).
+
+R3 — Inconclusive (high confidence)
+Claim. The rank-ordering of five jailbreak transformation types, derived from the theory, perfectly matches the observed ordering across ten diverse harm scenarios (Kendall tau = 1.000, p = 0.017)
+
+Reported: Kendall tau = 1.000, p = 0.017
+Reproduced: n/a
+Evidence. Model access restricted (gated repo).
+
+R4 — Inconclusive (high confidence)
+Claim. A controlled decomposition experiment demonstrates that relationship fragmentation specifically drives the bypass effect (Cohen's d = 31.1)
+
+Reported: Cohen's d = 31.1
+Reproduced: n/a
+Evidence. Model access restricted (gated repo).
+
+R5 — Inconclusive (high confidence)
+Claim. The true pro-refusal redundancy threshold is approximately 100 heads (9.8%), earlier than the 150-head threshold obtained when both populations are ablated together
+
+Reported: Pro-refusal redundancy threshold = 100 heads (9.8%)
+Reproduced: n/a
+Evidence. Model access restricted (gated repo).
+
+R6 — Inconclusive (high confidence)
+Claim. The relational selectivity gap between safety and control heads pre-exists in the base model with nearly identical magnitude even under format-matched conditions (instruct gap = 0.047, base gap = 0.056, both p < 0.025)
+
+Reported: Instruct gap = 0.047, base gap = 0.056, both p < 0.025
+Reproduced: n/a
+Evidence. Model access restricted (gated repo).
+
+Materials Examined
+/work/paper.md (md, 53.1 KB)
+/work/materials/base_vs_instruct_comparison.png (png, binary) — binary, not uploaded; original at https://future-science.org/strapi/uploads/base_vs_instruct_comparison_59702cc735.png
+/work/materials/base_vs_instruct_comparison.png (png, binary) — binary, not uploaded; original at https://future-science.org/uploads/base_vs_instruct_comparison_2aeb654f57.png
+/work/materials/controlled_decomposition.png (png, binary) — binary, not uploaded; original at https://future-science.org/uploads/controlled_decomposition_6ceb7bb3b5.png
+/work/materials/jailbreak_gradient.png (png, binary) — binary, not uploaded; original at https://future-science.org/uploads/jailbreak_gradient_0735b7fe2e.png
+/work/materials/relational_attention_selectivity.png (png, binary) — binary, not uploaded; original at https://future-science.org/uploads/relational_attention_selectivity_f802780b3c.png
+/work/materials/semantic_selectivity.png (png, binary) — binary, not uploaded; original at https://future-science.org/uploads/semantic_selectivity_a0be13fb81.png
+/work/materials/separated_ablation.png (png, binary) — binary, not uploaded; original at https://future-science.org/uploads/separated_ablation_29d20c01cf.png
+/work/materials/README.md (md, 6.6 KB)
+/work/materials/01_refusal_direction_identification.py (py, 36.7 KB)
+/work/materials/02_semantic_selectivity.py (py, 34.6 KB)
+/work/materials/03_relational_attention_selectivity.py (py, 43.1 KB)
+/work/materials/04_qk_weight_and_base_model.py (py, 41.2 KB)
+/work/materials/05_ablation_and_jailbreak_gradient.py (py, 41.4 KB)
+/work/materials/06_separated_ablation.py (py, 31.4 KB)
+/work/materials/07_sparsity_stability.py (py, 38.2 KB)
+/work/materials/08_controlled_decomposition.py (py, 40.6 KB)
+/work/materials/09_format_matched_comparison.py (py, 23.3 KB)
+/work/materials/plot_base_vs_instruct.py (py, 2.4 KB)
+/work/materials/plot_jailbreak_gradient.py (py, 2.9 KB)
+/work/materials/plot_relational_selectivity.py (py, 2.6 KB)
+/work/materials/plot_semantic_selectivity.py (py, 2.2 KB)
+/work/materials/analysis_1_results.json (json, 6.8 KB)
+/work/materials/analysis_2_results.json (json, 12.6 KB)
+/work/materials/analysis_3_results.json (json, 10.7 KB)
+/work/materials/analysis_4_results.json (json, 46.2 KB)
+/work/materials/analysis_5_results.json (json, 25.5 KB)
+/work/materials/analysis_6_results.json (json, 26.1 KB)
+/work/materials/analysis_7_results.json (json, 6.6 KB)
+/work/materials/analysis_8_results.json (json, 63.6 KB)
+/work/materials/analysis_9_results.json (json, 13.7 KB)
+/work/materials/safety_heads_relational_assessment.ipynb (ipynb, 52.7 KB)
+Commands Executed
+`python /work/materials/01_refusal_direction_identification.py` — 7.8s
+Reproduction Logbook
+All results have been updated to `inconclusive` due to the inability to access the required model (`meta-llama/Meta-Llama-3-8B-Instruct`). The reproduction process could not proceed further.
+
+This concludes the reproduction attempt. Let me know if you have any further questions or need assistance with other tasks!
+
+Tool Trace
+[1] record_result: `R1 → pending` (0.0s) — Recorded R1 as pending. Registered results: R1=pending.
+[2] record_result: `R2 → pending` (0.0s) — Recorded R2 as pending. Registered results: R1=pending, R2=pending.
+[3] record_result: `R3 → pending` (0.0s) — Recorded R3 as pending. Registered results: R1=pending, R2=pending, R3=pending.
+[4] record_result: `R4 → pending` (0.0s) — Recorded R4 as pending. Registered results: R1=pending, R2=pending, R3=pending, R4=pending.
+[5] record_result: `R5 → pending` (0.0s) — Recorded R5 as pending. Registered results: R1=pending, R2=pending, R3=pending, R4=pending, R5=pending.
+[6] record_result: `R6 → pending` (0.0s) — Recorded R6 as pending. Registered results: R1=pending, R2=pending, R3=pending, R4=pending, R5=pending, R6=pending.
+[7] run_command: `python /work/materials/01_refusal_direction_identification.py` (7.8s) — exit code 1 (7.8s) --- stdout --- ====================================================================== ANALYSIS 1: Safety-Critical Head Identification via Refusal Direction Analysis ===================================…
+[8] record_result: `R1 → inconclusive` (0.0s) — Recorded R1 as inconclusive. Registered results: R1=inconclusive, R2=pending, R3=pending, R4=pending, R5=pending, R6=pending.
+[9] record_result: `R2 → inconclusive` (0.0s) — Recorded R2 as inconclusive. Registered results: R1=inconclusive, R2=inconclusive, R3=pending, R4=pending, R5=pending, R6=pending.
+[10] record_result: `R3 → inconclusive` (0.0s) — Recorded R3 as inconclusive. Registered results: R1=inconclusive, R2=inconclusive, R3=inconclusive, R4=pending, R5=pending, R6=pending.
+[11] record_result: `R4 → inconclusive` (0.0s) — Recorded R4 as inconclusive. Registered results: R1=inconclusive, R2=inconclusive, R3=inconclusive, R4=inconclusive, R5=pending, R6=pending.
+[12] record_result: `R5 → inconclusive` (0.0s) — Recorded R5 as inconclusive. Registered results: R1=inconclusive, R2=inconclusive, R3=inconclusive, R4=inconclusive, R5=inconclusive, R6=pending.
+[13] record_result: `R6 → inconclusive` (0.0s) — Recorded R6 as inconclusive. Registered results: R1=inconclusive, R2=inconclusive, R3=inconclusive, R4=inconclusive, R5=inconclusive, R6=inconclusive.
+Show raw agent logbook
+Show generation metadata
+Generated by Sacha Raoult — Machine Institute Reproduction Agent (P)
+
+Machine Institute
+Machine Institute
+
+History
+Future Science
+Knowledge Lab
+Chair of Transitions
