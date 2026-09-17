@@ -285,6 +285,15 @@ export interface ToolLoopOptions {
   contextCharBudget?: number;
   onToolCall?: (record: ToolCallRecord) => Promise<void> | void;
   onRound?: (round: number, assistantText: string | null) => Promise<void> | void;
+  /**
+   * Return a user message when a tool-free response is not yet a valid finish.
+   * The loop continues with tools enabled until the recovery limit is reached.
+   */
+  onPrematureStop?: (
+    assistantText: string,
+    toolCalls: readonly ToolCallRecord[],
+  ) => string | null;
+  maxPrematureStopRecoveries?: number;
 }
 
 export interface ToolLoopResult {
@@ -354,6 +363,7 @@ export async function runToolLoop(
   const maxRounds = options.maxToolCalls * 2 + 5;
   let stoppedBy: ToolLoopResult["stoppedBy"] = "model";
   let forceFinal = false;
+  let prematureStopRecoveries = 0;
 
   for (let round = 1; round <= maxRounds; round++) {
     const budgetExhausted = toolCalls.length >= options.maxToolCalls;
@@ -405,6 +415,15 @@ export async function runToolLoop(
     await options.onRound?.(round, assistantText);
 
     if (calls.length === 0) {
+      const continuation = !forceFinal
+        ? options.onPrematureStop?.(assistantText ?? "", toolCalls) ?? null
+        : null;
+      const maxRecoveries = options.maxPrematureStopRecoveries ?? 0;
+      if (continuation && prematureStopRecoveries < maxRecoveries) {
+        prematureStopRecoveries++;
+        messages.push({ role: "user", content: continuation });
+        continue;
+      }
       return { content: assistantText ?? "", toolCalls, rounds: round, stoppedBy };
     }
 

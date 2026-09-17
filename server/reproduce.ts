@@ -33,6 +33,13 @@ const PAPER_INLINE_CHARS = 15_000;
 const README_INLINE_CHARS = 12_000;
 const JUDGE_TRANSCRIPT_CHARS = 150_000;
 const JUDGE_TOOL_RESULT_CHARS = 3_000;
+const MAX_PREMATURE_STOP_RECOVERIES = 2;
+const REQUIRED_LOGBOOK_SECTIONS = [
+  "## Claims",
+  "## Reproduction Log",
+  "## Discrepancies",
+  "## Limitations",
+] as const;
 
 export interface ReproductionOutput {
   markdown: string;
@@ -74,13 +81,88 @@ export const NO_USABLE_REPRODUCTION_EVIDENCE =
 
 export function hasUsableReproductionEvidence(input: {
   recordedResults: RecordedResult[];
-  toolCalls: Array<{ name: string }>;
+  toolCalls: readonly {
+    name: string;
+    args?: Record<string, unknown>;
+    result?: string;
+  }[];
 }): boolean {
-  const hasExecution = input.toolCalls.some(call => call.name === "run_command");
+  const hasExecution = input.toolCalls.some(call => {
+    if (call.name !== "run_command") return false;
+    const command = String(call.args?.command || "").trim();
+    const result = call.result || "";
+    return Boolean(command)
+      && !result.startsWith("Refused: empty command")
+      && !result.startsWith("Tool budget exhausted");
+  });
   const hasRecordedEvidence = input.recordedResults.some(result =>
     Boolean(result.reproducedValue?.trim() || result.evidence?.trim()),
   );
   return hasExecution || hasRecordedEvidence;
+}
+
+export function getReproductionCompletionIssues(input: {
+  recordedResults: RecordedResult[];
+  toolCalls: readonly {
+    name: string;
+    args?: Record<string, unknown>;
+    result?: string;
+  }[];
+  logbook: string;
+}): string[] {
+  const issues: string[] = [];
+  if (input.recordedResults.length === 0) {
+    issues.push("no core results have been registered");
+  }
+  const pending = input.recordedResults.filter(result => result.status === "pending");
+  if (pending.length > 0) {
+    issues.push(`${pending.length} result${pending.length === 1 ? " is" : "s are"} still pending (${pending.map(result => result.id).join(", ")})`);
+  }
+  const unsupported = input.recordedResults.filter(result =>
+    result.status !== "pending"
+    && !result.reproducedValue?.trim()
+    && !result.evidence?.trim(),
+  );
+  if (unsupported.length > 0) {
+    issues.push(`${unsupported.length} finalized result${unsupported.length === 1 ? " has" : "s have"} no reproduced value or supporting evidence (${unsupported.map(result => result.id).join(", ")})`);
+  }
+  if (!hasUsableReproductionEvidence(input)) {
+    issues.push("no command execution or recorded reproduction evidence exists");
+  }
+  const logbookLines = input.logbook.split(/\r?\n/);
+  const missingSections = REQUIRED_LOGBOOK_SECTIONS.filter(section => {
+    const start = logbookLines.findIndex(line => line.trim() === section);
+    if (start < 0) return true;
+    const nextHeadingOffset = logbookLines
+      .slice(start + 1)
+      .findIndex(line => /^##\s+\S/.test(line.trim()));
+    const end = nextHeadingOffset < 0
+      ? logbookLines.length
+      : start + 1 + nextHeadingOffset;
+    return !logbookLines.slice(start + 1, end).join("\n").trim();
+  });
+  if (missingSections.length > 0) {
+    issues.push(`the final logbook is missing: ${missingSections.join(", ")}`);
+  }
+  return issues;
+}
+
+export function buildReproductionContinuation(input: {
+  recordedResults: RecordedResult[];
+  toolCalls: readonly {
+    name: string;
+    args?: Record<string, unknown>;
+    result?: string;
+  }[];
+  logbook: string;
+}): string | null {
+  const issues = getReproductionCompletionIssues(input);
+  if (issues.length === 0) return null;
+  return [
+    "You attempted to finish before completing the reproduction.",
+    `Unmet requirements: ${issues.join("; ")}.`,
+    "Continue using the available tools now. Perform the reproduction work, update every pending result to verified, falsified, toy, or inconclusive with concrete evidence, then return the complete four-section markdown logbook. Do not stop again until these requirements are satisfied.",
+  ].join(" ");
 }
 
 const TOOLS: ToolSpec[] = [
@@ -301,6 +383,13 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
           await emitEvent("reproduction-progress", `${rec.index} tool calls used (${Math.round((Date.now() - startTime) / 60000)} min elapsed).`);
         }
       },
+      onPrematureStop: (assistantText, toolCalls) =>
+        buildReproductionContinuation({
+          recordedResults: Array.from(recorded.values()),
+          toolCalls,
+          logbook: assistantText,
+        }),
+      maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
     });
     await emitEvent("reproduction-agent", `Agent finished after ${toolLoopResult.toolCalls.length} tool call(s) (${toolLoopResult.stoppedBy}); logbook ${toolLoopResult.content.length} chars.`);
   } finally {
@@ -314,6 +403,14 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
 
   if (!hasUsableReproductionEvidence({ recordedResults: recordedList, toolCalls })) {
     throw new Error(NO_USABLE_REPRODUCTION_EVIDENCE);
+  }
+  const completionIssues = getReproductionCompletionIssues({
+    recordedResults: recordedList,
+    toolCalls,
+    logbook,
+  });
+  if (completionIssues.length > 0) {
+    throw new Error(`The reproduction agent stopped before completing required work: ${completionIssues.join("; ")}.`);
   }
 
   // Judge pass: a separate model grades the logbook against the raw tool outputs.

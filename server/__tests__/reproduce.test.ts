@@ -25,6 +25,8 @@ import {
   _FS_TYPE_FALLBACKS_FOR_TEST,
 } from "../future-science";
 import {
+  buildReproductionContinuation,
+  getReproductionCompletionIssues,
   hasUsableReproductionEvidence,
   NO_USABLE_REPRODUCTION_EVIDENCE,
 } from "../reproduce";
@@ -118,8 +120,128 @@ describe("Reproduction — usable execution evidence", () => {
   it("accepts an inconclusive run when a real command was attempted", () => {
     expect(hasUsableReproductionEvidence({
       recordedResults: [{ id: "R1", claim: "A quantitative claim", status: "inconclusive" }],
-      toolCalls: [{ name: "run_command" }],
+      toolCalls: [{
+        name: "run_command",
+        args: { command: "python reproduce.py" },
+        result: "exit code 1",
+      }],
     })).toBe(true);
+  });
+});
+
+describe("Reproduction — premature-stop recovery", () => {
+  it("continues the observed two-pending-results and blank-response sequence", () => {
+    const continuation = buildReproductionContinuation({
+      recordedResults: [
+        { id: "R1", claim: "Accuracy is 90%", status: "pending" },
+        { id: "R2", claim: "Loss is 0.1", status: "pending" },
+      ],
+      toolCalls: [
+        { name: "record_result" },
+        { name: "record_result" },
+      ],
+      logbook: "",
+    });
+
+    expect(continuation).toContain("2 results are still pending (R1, R2)");
+    expect(continuation).toContain("no command execution");
+    expect(continuation).toContain("final logbook is missing");
+    expect(continuation).toContain("Continue using the available tools now");
+  });
+
+  it("accepts a completed evidence-backed inconclusive reproduction", () => {
+    const input = {
+      recordedResults: [{
+        id: "R1",
+        claim: "A quantitative claim",
+        status: "inconclusive" as const,
+        evidence: "The command failed because the required dataset was not shipped.",
+      }],
+      toolCalls: [{
+        name: "run_command",
+        args: { command: "python reproduce.py" },
+        result: "exit code 1",
+      }],
+      logbook: [
+        "## Claims",
+        "R1 is inconclusive.",
+        "## Reproduction Log",
+        "Attempted the shipped script.",
+        "## Discrepancies",
+        "None measurable.",
+        "## Limitations",
+        "Dataset unavailable.",
+      ].join("\n"),
+    };
+
+    expect(getReproductionCompletionIssues(input)).toEqual([]);
+    expect(buildReproductionContinuation(input)).toBeNull();
+  });
+
+  it("still rejects finalized evidence when the required logbook is missing", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [{
+        id: "R1",
+        claim: "A quantitative claim",
+        status: "verified",
+        reproducedValue: "0.91",
+      }],
+      toolCalls: [{ name: "run_command" }],
+      logbook: "Done.",
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain("final logbook is missing");
+  });
+
+  it("requires supporting evidence for every finalized result", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [
+        {
+          id: "R1",
+          claim: "First claim",
+          status: "verified",
+          evidence: "results.json",
+        },
+        {
+          id: "R2",
+          claim: "Second claim",
+          status: "inconclusive",
+        },
+      ],
+      toolCalls: [{
+        name: "run_command",
+        args: { command: "python reproduce.py" },
+        result: "exit code 0",
+      }],
+      logbook: [
+        "## Claims",
+        "R1 verified; R2 inconclusive.",
+        "## Reproduction Log",
+        "Ran the script.",
+        "## Discrepancies",
+        "None.",
+        "## Limitations",
+        "R2 could not be measured.",
+      ].join("\n"),
+    });
+
+    expect(issues).toContain("1 finalized result has no reproduced value or supporting evidence (R2)");
+  });
+
+  it("does not accept required headings quoted inside prose", () => {
+    const issues = getReproductionCompletionIssues({
+      recordedResults: [{
+        id: "R1",
+        claim: "A claim",
+        status: "verified",
+        evidence: "results.json",
+      }],
+      toolCalls: [{ name: "record_result" }],
+      logbook: "I was asked to write ## Claims and ## Reproduction Log and ## Discrepancies and ## Limitations.",
+    });
+
+    expect(issues.some(issue => issue.includes("final logbook is missing"))).toBe(true);
   });
 });
 
