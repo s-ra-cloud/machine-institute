@@ -24,6 +24,10 @@ import {
   normalizeRevisions,
   _FS_TYPE_FALLBACKS_FOR_TEST,
 } from "../future-science";
+import {
+  hasUsableReproductionEvidence,
+  NO_USABLE_REPRODUCTION_EVIDENCE,
+} from "../reproduce";
 
 const sample: ClaimVerdict[] = [
   { id: "R1", claim: "Cohen's d = 1.25", verdict: "verified", originalValue: "1.25", reproducedValue: "1.24" },
@@ -76,6 +80,46 @@ describe("Reproduction — paper-level verdict", () => {
   });
   it("counts each verdict", () => {
     expect(countVerdicts(sample)).toEqual({ total: 4, verified: 1, falsified: 1, toy: 1, inconclusive: 1 });
+  });
+});
+
+describe("Reproduction — usable execution evidence", () => {
+  it("rejects the observed empty run with only two pending results and no logbook evidence", () => {
+    const valid = hasUsableReproductionEvidence({
+      recordedResults: [
+        { id: "R1", claim: "Accuracy is 90%", status: "pending" },
+        { id: "R2", claim: "Loss is 0.1", status: "pending" },
+      ],
+      toolCalls: [
+        { name: "record_result" },
+        { name: "record_result" },
+      ],
+    });
+
+    expect(valid).toBe(false);
+    expect(NO_USABLE_REPRODUCTION_EVIDENCE).toContain("no usable execution evidence");
+  });
+
+  it.each(["verified", "falsified", "toy", "inconclusive"] as const)(
+    "accepts an evidence-backed %s result",
+    status => {
+      expect(hasUsableReproductionEvidence({
+        recordedResults: [{
+          id: "R1",
+          claim: "A quantitative claim",
+          status,
+          evidence: "python reproduce.py produced results/output.json",
+        }],
+        toolCalls: [{ name: "record_result" }],
+      })).toBe(true);
+    },
+  );
+
+  it("accepts an inconclusive run when a real command was attempted", () => {
+    expect(hasUsableReproductionEvidence({
+      recordedResults: [{ id: "R1", claim: "A quantitative claim", status: "inconclusive" }],
+      toolCalls: [{ name: "run_command" }],
+    })).toBe(true);
   });
 });
 

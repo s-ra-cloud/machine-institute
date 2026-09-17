@@ -69,6 +69,20 @@ export interface RunReproductionOptions {
   emitEvent: (phase: string, message: string) => Promise<void>;
 }
 
+export const NO_USABLE_REPRODUCTION_EVIDENCE =
+  "The reproduction agent produced no usable execution evidence: it did not run any commands or record reproduced values or supporting evidence.";
+
+export function hasUsableReproductionEvidence(input: {
+  recordedResults: RecordedResult[];
+  toolCalls: Array<{ name: string }>;
+}): boolean {
+  const hasExecution = input.toolCalls.some(call => call.name === "run_command");
+  const hasRecordedEvidence = input.recordedResults.some(result =>
+    Boolean(result.reproducedValue?.trim() || result.evidence?.trim()),
+  );
+  return hasExecution || hasRecordedEvidence;
+}
+
 const TOOLS: ToolSpec[] = [
   {
     name: "list_files",
@@ -297,6 +311,10 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
   const logbook = toolLoopResult.content;
   const toolCalls = toolLoopResult.toolCalls;
   const recordedList = Array.from(recorded.values());
+
+  if (!hasUsableReproductionEvidence({ recordedResults: recordedList, toolCalls })) {
+    throw new Error(NO_USABLE_REPRODUCTION_EVIDENCE);
+  }
 
   // Judge pass: a separate model grades the logbook against the raw tool outputs.
   await emitEvent("reproduction-judge", `Judge (${judgeModelConfig.modelName || judgeModelConfig.provider}) grading ${recordedList.length} recorded result(s)...`);
