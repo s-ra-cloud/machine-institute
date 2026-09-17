@@ -296,13 +296,23 @@ export interface ToolLoopOptions {
     toolCalls: readonly ToolCallRecord[],
   ) => string | null;
   maxPrematureStopRecoveries?: number;
+  /**
+   * Return monotonic workflow progress used to distinguish productive
+   * continuations from repeated premature stops.
+   */
+  getRecoveryProgress?: () => number;
+  /** Replacement text used when older tool output is compacted. */
+  elidedToolOutputMessage?: string;
+  /** Return an empty result instead of throwing when a forced resource stop's
+   * finalization request fails. */
+  allowResourceStopFallback?: boolean;
 }
 
 export interface ToolLoopResult {
   content: string;
   toolCalls: ToolCallRecord[];
   rounds: number;
-  stoppedBy: "model" | "tool-budget" | "deadline" | "round-cap";
+  stoppedBy: "model" | "tool-budget" | "deadline" | "round-cap" | "no-progress";
 }
 
 const ELIDED_TOOL_OUTPUT = "[earlier tool output elided to fit the context window — re-run the tool if you need it again]";
@@ -314,18 +324,22 @@ function messageChars(m: { content?: unknown }): number {
 
 // Drop the bodies of the oldest tool results once the transcript outgrows the
 // model's context window, keeping the most recent ones intact.
-function compactMessages(messages: Array<Record<string, unknown>>, budgetChars: number): void {
+function compactMessages(
+  messages: Array<Record<string, unknown>>,
+  budgetChars: number,
+  elidedToolOutputMessage: string = ELIDED_TOOL_OUTPUT,
+): void {
   let total = messages.reduce((n, m) => n + messageChars(m), 0);
   if (total <= budgetChars) return;
   const toolIdx = messages.map((m, i) => (m.role === "tool" ? i : -1)).filter(i => i >= 0);
   const candidates = toolIdx.slice(0, Math.max(0, toolIdx.length - KEEP_RECENT_TOOL_MESSAGES));
   for (const i of candidates) {
     const m = messages[i];
-    if (m.content === ELIDED_TOOL_OUTPUT) continue;
+    if (m.content === elidedToolOutputMessage) continue;
     const numberedPrefix = typeof m.content === "string"
       ? m.content.match(/^\[Tool call #\d+\]\n/)?.[0] || ""
       : "";
-    const replacement = `${numberedPrefix}${ELIDED_TOOL_OUTPUT}`;
+    const replacement = `${numberedPrefix}${elidedToolOutputMessage}`;
     total -= messageChars(m) - replacement.length;
     m.content = replacement;
     if (total <= budgetChars) break;
@@ -355,6 +369,7 @@ export async function runToolLoop(
   const temperature = options.temperature ?? 0.2;
   const maxToolResultChars = options.maxToolResultChars ?? 12_000;
   const contextBudget = options.contextCharBudget ?? Math.floor(getContextWindow(config) * 3.0);
+  const elidedToolOutputMessage = options.elidedToolOutputMessage ?? ELIDED_TOOL_OUTPUT;
 
   const messages: Array<Record<string, unknown>> = [
     { role: "system", content: systemPrompt },
@@ -370,6 +385,7 @@ export async function runToolLoop(
   let stoppedBy: ToolLoopResult["stoppedBy"] = "model";
   let forceFinal = false;
   let prematureStopRecoveries = 0;
+  let recoveryProgressHighWater: number | undefined;
 
   for (let round = 1; round <= maxRounds; round++) {
     const budgetExhausted = toolCalls.length >= options.maxToolCalls;
@@ -384,8 +400,22 @@ export async function runToolLoop(
           : "STOP: the time budget is exhausted. Do not call any more tools. Write your final logbook now, based strictly on the tool outputs you have already seen. Any claim you could not finish testing must be recorded as inconclusive in the logbook.",
       });
     }
-    compactMessages(messages, contextBudget);
+    compactMessages(messages, contextBudget, elidedToolOutputMessage);
 
+    const requestWasForcedFinal = forceFinal;
+    const fallbackAfterResourceStop = (): ToolLoopResult | null => {
+      if (
+        requestWasForcedFinal
+        && (stoppedBy === "deadline" || stoppedBy === "tool-budget")
+      ) {
+        return { content: "", toolCalls, rounds: round, stoppedBy };
+      }
+      if (!requestWasForcedFinal && Date.now() >= options.deadlineMs) {
+        stoppedBy = "deadline";
+        return { content: "", toolCalls, rounds: round, stoppedBy };
+      }
+      return null;
+    };
     let completion: any;
     try {
       completion = await client.chat.completions.create(
@@ -402,13 +432,27 @@ export async function runToolLoop(
       const status = err?.status ?? err?.statusCode ?? "unknown";
       const body = err?.error ?? err?.message ?? String(err);
       console.error(`[ToolLoop] API request failed — model=${model} round=${round} status=${status}:`, JSON.stringify(body));
+      if (options.allowResourceStopFallback) {
+        const fallback = fallbackAfterResourceStop();
+        if (fallback) return fallback;
+      }
       throw new Error(`LLM request failed (${status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
     }
     if (completion?.error) {
+      if (options.allowResourceStopFallback) {
+        const fallback = fallbackAfterResourceStop();
+        if (fallback) return fallback;
+      }
       throw new Error(`LLM API error: ${completion.error.message || JSON.stringify(completion.error)}`);
     }
-    const msg = completion.choices?.[0]?.message;
-    if (!msg) throw new Error("LLM returned no message.");
+    const msg = completion?.choices?.[0]?.message;
+    if (!msg) {
+      if (options.allowResourceStopFallback) {
+        const fallback = fallbackAfterResourceStop();
+        if (fallback) return fallback;
+      }
+      throw new Error("LLM returned no message.");
+    }
 
     const calls: Array<{ id: string; function: { name: string; arguments: string } }> =
       (msg.tool_calls || []).filter((c: any) => c?.type === "function" && c.function?.name);
@@ -421,14 +465,34 @@ export async function runToolLoop(
     await options.onRound?.(round, assistantText);
 
     if (calls.length === 0) {
+      // A request may have started before the deadline and returned after it.
+      // Do not offer another recovery continuation in that case.
+      if (!forceFinal && Date.now() >= options.deadlineMs) {
+        forceFinal = true;
+        stoppedBy = "deadline";
+      }
       const continuation = !forceFinal
         ? options.onPrematureStop?.(assistantText ?? "", toolCalls) ?? null
         : null;
       const maxRecoveries = options.maxPrematureStopRecoveries ?? 0;
-      if (continuation && prematureStopRecoveries < maxRecoveries) {
-        prematureStopRecoveries++;
-        messages.push({ role: "user", content: continuation });
-        continue;
+      if (continuation) {
+        if (options.getRecoveryProgress) {
+          const progress = options.getRecoveryProgress();
+          if (recoveryProgressHighWater === undefined) {
+            // The first premature stop establishes the baseline. Subsequent
+            // increases are the only events that reset the consecutive count.
+            recoveryProgressHighWater = progress;
+          } else if (progress > recoveryProgressHighWater) {
+            recoveryProgressHighWater = progress;
+            prematureStopRecoveries = 0;
+          }
+        }
+        if (prematureStopRecoveries < maxRecoveries) {
+          prematureStopRecoveries++;
+          messages.push({ role: "user", content: continuation });
+          continue;
+        }
+        if (options.getRecoveryProgress) stoppedBy = "no-progress";
       }
       return { content: assistantText ?? "", toolCalls, rounds: round, stoppedBy };
     }
@@ -436,17 +500,34 @@ export async function runToolLoop(
     for (const call of calls) {
       let args: Record<string, unknown> = {};
       try {
-        args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+        const parsedArgs = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+        args = parsedArgs && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)
+          ? parsedArgs as Record<string, unknown>
+          : {};
       } catch {
         args = { _raw: call.function.arguments };
       }
       const started = Date.now();
       let result: string;
       let error = false;
-      if (toolCalls.length >= options.maxToolCalls) {
+      let dispatched = false;
+      if (forceFinal) {
+        result = stoppedBy === "deadline"
+          ? "Deadline exhausted — this call was not executed. Write your final logbook."
+          : "Tool budget exhausted — this call was not executed. Write your final logbook.";
+        error = true;
+      } else if (toolCalls.length >= options.maxToolCalls) {
         result = "Tool budget exhausted — this call was not executed. Write your final logbook.";
         error = true;
+        forceFinal = true;
+        stoppedBy = "tool-budget";
+      } else if (Date.now() >= options.deadlineMs) {
+        forceFinal = true;
+        stoppedBy = "deadline";
+        result = "Deadline exhausted — this call was not executed. Write your final logbook.";
+        error = true;
       } else {
+        dispatched = true;
         try {
           result = await execute(call.function.name, args);
         } catch (err) {
@@ -455,31 +536,44 @@ export async function runToolLoop(
         }
       }
       result = truncateToolResult(result ?? "", maxToolResultChars);
-      const record: ToolCallRecord = {
-        index: toolCalls.length + 1,
-        name: call.function.name,
-        args,
-        result,
-        durationMs: Date.now() - started,
-        error,
-      };
-      toolCalls.push(record);
-      await options.onToolCall?.(record);
+      let resultContent = result;
+      if (dispatched) {
+        const record: ToolCallRecord = {
+          index: toolCalls.length + 1,
+          name: call.function.name,
+          args,
+          result,
+          durationMs: Date.now() - started,
+          error,
+        };
+        toolCalls.push(record);
+        await options.onToolCall?.(record);
+        resultContent = options.numberToolResults
+          ? `[Tool call #${record.index}]\n${result}`
+          : result;
+      }
       messages.push({
         role: "tool",
         tool_call_id: call.id,
-        content: options.numberToolResults
-          ? `[Tool call #${record.index}]\n${result}`
-          : result,
+        content: resultContent,
       });
+    }
+
+    // A forced-final request is deliberately issued without tools. If the
+    // model nevertheless returns tool calls, preserve the refusal records and
+    // stop rather than allowing it to consume the remaining round budget.
+    if (requestWasForcedFinal) {
+      return { content: assistantText ?? "", toolCalls, rounds: round, stoppedBy };
     }
   }
 
   // Round cap reached with the model still calling tools: force one last
   // tool-free turn so a logbook is always produced.
-  stoppedBy = "round-cap";
+  if (!forceFinal || (stoppedBy !== "deadline" && stoppedBy !== "tool-budget")) {
+    stoppedBy = "round-cap";
+  }
   messages.push({ role: "user", content: "STOP: the round limit is reached. Do not call any more tools. Write your final logbook now." });
-  compactMessages(messages, contextBudget);
+  compactMessages(messages, contextBudget, elidedToolOutputMessage);
   const finalCompletion: any = await client.chat.completions.create(
     { model, messages: messages as any, max_tokens: maxTokens, temperature },
     { timeout: 600_000 },

@@ -604,7 +604,7 @@ describe("Reproduction — premature-stop recovery", () => {
     expect(recordedResults[0]).toMatchObject({
       status: "inconclusive",
       method: "blocked",
-      evidenceToolCallIds: [4],
+      evidenceToolCallIds: [],
       blockerKind: "budget",
     });
     expect(recordedResults[0].evidence).toContain("System-enforced deadline exhaustion");

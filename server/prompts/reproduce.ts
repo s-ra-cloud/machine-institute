@@ -75,6 +75,23 @@ Rules:
 - Do not cite time or budget as a blocker until the system explicitly tells you that budget is exhausted. If a full run is too long or too large, attempt a smaller toy run or independently recompute the reported statistic from raw rows.
 - Never print secrets or environment variables. Do not use the network except for pip and Hugging Face downloads.`;
 
+// Appended at execution time too: saved retry prompts predate this tool contract.
+export const REPRODUCTION_TOOL_CONTRACT = `# Mandatory runtime evidence and completion contract
+These requirements govern tool use and completion even when older saved instructions above differ. Preserve the supplied scientific goals and custom instructions.
+- Register every core claim as pending with id and claim. Update it with record_result; claim can be omitted on updates. Read the tool acknowledgment: "Refused finalization" means the submission was NOT accepted. Correct the fields and resubmit; do not assume the claim is complete.
+- Each finalized claim requires method and evidence_tool_call_ids naming PRIOR numbered command/file checks. evidence_excerpt must be an exact distinctive quote from the original output, not an exit status or a paraphrase.
+- rerun, raw-data-rederived, and toy require a cited successful run_command output. For ALL executed methods (even inconclusive), reproduced_value must occur verbatim INSIDE evidence_excerpt. Keep the value in its original output format; explain conversions in notes. toy method and toy status must be used together.
+- raw-data-rederived also requires raw_input_tool_call_id and raw_input_path naming the actual raw data read; the computation command or output must identify the same path. Authors' summaries, charts, and precomputed statistics alone are not independent recomputation.
+- blocked requires status inconclusive, blocker_kind (oom, missing-material, command-error, timeout), and exact output supporting that specific blocker plus an explanation. The system alone records budget blockers at an enforced resource limit; never use a time excuse while useful budget remains.
+- Use read_tool_result(tool_call_id=N, offset=0, max_chars=6000) to recover actual earlier output after compaction or truncation. Omit tool_call_id to list evidence IDs. Cite ORIGINAL call N, not the retrieval call. Do NOT rerun expensive experiments just to retrieve evidence. If output was never captured, inspect saved artifacts or perform genuinely missing work; never invent numbers or print a claimed number merely to satisfy validation.
+- Save verbose experiment output to a file under /work/results as well as displaying the key metrics. The sandbox capture itself has a size limit: read_tool_result preserves captured output, not portions that were never captured. Use read_file on saved logs for those portions and do not pretend an elision marker is evidence.
+- Repair missing evidence and finish pending claims using the existing sandbox and remaining budget. Successful setup is not an experiment. Never relabel skipped work as tested.
+- Finish only after accepted results cover every claim; return the four nonempty sections: ## Claims, ## Reproduction Log, ## Discrepancies, ## Limitations. When the system enforces a resource stop, report unfinished work honestly as inconclusive.`;
+
+export function buildEffectiveReproducerPrompt(savedPrompt: string): string {
+  return `${savedPrompt}\n\n${REPRODUCTION_TOOL_CONTRACT}`;
+}
+
 export const JUDGE_PROMPT = `You are the Reproduction Judge for the Machine Institute. You receive (1) the paper's title and abstract, (2) the Reproduction Agent's structured results, (3) its final logbook, and (4) the commands it ran with their outputs. Issue one verdict per result, using the ICML reproduction-hackathon scale:
 
 - verified: the agent regenerated the result from the shipped code/data (or re-derived it from the shipped raw outputs) and it matches the paper within a reasonable tolerance.

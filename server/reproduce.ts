@@ -3,7 +3,6 @@ import { loadPaperContext } from "./ethics-review";
 import { fetchContributionMaterials, materialSandboxPath, formatMaterialsInventory } from "./fs-materials";
 import { ReproductionSandbox, isModalConfigured, type GpuType } from "./modal-sandbox";
 import {
-  VERDICTS,
   parseJudgeOutput,
   verdictsFromRecordedResults,
   countVerdicts,
@@ -16,11 +15,12 @@ import {
   type ClaimVerdict,
   type OverallVerdict,
   type VerdictCounts,
-  type Verdict,
   REPRODUCTION_METHODS,
   REPRODUCTION_BLOCKERS,
+  buildEffectiveReproducerPrompt,
 } from "./prompts/reproduce";
 import { deriveContributionKeywords } from "./prompts/peer-review";
+import { ReproductionSession } from "./reproduction-session";
 
 // "Generous" budget: close to what the ICML hackathon agents were given.
 export const REPRODUCTION_BUDGET = {
@@ -35,6 +35,7 @@ const PAPER_INLINE_CHARS = 15_000;
 const README_INLINE_CHARS = 12_000;
 const JUDGE_TRANSCRIPT_CHARS = 150_000;
 const JUDGE_TOOL_RESULT_CHARS = 3_000;
+// Consecutive no-progress stops, not a lifetime limit on finishing more claims.
 const MAX_PREMATURE_STOP_RECOVERIES = 2;
 const REQUIRED_LOGBOOK_SECTIONS = [
   "## Claims",
@@ -103,7 +104,7 @@ export function hasUsableReproductionEvidence(input: {
   return hasExecution || hasRecordedEvidence;
 }
 
-export function getReproductionCompletionIssues(input: {
+export function getReproductionClaimIssues(input: {
   recordedResults: RecordedResult[];
   toolCalls: readonly {
     name: string;
@@ -111,7 +112,6 @@ export function getReproductionCompletionIssues(input: {
     args?: Record<string, unknown>;
     result?: string;
   }[];
-  logbook: string;
   budgetExhausted?: boolean;
 }): string[] {
   const issues: string[] = [];
@@ -132,6 +132,9 @@ export function getReproductionCompletionIssues(input: {
   }
   const finalized = input.recordedResults.filter(result => result.status !== "pending");
   for (const result of finalized) {
+    const systemBudgetBlocker = Boolean(input.budgetExhausted
+      && result.method === "blocked" && result.blockerKind === "budget"
+      && /System-enforced (?:deadline|tool-call budget) exhaustion/.test(result.evidence || ""));
     if (!result.method) {
       issues.push(`${result.id} has no reproduction method`);
       continue;
@@ -141,7 +144,7 @@ export function getReproductionCompletionIssues(input: {
       .filter((call): call is NonNullable<typeof call> =>
         Boolean(call) && ["run_command", "read_file", "list_files"].includes(call!.name),
       );
-    if (referencedCalls.length === 0) {
+    if (referencedCalls.length === 0 && !systemBudgetBlocker) {
       issues.push(`${result.id} does not cite any valid evidence tool calls`);
       continue;
     }
@@ -220,16 +223,16 @@ export function getReproductionCompletionIssues(input: {
         }
         return /\b(?:empty directory or not found|no such file|not found|missing)\b/i.test(output);
       });
-      const systemBudgetBlocker = Boolean(
-        input.budgetExhausted
-        && result.blockerKind === "budget"
-        && /System-enforced (?:deadline|tool-call budget) exhaustion/.test(explanation),
-      );
       if ((!citedBlocker || !blockerMatches) && !systemBudgetBlocker) {
         issues.push(`${result.id} blocker category and evidence excerpt do not match cited tool output`);
       }
     }
   }
+  return issues;
+}
+
+export function getReproductionCompletionIssues(input: Parameters<typeof getReproductionClaimIssues>[0] & { logbook: string }): string[] {
+  const issues = getReproductionClaimIssues(input);
   if (!hasUsableReproductionEvidence(input)) {
     issues.push("no command execution or recorded reproduction evidence exists");
   }
@@ -277,9 +280,6 @@ export function finalizeBudgetExhaustedResults(input: {
   stoppedBy: string;
 }): void {
   if (input.stoppedBy !== "deadline" && input.stoppedBy !== "tool-budget") return;
-  const evidenceToolCallIds = input.toolCalls
-    .filter(call => call.name === "run_command" && Boolean(String(call.args.command || "").trim()))
-    .map(call => call.index);
   const reason = input.stoppedBy === "deadline"
     ? "System-enforced deadline exhaustion"
     : "System-enforced tool-call budget exhaustion";
@@ -288,7 +288,8 @@ export function finalizeBudgetExhaustedResults(input: {
     result.status = "inconclusive";
     result.method = "blocked";
     result.blockerKind = "budget";
-    result.evidenceToolCallIds = evidenceToolCallIds;
+    // This is system evidence, not scientific evidence from an unrelated command.
+    result.evidenceToolCallIds = [];
     result.evidence = `${reason} prevented further claim-specific testing.`;
     result.notes = [result.notes, "Finalized deterministically after the agent reached the enforced resource limit."]
       .filter(Boolean)
@@ -297,6 +298,18 @@ export function finalizeBudgetExhaustedResults(input: {
 }
 
 const TOOLS: ToolSpec[] = [
+  {
+    name: "read_tool_result",
+    description: "Retrieve an earlier command/file output without rerunning it, even after context compaction. Omit tool_call_id to list prior evidence IDs. Cite the ORIGINAL evidence ID in record_result.",
+    parameters: {
+      type: "object",
+      properties: {
+        tool_call_id: { type: "integer" },
+        offset: { type: "integer" },
+        max_chars: { type: "integer", description: "Up to 8000 characters per page." },
+      },
+    },
+  },
   {
     name: "list_files",
     description: "List the files in a directory inside the sandbox (e.g. /work, /work/materials, /work/results).",
@@ -356,7 +369,7 @@ const TOOLS: ToolSpec[] = [
         raw_input_tool_call_id: { type: "integer", description: "For raw-data-rederived, the read_file tool call number that opened the raw data." },
         raw_input_path: { type: "string", description: "For raw-data-rederived, the exact raw data path opened and used by the computation." },
       },
-      required: ["id", "claim", "status"],
+      required: ["id", "status"],
     },
   },
 ];
@@ -395,8 +408,11 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
   const sandbox = await ReproductionSandbox.create({ gpu, timeoutMs: REPRODUCTION_BUDGET.sandboxTimeoutMs, env });
   await emitEvent("reproduction-sandbox", `Sandbox ${sandbox.sandboxId} ready.`);
 
-  const recorded = new Map<string, RecordedResult>();
+  const session = new ReproductionSession((recordedResults, toolCalls) =>
+    getReproductionClaimIssues({ recordedResults, toolCalls, budgetExhausted: false }));
+  const recorded = session.recorded;
   let toolLoopResult: Awaited<ReturnType<typeof runToolLoop>> | null = null;
+  let logbook = "";
   let gpuInfo = "(not probed)";
 
   try {
@@ -416,8 +432,10 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
     gpuInfo = (probe.stdout || probe.stderr || "").trim() || "(no output)";
     await emitEvent("reproduction-gpu", `Sandbox environment: ${gpuInfo.replace(/\s+/g, " ").slice(0, 300)}`);
 
-    const execute = async (name: string, args: Record<string, unknown>): Promise<string> => {
+    const executeTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
       switch (name) {
+        case "read_tool_result":
+          return session.readToolResult(args);
         case "list_files": {
           const path = String(args.path || "/work");
           const entries = await sandbox.listFiles(path);
@@ -443,55 +461,23 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
           const command = String(args.command || "");
           if (!command.trim()) return "Refused: empty command.";
           const requested = (Number(args.timeout_seconds) || 600) * 1000;
-          const timeoutMs = Math.min(Math.max(requested, 5_000), REPRODUCTION_BUDGET.perCommandMs);
+          const remainingMs = startTime + REPRODUCTION_BUDGET.wallClockMs - Date.now();
+          if (remainingMs <= 0) return "Deadline exhausted — command was not executed.";
+          const timeoutMs = Math.min(Math.max(requested, 5_000), REPRODUCTION_BUDGET.perCommandMs, remainingMs);
           const result = await sandbox.exec(["bash", "-lc", command], { timeoutMs });
           return fmtExec(result);
         }
         case "record_result": {
-          const id = String(args.id || "").trim();
-          const claim = String(args.claim || "").trim();
-          const statusRaw = String(args.status || "").toLowerCase().trim();
-          if (!id || !claim) return "Refused: id and claim are required.";
-          const status: RecordedResult["status"] = statusRaw === "pending" || (VERDICTS as readonly string[]).includes(statusRaw)
-            ? (statusRaw as Verdict | "pending")
-            : "pending";
-          const prev = recorded.get(id);
-          const methodRaw = String(args.method || "").trim();
-          const method = (REPRODUCTION_METHODS as readonly string[]).includes(methodRaw)
-            ? (methodRaw as RecordedResult["method"])
-            : prev?.method;
-          const evidenceToolCallIds = Array.isArray(args.evidence_tool_call_ids)
-            ? args.evidence_tool_call_ids
-              .map(value => Number(value))
-              .filter(value => Number.isInteger(value) && value > 0)
-            : prev?.evidenceToolCallIds;
-          const blockerRaw = String(args.blocker_kind || "").trim();
-          const blockerKind = (REPRODUCTION_BLOCKERS as readonly string[]).includes(blockerRaw)
-            ? (blockerRaw as RecordedResult["blockerKind"])
-            : prev?.blockerKind;
-          recorded.set(id, {
-            id,
-            claim,
-            status,
-            originalValue: args.original_value !== undefined ? String(args.original_value) : prev?.originalValue,
-            reproducedValue: args.reproduced_value !== undefined ? String(args.reproduced_value) : prev?.reproducedValue,
-            evidence: args.evidence !== undefined ? String(args.evidence) : prev?.evidence,
-            notes: args.notes !== undefined ? String(args.notes) : prev?.notes,
-            method,
-            evidenceToolCallIds,
-            evidenceExcerpt: args.evidence_excerpt !== undefined ? String(args.evidence_excerpt) : prev?.evidenceExcerpt,
-            blockerKind,
-            rawInputToolCallId: args.raw_input_tool_call_id !== undefined
-              ? Number(args.raw_input_tool_call_id)
-              : prev?.rawInputToolCallId,
-            rawInputPath: args.raw_input_path !== undefined ? String(args.raw_input_path) : prev?.rawInputPath,
-          });
-          const summary = Array.from(recorded.values()).map(r => `${r.id}=${r.status}`).join(", ");
-          return `Recorded ${id} as ${status}. Registered results: ${summary}.`;
+          return session.recordResult(args);
         }
         default:
           return `Unknown tool: ${name}`;
       }
+    };
+    const execute = async (name: string, args: Record<string, unknown>): Promise<string> => {
+      const output = await executeTool(name, args);
+      session.captureOutput(name, output);
+      return output;
     };
 
     const userMessage = [
@@ -529,59 +515,67 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
     ].join("\n");
 
     await emitEvent("reproduction-agent", `Reproduction agent (${modelConfig.modelName || modelConfig.provider}) started; budget ${REPRODUCTION_BUDGET.maxToolCalls} tool calls / ${Math.round(REPRODUCTION_BUDGET.wallClockMs / 60000)} min.`);
-    toolLoopResult = await runToolLoop(modelConfig, opts.reproducerPrompt, userMessage, TOOLS, execute, {
+    toolLoopResult = await runToolLoop(modelConfig, buildEffectiveReproducerPrompt(opts.reproducerPrompt), userMessage, TOOLS, execute, {
       maxToolCalls: REPRODUCTION_BUDGET.maxToolCalls,
       deadlineMs: startTime + REPRODUCTION_BUDGET.wallClockMs,
       maxTokens: 8000,
       temperature: 0.2,
       numberToolResults: true,
+      allowResourceStopFallback: true,
+      elidedToolOutputMessage: "[Earlier output elided. Use read_tool_result with the original tool call ID; do not rerun the experiment to retrieve it.]",
+      getRecoveryProgress: () => session.progress,
       onToolCall: async (rec: ToolCallRecord) => {
+        session.observeToolCall(rec);
         if (rec.name === "run_command") {
           const cmd = String(rec.args.command || "").replace(/\s+/g, " ").slice(0, 140);
           const firstLine = rec.result.split("\n")[0];
           await emitEvent("reproduction-run", `[${rec.index}/${REPRODUCTION_BUDGET.maxToolCalls}] ${cmd} → ${firstLine}`);
         } else if (rec.name === "record_result") {
-          await emitEvent("reproduction-record", `[${rec.index}/${REPRODUCTION_BUDGET.maxToolCalls}] ${rec.args.id}: ${rec.args.status} — ${String(rec.args.claim || "").slice(0, 120)}`);
+          await emitEvent("reproduction-record", `[${rec.index}/${REPRODUCTION_BUDGET.maxToolCalls}] ${rec.result.slice(0, 500)}`);
         } else if (rec.index % 10 === 0) {
           await emitEvent("reproduction-progress", `${rec.index} tool calls used (${Math.round((Date.now() - startTime) / 60000)} min elapsed).`);
         }
       },
-      onPrematureStop: (assistantText, toolCalls) =>
-        buildReproductionContinuation({
+      onPrematureStop: (assistantText) => {
+        const continuation = buildReproductionContinuation({
           recordedResults: Array.from(recorded.values()),
-          toolCalls,
+          toolCalls: session.toolCalls,
           logbook: assistantText,
           budgetExhausted: false,
-        }),
+        });
+        return continuation ? `${continuation}\n${session.repairContext()}` : null;
+      },
       maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
     });
     await emitEvent("reproduction-agent", `Agent finished after ${toolLoopResult.toolCalls.length} tool call(s) (${toolLoopResult.stoppedBy}); logbook ${toolLoopResult.content.length} chars.`);
+    const recordedResults = Array.from(recorded.values());
+    const budgetExhausted = toolLoopResult.stoppedBy === "deadline" || toolLoopResult.stoppedBy === "tool-budget";
+    finalizeBudgetExhaustedResults({ recordedResults, toolCalls: session.toolCalls, stoppedBy: toolLoopResult.stoppedBy });
+    logbook = toolLoopResult.content;
+    if (budgetExhausted) {
+      const states = recordedResults.map(r => `${r.id}: ${r.status} — ${r.evidence || r.reproducedValue || "No result obtained."}`).join("\n");
+      // Tools are unavailable at a hard stop. Never depend on one more model call
+      // to synchronize pending claims or manufacture a scientific result.
+      if (getReproductionCompletionIssues({ recordedResults, toolCalls: session.toolCalls, logbook, budgetExhausted })
+        .some(issue => issue.startsWith("the final logbook is missing"))) {
+        logbook = `## Claims\n${states || "No claims registered."}\n\n## Reproduction Log\nSystem-generated resource-stop summary. ${session.toolCalls.filter(t => t.name === "run_command").length} command calls recorded; see the tool transcript for actual outputs.\n\n## Discrepancies\nNo additional conclusions inferred at the resource limit.\n\n## Limitations\nSystem-enforced ${toolLoopResult.stoppedBy} exhaustion. Unfinished claims remain inconclusive.`;
+      } else {
+        logbook += `\n\n## System-enforced final claim states\nThese accepted states supersede any unaccepted proposed statuses in the agent logbook:\n${states}`;
+      }
+    }
+    const completionIssues = getReproductionCompletionIssues({
+      recordedResults, toolCalls: session.toolCalls, logbook, budgetExhausted,
+    });
+    if (completionIssues.length) {
+      throw new Error(`The reproduction agent stopped before completing required work (${toolLoopResult.stoppedBy}): ${completionIssues.join("; ")}.`);
+    }
   } finally {
     await sandbox.terminate();
     await emitEvent("reproduction-sandbox", `Sandbox ${sandbox.sandboxId} terminated.`);
   }
 
-  const logbook = toolLoopResult.content;
-  const toolCalls = toolLoopResult.toolCalls;
+  const toolCalls = session.toolCalls;
   const recordedList = Array.from(recorded.values());
-  finalizeBudgetExhaustedResults({
-    recordedResults: recordedList,
-    toolCalls,
-    stoppedBy: toolLoopResult.stoppedBy,
-  });
-
-  if (!hasUsableReproductionEvidence({ recordedResults: recordedList, toolCalls })) {
-    throw new Error(NO_USABLE_REPRODUCTION_EVIDENCE);
-  }
-  const completionIssues = getReproductionCompletionIssues({
-    recordedResults: recordedList,
-    toolCalls,
-    logbook,
-    budgetExhausted: toolLoopResult.stoppedBy === "deadline" || toolLoopResult.stoppedBy === "tool-budget",
-  });
-  if (completionIssues.length > 0) {
-    throw new Error(`The reproduction agent stopped before completing required work: ${completionIssues.join("; ")}.`);
-  }
 
   // Judge pass: a separate model grades the logbook against the raw tool outputs.
   await emitEvent("reproduction-judge", `Judge (${judgeModelConfig.modelName || judgeModelConfig.provider}) grading ${recordedList.length} recorded result(s)...`);
@@ -605,6 +599,9 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
     ``,
     `# AGENT'S LOGBOOK`,
     logbook || "(no logbook produced)",
+    ``,
+    `# ORIGINAL CITED TOOL OUTPUTS (server-extracted, before chronological transcript truncation)`,
+    session.judgeEvidence(),
     ``,
     `# TOOL TRANSCRIPT (commands and outputs)`,
     transcript || "(no tools were called)",

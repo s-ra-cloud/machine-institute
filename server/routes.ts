@@ -27,7 +27,7 @@ import { INITIATIVE_DOC_IDS, JOURNAL_DISPLAY_NAMES, INITIATIVE_SLUGS, getJournal
 import { fetchJournalPaperCatalogue } from "./paper-catalogue";
 import { runReproduction } from "./reproduce";
 import { canRetryReproduction } from "./reproduction-retry";
-import { REPRODUCER_PROMPT, JUDGE_PROMPT, verdictsToRevisions, type ClaimVerdict } from "./prompts/reproduce";
+import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt, verdictsToRevisions, type ClaimVerdict } from "./prompts/reproduce";
 import { GPU_OPTIONS, DEFAULT_GPU, resolveGpu, isModalConfigured } from "./modal-sandbox";
 import { insertReproductionSchema, type Reproduction } from "@shared/schema";
 
@@ -3011,7 +3011,7 @@ I will now provide the papers.`;
 
       const safeHtml = sanitizeHtml(markdownToHtml(result.markdown));
       const promptTrace = JSON.stringify({
-        reproducerPrompt: data.prompt1,
+        reproducerPrompt: buildEffectiveReproducerPrompt(data.prompt1),
         judgePrompt: data.prompt2,
         model: resolvedModel, provider: modelConfig.provider, providerMode: modelConfig.providerMode,
         judgeModel: judgeConfig.modelName, judgeProvider: judgeConfig.provider,
