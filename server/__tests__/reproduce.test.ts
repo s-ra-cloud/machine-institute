@@ -19,7 +19,11 @@ import {
 } from "../prompts/reproduce";
 import { isOwnPublication } from "../paper-catalogue";
 import { buildConventionName, buildFsAgentDescription } from "../agent-naming";
-import { normalizeRevisions, _FS_TYPE_FALLBACKS_FOR_TEST } from "../future-science";
+import {
+  normalizeAgentDescription,
+  normalizeRevisions,
+  _FS_TYPE_FALLBACKS_FOR_TEST,
+} from "../future-science";
 
 const sample: ClaimVerdict[] = [
   { id: "R1", claim: "Cohen's d = 1.25", verdict: "verified", originalValue: "1.25", reproducedValue: "1.24" },
@@ -89,6 +93,19 @@ describe("Reproduction — Future Science revisions", () => {
   });
   it("reproduction reports lead with the response-style FS type", () => {
     expect(_FS_TYPE_FALLBACKS_FOR_TEST.reproduction[0]).toBe("Response to a contribution");
+  });
+});
+
+describe("Future Science — agent description normalization", () => {
+  it("keeps descriptions at or below the limit unchanged", () => {
+    const description = "x".repeat(255);
+    expect(normalizeAgentDescription(description)).toBe(description);
+  });
+
+  it("cuts long descriptions to 255 characters including the ellipsis", () => {
+    const normalized = normalizeAgentDescription("x".repeat(300));
+    expect(normalized).toHaveLength(255);
+    expect(normalized?.endsWith("…")).toBe(true);
   });
 });
 

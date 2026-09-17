@@ -70,6 +70,17 @@ function splitAgentNameForFutureScience(name: string): { firstName: string; last
   };
 }
 
+const MAX_AGENT_DESCRIPTION_LENGTH = 255;
+
+// Future Science stores agentDescription in a 255-character field. Keep this
+// normalization shared so every submission path applies the same rule.
+export function normalizeAgentDescription(description?: string): string | undefined {
+  if (!description) return undefined;
+  return description.length > MAX_AGENT_DESCRIPTION_LENGTH
+    ? description.slice(0, MAX_AGENT_DESCRIPTION_LENGTH - 1).trimEnd() + "…"
+    : description;
+}
+
 // The authoritative set of contribution `type` strings Future Science accepts on
 // the api-bots endpoint. FS rejects anything else with a 4xx, so every fallback
 // array below MUST be a subset of this list. (An earlier version leaked the
@@ -133,10 +144,7 @@ export async function submitLiteratureReviewToFutureScience(
       baseMetadata.researchOrchestrator = options.orchestratorName;
     }
     if (options.agentDescription) {
-      const MAX_AGENT_DESC = 500;
-      baseMetadata.agentDescription = options.agentDescription.length > MAX_AGENT_DESC
-        ? options.agentDescription.slice(0, MAX_AGENT_DESC - 1).trimEnd() + "…"
-        : options.agentDescription;
+      baseMetadata.agentDescription = normalizeAgentDescription(options.agentDescription);
     }
 
     console.log("Future Science literature review api-bot payload fields:", {
@@ -393,10 +401,7 @@ export async function submitPeerReviewToFutureScience(
   };
   if (options.orchestratorName) baseMetadata.researchOrchestrator = options.orchestratorName;
   if (options.agentDescription) {
-    const MAX_AGENT_DESC = 500;
-    baseMetadata.agentDescription = options.agentDescription.length > MAX_AGENT_DESC
-      ? options.agentDescription.slice(0, MAX_AGENT_DESC - 1).trimEnd() + "…"
-      : options.agentDescription;
+    baseMetadata.agentDescription = normalizeAgentDescription(options.agentDescription);
   }
   if (options.linkOriginalContribution) {
     baseMetadata.linkOriginalContribution = options.linkOriginalContribution;
@@ -557,14 +562,7 @@ export async function submitEthicsReportToFutureScience(
   };
   if (options.orchestratorName) baseMetadata.researchOrchestrator = options.orchestratorName;
   if (options.agentDescription) {
-    // FS / Strapi appears to enforce a length cap on agentDescription; long
-    // strings cause the api-bots endpoint to return a generic 500 "Failed to
-    // create contribution". Truncate defensively to stay well under any
-    // typical Strapi text-field limit.
-    const MAX_AGENT_DESC = 500;
-    baseMetadata.agentDescription = options.agentDescription.length > MAX_AGENT_DESC
-      ? options.agentDescription.slice(0, MAX_AGENT_DESC - 1).trimEnd() + "…"
-      : options.agentDescription;
+    baseMetadata.agentDescription = normalizeAgentDescription(options.agentDescription);
   }
   if (options.linkOriginalContribution) {
     baseMetadata.linkOriginalContribution = options.linkOriginalContribution;
@@ -692,9 +690,7 @@ export async function publishToFutureScience(options: PublishOptions): Promise<{
       payload.metadata = {
         generatedBy: "Machine Institute AI Pipeline",
         orchestratorName: options.metadata.orchestratorName,
-        agentDescription: options.metadata.agentDescription && options.metadata.agentDescription.length > 500
-          ? options.metadata.agentDescription.slice(0, 499).trimEnd() + "…"
-          : options.metadata.agentDescription,
+        agentDescription: normalizeAgentDescription(options.metadata.agentDescription),
         topic: options.metadata.topic,
         modelProvider: options.metadata.modelProvider,
         modelName: options.metadata.modelName,
