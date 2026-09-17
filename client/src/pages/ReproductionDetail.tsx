@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, Link, useLocation } from "wouter";
-import { ArrowLeft, Loader2, Calendar, Bot, Clock, Info, ExternalLink, Trash2, UploadCloud, FlaskConical, Cpu } from "lucide-react";
+import { ArrowLeft, Loader2, Calendar, Bot, Clock, Info, ExternalLink, Trash2, UploadCloud, FlaskConical, Cpu, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FadeIn } from "@/components/ui/motion";
 import { Navigation } from "@/components/Navigation";
@@ -27,6 +27,7 @@ const VERDICT_STYLES: Record<string, string> = {
   toy: "text-blue-300 border-blue-300/30 bg-blue-300/5",
   inconclusive: "text-yellow-400 border-yellow-400/30 bg-yellow-400/5",
 };
+const REPRODUCTION_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
 
 export function verdictStyle(verdict: string | null | undefined): string {
   return VERDICT_STYLES[verdict || ""] || "text-muted-foreground border-border/30 bg-muted/5";
@@ -36,9 +37,10 @@ export default function ReproductionDetail() {
   const { id } = useParams<{ id: string }>();
   const [showMeta, setShowMeta] = useState(false);
   const [showLogbook, setShowLogbook] = useState(false);
-  const { isAdmin } = useAuth();
+  const { authenticated, user, isAdmin } = useAuth();
   const [, navigate] = useLocation();
   const [republishMessage, setRepublishMessage] = useState<string | null>(null);
+  const [retryMessage, setRetryMessage] = useState<string | null>(null);
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -57,6 +59,16 @@ export default function ReproductionDetail() {
     },
     onSuccess: (body) => setRepublishMessage(`Published. Document ID: ${body.documentId}`),
     onError: (err: any) => setRepublishMessage(`Failed: ${err?.message || "unknown error"}`),
+  });
+  const retryMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/reproductions/${id}/retry`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Retry failed");
+      return body as Reproduction;
+    },
+    onSuccess: (retry) => navigate(`/reproductions/${retry.id}`),
+    onError: (err: any) => setRetryMessage(err?.message || "Retry failed"),
   });
 
   const { data: run, isLoading } = useQuery<Reproduction>({
@@ -262,6 +274,20 @@ export default function ReproductionDetail() {
               <div className="border border-red-500/20 bg-red-500/5 p-8">
                 <p className="text-red-400 font-mono text-sm">Reproduction failed.</p>
                 {run.contentHtml && <div className="mt-4 text-sm text-red-300/70" dangerouslySetInnerHTML={{ __html: run.contentHtml }} />}
+                {authenticated && user?.id === run.userId && REPRODUCTION_ACCESS_EMAILS.includes(user.email || "") && (
+                  <>
+                    <Button
+                      onClick={() => { setRetryMessage(null); retryMutation.mutate(); }}
+                      disabled={retryMutation.isPending}
+                      className="mt-6 rounded-none font-mono text-xs"
+                      data-testid="button-retry-reproduction"
+                    >
+                      {retryMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                      {retryMutation.isPending ? "Starting retry..." : "Retry reproduction"}
+                    </Button>
+                    {retryMessage && <p className="mt-3 text-xs font-mono text-red-300" data-testid="text-retry-error">{retryMessage}</p>}
+                  </>
+                )}
               </div>
             ) : run.contentHtml ? (
               <section className="mb-10">

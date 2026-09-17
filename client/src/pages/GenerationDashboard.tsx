@@ -58,6 +58,7 @@ interface ReproductionRecord {
   modelProvider: string | null;
   modelName: string | null;
   providerMode: string | null;
+  userId: string | null;
   publishedDocumentId: string | null;
   promptTrace: string | null;
   sourceTrace: string | null;
@@ -680,6 +681,20 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/reproductions/available-papers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
       if (data?.id) navigate(`/reproductions/${data.id}`);
+    },
+  });
+
+  const retryReproductionMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/reproductions/${id}/retry`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Failed to retry reproduction");
+      return body as ReproductionRecord;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reproductions-all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reproductions/available-papers"] });
+      navigate(`/reproductions/${data.id}`);
     },
   });
 
@@ -2504,6 +2519,32 @@ export default function GenerationDashboard() {
                     <div className="flex items-center gap-2 mt-3 text-xs font-mono text-primary/50">
                       <Loader2 className="w-3 h-3 animate-spin" />
                       <span>Running in GPU sandbox — this can take up to two hours...</span>
+                    </div>
+                  )}
+
+                  {run.status === "failed" && hasPlatformAccess && user?.id === run.userId && (
+                    <div className="mt-3 flex items-center gap-4">
+                      <Link
+                        href={`/reproductions/${run.id}`}
+                        className="text-[10px] font-mono text-muted-foreground hover:underline"
+                        data-testid={`link-view-failed-repro-${run.id}`}
+                      >
+                        View failure details
+                      </Link>
+                      <button
+                        onClick={() => retryReproductionMutation.mutate(run.id)}
+                        disabled={retryReproductionMutation.isPending && retryReproductionMutation.variables === run.id}
+                        className="text-[10px] font-mono text-primary hover:underline flex items-center gap-1 disabled:opacity-40"
+                        data-testid={`button-retry-repro-${run.id}`}
+                      >
+                        {retryReproductionMutation.isPending && retryReproductionMutation.variables === run.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                        Retry reproduction
+                      </button>
+                      {retryReproductionMutation.isError && retryReproductionMutation.variables === run.id && (
+                        <span className="text-[10px] font-mono text-red-400" data-testid="text-retry-repro-error">
+                          {retryReproductionMutation.error.message}
+                        </span>
+                      )}
                     </div>
                   )}
 

@@ -2885,6 +2885,84 @@ I will now provide the papers.`;
     }
   });
 
+  app.post("/api/reproductions/:id/retry", requireAuth, async (req, res) => {
+    try {
+      const source = await storage.getReproductionById(String(req.params.id));
+      if (!source) return res.status(404).json({ error: "Reproduction not found." });
+      if (source.status !== "failed") {
+        return res.status(400).json({ error: "Only failed reproductions can be retried." });
+      }
+
+      const user = (req as any).user;
+      if (!REPRODUCTION_ACCESS_EMAILS.includes(user.email)) {
+        return res.status(403).json({ error: "Reproduction runs use the institute's GPU sandbox and are restricted to institute members." });
+      }
+      if (!source.userId || source.userId !== user.id) {
+        return res.status(403).json({ error: "You can only retry your own reproduction runs." });
+      }
+      if (!isModalConfigured()) {
+        return res.status(503).json({ error: "Reproduction sandboxes are not configured. MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are missing." });
+      }
+
+      const providerMode = source.providerMode === "byoc" ? "byoc" : "platform";
+      const provider = source.modelProvider || "openrouter";
+      const apiKey = providerMode === "byoc" && source.userId
+        ? getEphemeralKey(source.userId, provider) || undefined
+        : undefined;
+      if (providerMode === "platform" && !process.env.OPENROUTER_API_KEY) {
+        return res.status(503).json({ error: "Platform model generation is not configured. OPENROUTER_API_KEY is missing." });
+      }
+      if (providerMode === "byoc" && !apiKey) {
+        return res.status(400).json({ error: "The saved BYOC API key is no longer available. Start a new reproduction to provide it again." });
+      }
+
+      const modelConfig: ModelProviderConfig = {
+        providerMode,
+        provider,
+        modelName: source.modelName || "",
+        apiKey,
+      };
+      const resolvedModel = resolveModelName(modelConfig);
+      const judgeConfig: ModelProviderConfig = {
+        providerMode,
+        provider: providerMode === "byoc" ? provider : (source.judgeModelProvider || provider),
+        modelName: source.judgeModelName || resolvedModel,
+        apiKey,
+      };
+      const parsed = insertReproductionSchema.safeParse({
+        projectId: source.projectId,
+        agentId: source.agentId,
+        journalId: source.journalId,
+        documentId: source.documentId,
+        paperTitle: source.paperTitle,
+        gpu: source.gpu,
+        judgeModelProvider: judgeConfig.provider,
+        judgeModelName: judgeConfig.modelName,
+        prompt1: source.prompt1,
+        prompt2: source.prompt2,
+        userId: source.userId,
+        orchestratorName: source.orchestratorName,
+        agentDescription: source.agentDescription,
+        modelProvider: provider,
+        modelName: resolvedModel,
+        providerMode,
+      });
+      if (!parsed.success) return res.status(400).json({ error: fromZodError(parsed.error).message });
+
+      const retry = await storage.createReproduction(parsed.data);
+      if (!retry) {
+        return res.status(409).json({ error: "A retry for this paper and model is already running." });
+      }
+      res.status(201).json(retry);
+      generateReproductionBackground(retry.id, parsed.data, modelConfig, judgeConfig).catch(err => {
+        console.error("Background reproduction retry failed:", err);
+      });
+    } catch (err: any) {
+      console.error("Error retrying reproduction:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   async function generateReproductionBackground(
     reproductionId: string,
     data: { projectId: string; journalId: string; documentId: string; paperTitle?: string | null; gpu: string; prompt1: string; prompt2: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
