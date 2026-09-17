@@ -14,3 +14,9 @@ Current mandatory tool requirements must accompany saved prompts at execution ti
 **Why:** Explicit reruns retain old prompts, which can predate stricter evidence contracts. Changing only the default prompt leaves retries inconsistent with the validator.
 
 **How to apply:** Keep saved scientific instructions intact and append the current runtime requirements; make successful prompt traces describe the effective instructions used.
+
+Routed context limits need an execution-specific policy, separate from advertised model capacity used by other workflows.
+
+**Why:** A routed DeepSeek reproduction was rejected by DeepInfra at 32,768 tokens despite the advertised 64,000-token window. Changing global model metadata would also change literature-review reading capacity. Retrying the whole reproduction would repeat paid experiments instead of repairing the rejected language-model request.
+
+**How to apply:** Treat upstream limits as serving constraints, preserve source evidence independently of presentation context, and test recovery inside the same run. Keep paid GPU verification separate from mocked provider/sandbox replays.

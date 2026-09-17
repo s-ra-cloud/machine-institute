@@ -1,4 +1,11 @@
 import OpenAI from "openai";
+import {
+  ContextBudgetError,
+  RequestContextBudget,
+  isContextOverflow,
+  reportedContextLimit,
+} from "./llm-context";
+import { fitToolContext, type ToolContextProtection } from "./tool-context";
 
 export interface ModelProviderConfig {
   providerMode: "platform" | "byoc";
@@ -85,7 +92,7 @@ const OPENAI_COMPAT_BASE_URLS: Record<string, string> = {
   openrouter: "https://openrouter.ai/api/v1",
 };
 
-export function createLLMClient(config: ModelProviderConfig): OpenAI | null {
+export function createLLMClient(config: ModelProviderConfig, options: { maxRetries?: number } = {}): OpenAI | null {
   if (config.providerMode === "platform") {
     const platformKey = process.env.OPENROUTER_API_KEY;
     if (!platformKey) {
@@ -94,6 +101,7 @@ export function createLLMClient(config: ModelProviderConfig): OpenAI | null {
     return new OpenAI({
       baseURL: "https://openrouter.ai/api/v1",
       apiKey: platformKey,
+      ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
     });
   }
 
@@ -109,6 +117,7 @@ export function createLLMClient(config: ModelProviderConfig): OpenAI | null {
   return new OpenAI({
     baseURL,
     apiKey: config.apiKey,
+    ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
   });
 }
 
@@ -116,11 +125,19 @@ export async function generateWithConfig(
   config: ModelProviderConfig,
   systemPrompt: string,
   userMessage: string,
-  options: { maxTokens?: number; temperature?: number } = {},
+  options: {
+    maxTokens?: number;
+    temperature?: number;
+    /** Opt into context-safe request behavior used by judge/reproduction callers. */
+    contextRequest?: boolean;
+    timeoutMs?: number;
+  } = {},
 ): Promise<GenerationResult> {
   const model = resolveModelName(config);
   const maxTokens = options.maxTokens || 12000;
   const temperature = options.temperature || 0.3;
+  const timeoutMs = options.timeoutMs ?? 600_000;
+  const contextRequest = options.contextRequest === true;
 
   if (config.provider === "anthropic" && config.providerMode === "byoc") {
     if (!config.apiKey) {
@@ -140,21 +157,31 @@ export async function generateWithConfig(
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       }),
+      ...(contextRequest ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
+      if (contextRequest) {
+        throw sanitizeContextRequestError(
+          { status: response.status, message: errorText },
+          model,
+        );
+      }
       throw new Error(`Anthropic API error (${response.status}): ${errorText}`);
     }
 
     const result: AnthropicMessagesResponse = await response.json() as AnthropicMessagesResponse;
+    if (contextRequest && (result.type === "error" || (result as any).error)) {
+      throw sanitizeContextRequestError((result as any).error ?? result, model);
+    }
     const textBlock = result.content?.find((block) => block.type === "text");
     const content = textBlock?.text || "";
 
     return { content, model, provider: "anthropic" };
   }
 
-  const client = createLLMClient(config);
+  const client = createLLMClient(config, contextRequest ? { maxRetries: 0 } : {});
   if (!client) {
     throw new Error(`Could not create LLM client for provider: ${config.provider}`);
   }
@@ -171,26 +198,71 @@ export async function generateWithConfig(
         max_tokens: maxTokens,
         temperature,
       },
-      { timeout: 600_000 },
+      { timeout: timeoutMs, ...(contextRequest ? { maxRetries: 0 } : {}) },
     );
   } catch (err: any) {
     const status = err?.status ?? err?.statusCode ?? "unknown";
     const body = err?.error ?? err?.message ?? String(err);
+    if (contextRequest) {
+      throw sanitizeContextRequestError({ ...err, status, message: body }, model);
+    }
     console.error(`[LLM] API request failed — model=${model} provider=${config.provider} status=${status}:`, JSON.stringify(body));
     throw new Error(`LLM request failed (${status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
   }
 
   if (completion?.error) {
+    if (contextRequest) {
+      throw sanitizeContextRequestError(completion.error, model);
+    }
     console.error(`[LLM] API returned error body — model=${model} provider=${config.provider}:`, JSON.stringify(completion.error));
     throw new Error(`LLM API error: ${completion.error.message || JSON.stringify(completion.error)}`);
   }
 
   const content = completion.choices?.[0]?.message?.content || "";
   if (!content) {
+    if (contextRequest) {
+      throw new Error(`LLM returned empty response for context request (model=${model})`);
+    }
     console.error(`[LLM] Empty content returned — model=${model} choices:`, JSON.stringify(completion.choices));
     throw new Error(`LLM returned empty response (choices: ${JSON.stringify(completion.choices)})`);
   }
   return { content, model, provider: config.provider };
+}
+
+function sanitizeContextRequestError(error: any, model: string): Error {
+  const status = error?.status ?? error?.statusCode;
+  const code = error?.code ?? error?.type ?? "context_request_failed";
+  const rawMessage = contextRequestErrorText(error);
+  const contextLike = isContextOverflow(error);
+  const message = contextLike
+    ? `Context length exceeded (${status ?? "unknown"})`
+    : `LLM context request failed (${status ?? "unknown"})`;
+  const result = new Error(message);
+  const reportedLimit = error?.limit
+    ?? error?.max_tokens
+    ?? error?.maximum_tokens
+    ?? reportedContextLimit(error);
+  Object.assign(result, {
+    code: contextLike ? "context_length_exceeded" : code,
+    status,
+    statusCode: status,
+    model,
+    // Providers commonly return one of these fields. Keeping the numeric hint
+    // lets RequestContextBudget.reduce choose a smaller input cap without
+    // retaining or logging the provider's raw response.
+    limit: reportedLimit === undefined ? undefined : Number(reportedLimit),
+  });
+  return result;
+}
+
+function contextRequestErrorText(error: unknown, depth = 0): string {
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object" || depth > 3) return "";
+  const value = error as Record<string, unknown>;
+  return ["message", "code", "type", "error", "body", "data"]
+    .map(key => contextRequestErrorText(value[key], depth + 1))
+    .filter(Boolean)
+    .join(" ");
 }
 
 interface AnthropicMessagesResponse {
@@ -306,6 +378,8 @@ export interface ToolLoopOptions {
   /** Return an empty result instead of throwing when a forced resource stop's
    * finalization request fails. */
   allowResourceStopFallback?: boolean;
+  /** Opt-in protection for routed context caps and context-length retries. */
+  contextProtection?: ToolContextProtection;
 }
 
 export interface ToolLoopResult {
@@ -351,6 +425,32 @@ function truncateToolResult(s: string, max: number): string {
   return `${s.slice(0, Math.floor(max * 0.7))}\n\n[... ${s.length - max} chars truncated ...]\n\n${s.slice(-Math.floor(max * 0.3))}`;
 }
 
+async function reportContextDiagnostic(
+  budget: RequestContextBudget,
+  request: unknown,
+  model: string,
+  protection: ToolContextProtection | undefined,
+): Promise<void> {
+  const message = `[ToolLoop] context budget stage=tool-loop model=${model}: ${budget.diagnostic(request)}`;
+  console.warn(message);
+  await protection?.onDiagnostic?.(message);
+}
+
+function terminalContextError(
+  budget: RequestContextBudget,
+  request: unknown,
+  model: string,
+): ContextBudgetError {
+  return new ContextBudgetError(
+    `Tool-loop context request remained too large (stage=tool-loop model=${model}; ${budget.diagnostic(request)}).`,
+  );
+}
+
+function activeRequestTimeout(deadlineMs: number, protectedRequest: boolean): number {
+  if (!protectedRequest) return 600_000;
+  return Math.max(1, Math.min(600_000, deadlineMs - Date.now()));
+}
+
 export async function runToolLoop(
   config: ModelProviderConfig,
   systemPrompt: string,
@@ -362,7 +462,7 @@ export async function runToolLoop(
   if (config.provider === "anthropic" && config.providerMode === "byoc") {
     throw new Error("Tool-using agents require an OpenAI-compatible provider (platform, OpenAI, or OpenRouter). Anthropic BYOC is not supported for this workflow yet.");
   }
-  const client = createLLMClient(config);
+  const client = createLLMClient(config, options.contextProtection ? { maxRetries: 0 } : {});
   if (!client) throw new Error(`Could not create LLM client for provider: ${config.provider}`);
   const model = resolveModelName(config);
   const maxTokens = options.maxTokens ?? 8000;
@@ -370,6 +470,9 @@ export async function runToolLoop(
   const maxToolResultChars = options.maxToolResultChars ?? 12_000;
   const contextBudget = options.contextCharBudget ?? Math.floor(getContextWindow(config) * 3.0);
   const elidedToolOutputMessage = options.elidedToolOutputMessage ?? ELIDED_TOOL_OUTPUT;
+  const requestBudget = options.contextProtection
+    ? new RequestContextBudget(config, maxTokens, "tool-loop", getContextWindow(config))
+    : null;
 
   const messages: Array<Record<string, unknown>> = [
     { role: "system", content: systemPrompt },
@@ -400,7 +503,7 @@ export async function runToolLoop(
           : "STOP: the time budget is exhausted. Do not call any more tools. Write your final logbook now, based strictly on the tool outputs you have already seen. Any claim you could not finish testing must be recorded as inconclusive in the logbook.",
       });
     }
-    compactMessages(messages, contextBudget, elidedToolOutputMessage);
+    if (!requestBudget) compactMessages(messages, contextBudget, elidedToolOutputMessage);
 
     const requestWasForcedFinal = forceFinal;
     const fallbackAfterResourceStop = (): ToolLoopResult | null => {
@@ -416,34 +519,97 @@ export async function runToolLoop(
       }
       return null;
     };
+    const baseRequest: Record<string, unknown> = {
+      model,
+      messages: messages as any,
+      ...(forceFinal ? {} : { tools: toolDefs as any, tool_choice: "auto" as const }),
+      max_tokens: maxTokens,
+      temperature,
+    };
     let completion: any;
-    try {
-      completion = await client.chat.completions.create(
-        {
-          model,
-          messages: messages as any,
-          ...(forceFinal ? {} : { tools: toolDefs as any, tool_choice: "auto" as const }),
-          max_tokens: maxTokens,
-          temperature,
-        },
-        { timeout: 600_000 },
-      );
-    } catch (err: any) {
-      const status = err?.status ?? err?.statusCode ?? "unknown";
-      const body = err?.error ?? err?.message ?? String(err);
-      console.error(`[ToolLoop] API request failed — model=${model} round=${round} status=${status}:`, JSON.stringify(body));
-      if (options.allowResourceStopFallback) {
-        const fallback = fallbackAfterResourceStop();
-        if (fallback) return fallback;
+    let contextReductions = 0;
+    while (true) {
+      const request = requestBudget
+        ? fitToolContext(baseRequest, {
+          budget: requestBudget,
+          protection: options.contextProtection!,
+          elidedToolOutputMessage,
+          numberToolResults: options.numberToolResults,
+        })
+        : baseRequest;
+      if (requestBudget && !requestWasForcedFinal && Date.now() >= options.deadlineMs) {
+        stoppedBy = "deadline";
+        return { content: "", toolCalls, rounds: round, stoppedBy };
       }
-      throw new Error(`LLM request failed (${status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
-    }
-    if (completion?.error) {
-      if (options.allowResourceStopFallback) {
-        const fallback = fallbackAfterResourceStop();
-        if (fallback) return fallback;
+      try {
+        completion = await client.chat.completions.create(
+          request as any,
+          { timeout: activeRequestTimeout(options.deadlineMs, Boolean(requestBudget)), ...(requestBudget ? { maxRetries: 0 } : {}) },
+        );
+      } catch (err: any) {
+        if (
+          requestBudget
+          && isContextOverflow(err)
+          && contextReductions < 2
+          && Date.now() < options.deadlineMs
+          && requestBudget.reduce(err, request)
+        ) {
+          contextReductions++;
+          await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
+          if (Date.now() >= options.deadlineMs) {
+            stoppedBy = "deadline";
+            return { content: "", toolCalls, rounds: round, stoppedBy };
+          }
+          continue;
+        }
+        const status = err?.status ?? err?.statusCode ?? "unknown";
+        const body = err?.error ?? err?.message ?? String(err);
+        if (requestBudget && isContextOverflow(err)) {
+          await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
+        } else {
+          console.error(`[ToolLoop] API request failed — model=${model} round=${round} status=${status}:`, JSON.stringify(body));
+        }
+        if (options.allowResourceStopFallback) {
+          const fallback = fallbackAfterResourceStop();
+          if (fallback) return fallback;
+        }
+        if (requestBudget && isContextOverflow(err)) {
+          throw terminalContextError(requestBudget, request, model);
+        }
+        throw new Error(`LLM request failed (${status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
       }
-      throw new Error(`LLM API error: ${completion.error.message || JSON.stringify(completion.error)}`);
+      if (completion?.error) {
+        const completionError = completion.error;
+        if (
+          requestBudget
+          && isContextOverflow(completionError)
+          && contextReductions < 2
+          && Date.now() < options.deadlineMs
+          && requestBudget.reduce(completionError, request)
+        ) {
+          contextReductions++;
+          await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
+          if (Date.now() >= options.deadlineMs) {
+            stoppedBy = "deadline";
+            return { content: "", toolCalls, rounds: round, stoppedBy };
+          }
+          continue;
+        }
+        if (requestBudget && isContextOverflow(completionError)) {
+          await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
+        } else {
+          console.error(`[ToolLoop] API returned error body — model=${model} round=${round}:`, JSON.stringify(completionError));
+        }
+        if (options.allowResourceStopFallback) {
+          const fallback = fallbackAfterResourceStop();
+          if (fallback) return fallback;
+        }
+        if (requestBudget && isContextOverflow(completionError)) {
+          throw terminalContextError(requestBudget, request, model);
+        }
+        throw new Error(`LLM API error: ${completionError.message || JSON.stringify(completionError)}`);
+      }
+      break;
     }
     const msg = completion?.choices?.[0]?.message;
     if (!msg) {
@@ -573,11 +739,75 @@ export async function runToolLoop(
     stoppedBy = "round-cap";
   }
   messages.push({ role: "user", content: "STOP: the round limit is reached. Do not call any more tools. Write your final logbook now." });
-  compactMessages(messages, contextBudget, elidedToolOutputMessage);
-  const finalCompletion: any = await client.chat.completions.create(
-    { model, messages: messages as any, max_tokens: maxTokens, temperature },
-    { timeout: 600_000 },
-  );
+  if (!requestBudget) compactMessages(messages, contextBudget, elidedToolOutputMessage);
+  const finalRequest: Record<string, unknown> = {
+    model,
+    messages: messages as any,
+    max_tokens: maxTokens,
+    temperature,
+  };
+  let finalCompletion: any;
+  let finalReductions = 0;
+  while (true) {
+    const request = requestBudget
+      ? fitToolContext(finalRequest, {
+        budget: requestBudget,
+        protection: options.contextProtection!,
+        elidedToolOutputMessage,
+        numberToolResults: options.numberToolResults,
+      })
+      : finalRequest;
+    try {
+      finalCompletion = await client.chat.completions.create(
+        request as any,
+        { timeout: activeRequestTimeout(options.deadlineMs, Boolean(requestBudget)), ...(requestBudget ? { maxRetries: 0 } : {}) },
+      );
+    } catch (err: any) {
+      if (
+        requestBudget
+        && isContextOverflow(err)
+        && finalReductions < 2
+        && Date.now() < options.deadlineMs
+        && requestBudget.reduce(err, request)
+      ) {
+        finalReductions++;
+        await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
+        if (Date.now() >= options.deadlineMs) {
+          stoppedBy = "deadline";
+          return { content: "", toolCalls, rounds: maxRounds + 1, stoppedBy };
+        }
+        continue;
+      }
+      if (requestBudget && isContextOverflow(err)) {
+        await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
+        throw terminalContextError(requestBudget, request, model);
+      }
+      throw err;
+    }
+    if (finalCompletion?.error) {
+      const completionError = finalCompletion.error;
+      if (
+        requestBudget
+        && isContextOverflow(completionError)
+        && finalReductions < 2
+        && Date.now() < options.deadlineMs
+        && requestBudget.reduce(completionError, request)
+      ) {
+        finalReductions++;
+        await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
+        if (Date.now() >= options.deadlineMs) {
+          stoppedBy = "deadline";
+          return { content: "", toolCalls, rounds: maxRounds + 1, stoppedBy };
+        }
+        continue;
+      }
+      if (requestBudget && isContextOverflow(completionError)) {
+        await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
+        throw terminalContextError(requestBudget, request, model);
+      }
+    }
+    break;
+  }
   const finalText = finalCompletion?.choices?.[0]?.message?.content;
   return { content: typeof finalText === "string" ? finalText : "", toolCalls, rounds: maxRounds + 1, stoppedBy };
 }

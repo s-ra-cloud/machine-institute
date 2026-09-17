@@ -94,6 +94,18 @@ export class ReproductionSession {
     return `Registered results: ${Array.from(this.recorded.values()).map(r => `${r.id}=${r.status}`).join(", ")}.`;
   }
 
+  contextState(): string {
+    const claims = Array.from(this.recorded.values()).map(result => ({
+      id: result.id, claim: result.claim, status: result.status, method: result.method,
+      originalValue: result.originalValue, reproducedValue: result.reproducedValue,
+      evidenceToolCallIds: result.evidenceToolCallIds, rawInputPath: result.rawInputPath,
+      rawInputToolCallId: result.rawInputToolCallId, blockerKind: result.blockerKind,
+      repairIssues: this.rejected.get(result.id),
+      proposedEvidenceIds: this.drafts.get(result.id)?.evidenceToolCallIds,
+    }));
+    return `Current accepted claim states (authoritative; rejected submissions are not final):\n${JSON.stringify(claims)}\nAll original evidence remains in read_tool_result; omit tool_call_id to list original IDs. Repair the issues above without rerunning completed experiments for output.`;
+  }
+
   repairContext(): string {
     const outstanding = Array.from(this.recorded.values()).filter(r => r.status === "pending");
     return [

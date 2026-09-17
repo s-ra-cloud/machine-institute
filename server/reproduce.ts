@@ -1,9 +1,8 @@
-import { generateWithConfig, runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolCallRecord } from "./model-service";
+import { getContextWindow, runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolCallRecord } from "./model-service";
 import { loadPaperContext } from "./ethics-review";
 import { fetchContributionMaterials, materialSandboxPath, formatMaterialsInventory } from "./fs-materials";
 import { ReproductionSandbox, isModalConfigured, type GpuType } from "./modal-sandbox";
 import {
-  parseJudgeOutput,
   verdictsFromRecordedResults,
   countVerdicts,
   deriveOverallVerdict,
@@ -21,6 +20,8 @@ import {
 } from "./prompts/reproduce";
 import { deriveContributionKeywords } from "./prompts/peer-review";
 import { ReproductionSession } from "./reproduction-session";
+import { ContextBudgetError, isContextOverflow, RequestContextBudget } from "./llm-context";
+import { runBoundedReproductionJudge } from "./reproduction-judge";
 
 // "Generous" budget: close to what the ICML hackathon agents were given.
 export const REPRODUCTION_BUDGET = {
@@ -33,8 +34,6 @@ export const REPRODUCTION_BUDGET = {
 
 const PAPER_INLINE_CHARS = 15_000;
 const README_INLINE_CHARS = 12_000;
-const JUDGE_TRANSCRIPT_CHARS = 150_000;
-const JUDGE_TOOL_RESULT_CHARS = 3_000;
 // Consecutive no-progress stops, not a lifetime limit on finishing more claims.
 const MAX_PREMATURE_STOP_RECOVERIES = 2;
 const REQUIRED_LOGBOOK_SECTIONS = [
@@ -382,6 +381,19 @@ function fmtExec(r: { exitCode: number | null; stdout: string; stderr: string; t
 export async function runReproduction(opts: RunReproductionOptions): Promise<ReproductionOutput> {
   const startTime = Date.now();
   const { projectId, journalId, initiativeDocId, initiativeSlug, journalDisplayName, documentId, paperTitle, modelConfig, judgeModelConfig, gpu, emitEvent } = opts;
+  const effectivePrompt = buildEffectiveReproducerPrompt(opts.reproducerPrompt);
+  // Reject irreducible custom instructions before booting a paid sandbox.
+  new RequestContextBudget(modelConfig, 8000, "reproduction instructions", getContextWindow(modelConfig)).assertFits({
+    model: modelConfig.modelName,
+    messages: [{ role: "system", content: effectivePrompt }],
+    tools: TOOLS.map(tool => ({ type: "function", function: tool })),
+    max_tokens: 8000,
+  });
+  new RequestContextBudget(judgeModelConfig, 6000, "judge instructions", getContextWindow(judgeModelConfig)).assertFits({
+    model: judgeModelConfig.modelName,
+    messages: [{ role: "system", content: opts.judgePrompt }],
+    max_tokens: 6000,
+  });
 
   if (!isModalConfigured()) {
     throw new Error("Reproduction sandboxes are not configured (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET missing).");
@@ -515,13 +527,23 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
     ].join("\n");
 
     await emitEvent("reproduction-agent", `Reproduction agent (${modelConfig.modelName || modelConfig.provider}) started; budget ${REPRODUCTION_BUDGET.maxToolCalls} tool calls / ${Math.round(REPRODUCTION_BUDGET.wallClockMs / 60000)} min.`);
-    toolLoopResult = await runToolLoop(modelConfig, buildEffectiveReproducerPrompt(opts.reproducerPrompt), userMessage, TOOLS, execute, {
+    toolLoopResult = await runToolLoop(modelConfig, effectivePrompt, userMessage, TOOLS, execute, {
       maxToolCalls: REPRODUCTION_BUDGET.maxToolCalls,
       deadlineMs: startTime + REPRODUCTION_BUDGET.wallClockMs,
       maxTokens: 8000,
       temperature: 0.2,
       numberToolResults: true,
       allowResourceStopFallback: true,
+      contextProtection: {
+        getState: () => session.contextState(),
+        compactUserMessage: [
+          `Target paper: ${title}. Journal: ${journalDisplayName}.`,
+          "Inline paper, abstract and README omitted to fit the request. Read the full paper at /work/paper.md and the complete material inventory at /work/MATERIALS_INDEX.md; shipped files are already uploaded.",
+          `Budget unchanged: ${REPRODUCTION_BUDGET.maxToolCalls} tool calls, ${REPRODUCTION_BUDGET.wallClockMs / 60000} minutes wall-clock.`,
+          "Extract all core claims, reproduce using shipped materials, and finalize every claim with validated evidence. Retrieve prior output by original ID with read_tool_result instead of repeating experiments.",
+        ].join("\n"),
+        onDiagnostic: message => emitEvent("reproduction-context", message),
+      },
       elidedToolOutputMessage: "[Earlier output elided. Use read_tool_result with the original tool call ID; do not rerun the experiment to retrieve it.]",
       getRecoveryProgress: () => session.progress,
       onToolCall: async (rec: ToolCallRecord) => {
@@ -579,42 +601,19 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
 
   // Judge pass: a separate model grades the logbook against the raw tool outputs.
   await emitEvent("reproduction-judge", `Judge (${judgeModelConfig.modelName || judgeModelConfig.provider}) grading ${recordedList.length} recorded result(s)...`);
-  let transcript = "";
-  for (const t of toolCalls) {
-    const argsText = t.name === "run_command" ? String(t.args.command || "") : JSON.stringify(t.args);
-    const block = `### [${t.index}] ${t.name}: ${argsText.slice(0, 500)}\n${t.result.slice(0, JUDGE_TOOL_RESULT_CHARS)}${t.result.length > JUDGE_TOOL_RESULT_CHARS ? "\n[... truncated ...]" : ""}\n\n`;
-    if (transcript.length + block.length > JUDGE_TRANSCRIPT_CHARS) {
-      transcript += `[... ${toolCalls.length - t.index + 1} further tool call(s) omitted for length ...]\n`;
-      break;
-    }
-    transcript += block;
-  }
-  const judgeInput = [
-    `# PAPER`,
-    `**Title:** ${title}`,
-    `**Abstract:** ${abstract || "(none)"}`,
-    ``,
-    `# AGENT'S RECORDED RESULTS (proposals, not verdicts)`,
-    recordedList.length ? JSON.stringify(recordedList, null, 2) : "(the agent registered no results)",
-    ``,
-    `# AGENT'S LOGBOOK`,
-    logbook || "(no logbook produced)",
-    ``,
-    `# ORIGINAL CITED TOOL OUTPUTS (server-extracted, before chronological transcript truncation)`,
-    session.judgeEvidence(),
-    ``,
-    `# TOOL TRANSCRIPT (commands and outputs)`,
-    transcript || "(no tools were called)",
-  ].join("\n");
-
   let judgeSummary = "";
   let results: ClaimVerdict[] = [];
   try {
-    const judged = await generateWithConfig(judgeModelConfig, opts.judgePrompt, judgeInput, { maxTokens: 6000, temperature: 0.1 });
-    const parsed = parseJudgeOutput(judged.content);
-    judgeSummary = parsed.summary;
-    results = parsed.results;
+    const judged = await runBoundedReproductionJudge({
+      config: judgeModelConfig, prompt: opts.judgePrompt, title, abstract, logbook,
+      recordedResults: recordedList, toolCalls,
+      onDiagnostic: message => emitEvent("reproduction-context", message),
+    });
+    judgeSummary = judged.summary;
+    results = judged.results;
   } catch (err) {
+    // An ungradable context must never become a self-certified reproduction.
+    if (err instanceof ContextBudgetError || isContextOverflow(err)) throw err;
     await emitEvent("reproduction-judge", `Judge call failed (${err instanceof Error ? err.message : String(err)}); falling back to the agent's own statuses.`);
   }
   if (results.length === 0) {

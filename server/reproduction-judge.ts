@@ -1,0 +1,473 @@
+import {
+  generateWithConfig,
+  getContextWindow,
+  type ModelProviderConfig,
+  type ToolCallRecord,
+} from "./model-service";
+import {
+  ContextBudgetError,
+  isContextOverflow,
+  RequestContextBudget,
+} from "./llm-context";
+import {
+  parseJudgeOutput,
+  type ClaimVerdict,
+  type RecordedResult,
+} from "./prompts/reproduce";
+
+const JUDGE_OUTPUT_TOKENS = 6000;
+const JUDGE_TIMEOUT_MS = 600_000;
+const MAX_CONTEXT_RETRIES = 2;
+const TRANSCRIPT_RESULT_CHARS = 3_000;
+
+export interface RunBoundedReproductionJudgeOptions {
+  config: ModelProviderConfig;
+  prompt: string;
+  title: string;
+  abstract: string;
+  logbook: string;
+  recordedResults: RecordedResult[];
+  toolCalls: readonly ToolCallRecord[];
+  onDiagnostic?: (message: string) => Promise<void> | void;
+}
+
+export interface BoundedReproductionJudgeResult {
+  summary: string;
+  results: ClaimVerdict[];
+}
+
+type InputReduction = 0 | 1 | 2 | 3 | 4;
+type JudgeRequest = {
+  model: string;
+  messages: Array<{ role: "system" | "user"; content: string }>;
+  max_tokens: number;
+  temperature: number;
+};
+
+/**
+ * Keep the evidence block deliberately independent from the chronological
+ * transcript.  The latter is useful context, but it is not authoritative:
+ * cited tool output is the evidence a judge must be able to inspect.
+ */
+function citedEvidence(result: RecordedResult, toolCalls: readonly ToolCallRecord[]): string {
+  const ids = new Set<number>(result.evidenceToolCallIds ?? []);
+  if (result.rawInputToolCallId !== undefined) ids.add(result.rawInputToolCallId);
+  const calls = toolCalls.filter(call => ids.has(call.index));
+  const blocks = calls.map(call => {
+    const args = JSON.stringify(call.args ?? {});
+    const excerpt = result.evidenceExcerpt?.trim();
+    const excerptPosition = excerpt ? call.result.indexOf(excerpt) : -1;
+    const exactExcerptFound = excerptPosition >= 0;
+    // Keep the exact cited excerpt and a small surrounding window. Large raw
+    // reads are represented by a clearly labelled bounded page.
+    let output = call.result;
+    if (exactExcerptFound) {
+      const start = Math.max(0, excerptPosition - 250);
+      const end = Math.min(call.result.length, excerptPosition + excerpt!.length + 250);
+      output = `${start > 0 ? "[... preceding output omitted ...]\n" : ""}${call.result.slice(start, end)}${end < call.result.length ? "\n[... following output omitted ...]" : ""}`;
+    } else if (call.name === "read_file" && call.result.length > 8_000) {
+      output = `${call.result.slice(0, 8_000)}\n[... raw read output bounded to the first 8000 characters; cite a retained exact excerpt ...]`;
+    } else if (call.result.length > 12_000) {
+      output = `${call.result.slice(0, 12_000)}\n[... uncited command output bounded ...]`;
+    }
+    const provenance = result.rawInputToolCallId === call.index
+      ? `\nRaw-input provenance: ${result.rawInputPath || "(path not recorded)"} (original tool #${call.index})`
+      : "";
+    return [
+      `Original tool #${call.index}: ${call.name} ${args}`,
+      `Output status: ${call.result.split("\n", 1)[0]}`,
+      output,
+      exactExcerptFound ? `Exact cited excerpt: ${excerpt}` : "",
+      provenance,
+    ].filter(Boolean).join("\n");
+  });
+  return blocks.length
+    ? blocks.join("\n\n")
+    : "No scientific output cited. The structured result is not evidence by itself.";
+}
+
+function transcriptBlocks(toolCalls: readonly ToolCallRecord[]): string[] {
+  return toolCalls.map(call => {
+    const args = call.name === "run_command"
+      ? String(call.args?.command ?? "")
+      : JSON.stringify(call.args ?? {});
+    const output = call.result.slice(0, TRANSCRIPT_RESULT_CHARS);
+    return [
+      `### [${call.index}] ${call.name}: ${args.slice(0, 500)}`,
+      output,
+      call.result.length > TRANSCRIPT_RESULT_CHARS ? "[... truncated ...]" : "",
+      "",
+    ].filter(Boolean).join("\n");
+  });
+}
+
+function compact(text: string, limit: number, label: string): string {
+  if (text.length <= limit) return text || `(no ${label} produced)`;
+  const tail = Math.max(200, Math.floor(limit * 0.25));
+  return `${text.slice(0, limit - tail)}\n[... ${label} compacted by the bounded judge ...]\n${text.slice(-tail)}`;
+}
+
+function transcriptForLevel(blocks: string[], level: InputReduction): string {
+  if (level === 0) return blocks.join("\n\n") || "(no tools were called)";
+  // A transcript is redundant with ORIGINAL CITED TOOL OUTPUTS.  Remove the
+  // oldest blocks first, retaining the recent chronological context.
+  const keep = level === 1 ? Math.min(8, blocks.length) : level === 2 ? Math.min(3, blocks.length) : 0;
+  const omitted = blocks.length - keep;
+  const prefix = omitted > 0 ? `[... ${omitted} earlier transcript tool call(s) omitted ...]\n\n` : "";
+  const retained = keep === 0 ? [] : blocks.slice(-keep);
+  return `${prefix}${retained.join("\n\n") || "(transcript omitted; see original cited outputs)"}`;
+}
+
+function buildJudgeInput(
+  title: string,
+  abstract: string,
+  logbook: string,
+  claims: RecordedResult[],
+  toolCalls: readonly ToolCallRecord[],
+  level: InputReduction,
+): string {
+  const blocks = transcriptBlocks(toolCalls);
+  const paperAbstract = level >= 3 ? compact(abstract, level >= 4 ? 500 : 2_000, "abstract") : abstract || "(none)";
+  const paperLogbook = level >= 2
+    ? compact(logbook, level >= 4 ? 1_000 : level >= 3 ? 4_000 : 8_000, "logbook")
+    : logbook || "(no logbook produced)";
+  const evidence = claims.map(result => [
+    `### ${result.id} — original cited evidence`,
+    citedEvidence(result, toolCalls),
+  ].join("\n")).join("\n\n");
+  return [
+    "# PAPER",
+    `**Title:** ${title}`,
+    `**Abstract:** ${paperAbstract}`,
+    "",
+    "# AGENT'S RECORDED RESULTS (proposals, not verdicts)",
+    claims.length ? JSON.stringify(claims, null, 2) : "(the agent registered no results)",
+    "",
+    "# AGENT'S LOGBOOK",
+    paperLogbook,
+    "",
+    "# ORIGINAL CITED TOOL OUTPUTS (server-extracted, before chronological transcript truncation)",
+    evidence,
+    "",
+    "# TOOL TRANSCRIPT (commands and outputs)",
+    transcriptForLevel(blocks, level),
+  ].join("\n");
+}
+
+function requestFor(config: ModelProviderConfig, prompt: string, input: string, maxTokens: number): JudgeRequest {
+  return {
+    model: config.modelName,
+    messages: [
+      { role: "system", content: prompt },
+      { role: "user", content: input },
+    ],
+    max_tokens: maxTokens,
+    temperature: 0.1,
+  };
+}
+
+function budgetFor(
+  config: ModelProviderConfig,
+  maxTokens: number,
+  observedInputLimit = Number.POSITIVE_INFINITY,
+): RequestContextBudget {
+  const budget = new RequestContextBudget(
+    config,
+    maxTokens,
+    "reproduction-judge",
+    getContextWindow(config),
+  );
+  if (Number.isFinite(observedInputLimit)) {
+    budget.inputLimit = Math.min(budget.inputLimit, observedInputLimit);
+  }
+  return budget;
+}
+
+async function diagnostic(
+  onDiagnostic: ((message: string) => Promise<void> | void) | undefined,
+  message: string,
+): Promise<void> {
+  await onDiagnostic?.(message);
+}
+
+function judgeContextOverflow(error: unknown): boolean {
+  if (isContextOverflow(error)) return true;
+  const text = error instanceof Error ? error.message : String(error ?? "");
+  return /context[_\s-]*length[\s\S]{0,80}\d[\s\S]{0,20}>\s*\d+/i.test(text);
+}
+
+function reduceJudgeBudget(
+  budget: RequestContextBudget,
+  error: unknown,
+  request: JudgeRequest,
+): boolean {
+  if (budget.reduce(error, request)) return true;
+  // Some SDK wrappers retain only "context_length 35175 > 32768", which is
+  // safe to recognize locally even when the shared classifier cannot parse it.
+  if (!judgeContextOverflow(error)) return false;
+  return budget.reduce(new Error("context length exceeded"), request);
+}
+
+function fitsAt(
+  config: ModelProviderConfig,
+  prompt: string,
+  input: string,
+  maxTokens: number,
+): boolean {
+  const budget = budgetFor(config, maxTokens);
+  return budget.fits(requestFor(config, prompt, input, maxTokens));
+}
+
+function outputAllocation(groupSize: number, totalClaims: number): number {
+  const allocation = Math.floor(JUDGE_OUTPUT_TOKENS * groupSize / totalClaims);
+  if (allocation < 1) {
+    throw new ContextBudgetError(
+      `Reproduction judge cannot allocate output tokens to a batch of ${groupSize} claim(s); ${totalClaims} claims exceed the 6000-token judge budget.`,
+    );
+  }
+  return allocation;
+}
+
+function firstFittingLevel(
+  opts: RunBoundedReproductionJudgeOptions,
+  claims: RecordedResult[],
+  maxTokens: number,
+  minimumLevel = 0,
+  budget?: RequestContextBudget,
+): InputReduction | undefined {
+  for (let level = minimumLevel; level <= 4; level++) {
+    const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, claims, opts.toolCalls, level as InputReduction);
+    const request = requestFor(opts.config, opts.prompt, input, maxTokens);
+    if (budget ? budget.fits(request) : fitsAt(opts.config, opts.prompt, input, maxTokens)) {
+      return level as InputReduction;
+    }
+  }
+  return undefined;
+}
+
+interface PartitionedGroup {
+  claims: RecordedResult[];
+  initialLevel: InputReduction;
+  contextRetries: number;
+}
+
+/**
+ * Partition claims without throwing away evidence.  This is done before
+ * making model calls so a context failure cannot turn into a self-verdict.
+ */
+function partitionClaims(
+  opts: RunBoundedReproductionJudgeOptions,
+  claims: RecordedResult[],
+): PartitionedGroup[] {
+  const groups: PartitionedGroup[] = [];
+  const visit = (group: RecordedResult[]): void => {
+    const maxTokens = outputAllocation(group.length, claims.length);
+    const fittingLevel = firstFittingLevel(opts, group, maxTokens);
+    if (fittingLevel !== undefined) {
+      groups.push({ claims: group, initialLevel: fittingLevel, contextRetries: 0 });
+      return;
+    }
+    if (group.length > 1) {
+      const midpoint = Math.ceil(group.length / 2);
+      visit(group.slice(0, midpoint));
+      visit(group.slice(midpoint));
+      return;
+    }
+    const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, group, opts.toolCalls, 4);
+    const budget = budgetFor(opts.config, maxTokens);
+    const request = requestFor(opts.config, opts.prompt, input, maxTokens);
+    try {
+      budget.assertFits(request);
+    } catch {
+      throw new ContextBudgetError(
+        `Reproduction judge cannot fit essential evidence (${budget.diagnostic(request)}).`,
+      );
+    }
+    throw new ContextBudgetError(
+      `Reproduction judge cannot fit essential evidence (${budget.diagnostic(request)}).`,
+    );
+  };
+  visit(claims);
+  return groups;
+}
+
+function resultForClaim(result: RecordedResult): ClaimVerdict {
+  return {
+    id: result.id,
+    claim: result.claim,
+    verdict: "inconclusive",
+    originalValue: result.originalValue,
+    reproducedValue: result.reproducedValue,
+    evidence: result.evidence,
+  };
+}
+
+function aggregate(
+  recordedResults: RecordedResult[],
+  judged: Map<string, ClaimVerdict>,
+): ClaimVerdict[] {
+  // Iterating the registered list makes the result order stable and also
+  // guarantees one row per registered ID, regardless of model output order.
+  const seen = new Set<string>();
+  return recordedResults.filter(recorded => {
+    if (seen.has(recorded.id)) return false;
+    seen.add(recorded.id);
+    return true;
+  }).map(recorded => {
+    const proposed = judged.get(recorded.id);
+    if (!proposed) return resultForClaim(recorded);
+    return {
+      ...resultForClaim(recorded),
+      verdict: proposed.verdict,
+      // These are descriptive judge fields, never the claim identity.
+      reproducedValue: proposed.reproducedValue ?? recorded.reproducedValue,
+      evidence: proposed.evidence ?? recorded.evidence,
+      confidence: proposed.confidence,
+    };
+  });
+}
+
+export async function runBoundedReproductionJudge(
+  opts: RunBoundedReproductionJudgeOptions,
+): Promise<BoundedReproductionJudgeResult> {
+  const started = Date.now();
+  const seenIds = new Set<string>();
+  const recordedResults = opts.recordedResults.filter(result => {
+    if (seenIds.has(result.id)) return false;
+    seenIds.add(result.id);
+    return true;
+  });
+  if (recordedResults.length === 0) {
+    return { summary: "No registered claims were available for judging.", results: [] };
+  }
+
+  const groups = partitionClaims(opts, recordedResults);
+  const judged = new Map<string, ClaimVerdict>();
+  const summaries: string[] = [];
+  let observedInputLimit = Number.POSITIVE_INFINITY;
+
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+    const group = groups[groupIndex];
+    const claims = group.claims;
+    const maxTokens = outputAllocation(claims.length, recordedResults.length);
+    const budget = budgetFor(opts.config, maxTokens, observedInputLimit);
+    let level: InputReduction = group.initialLevel;
+    let parsed: { summary: string; results: ClaimVerdict[] } | undefined;
+    let completed = false;
+    let contextRetries = group.contextRetries;
+
+    while (true) {
+      const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, claims, opts.toolCalls, level);
+      const request = requestFor(opts.config, opts.prompt, input, maxTokens);
+      try {
+        budget.assertFits(request);
+      } catch {
+        // A local preflight failure is not a provider retry. Select a fitting
+        // compact form, or split the batch while preserving every claim.
+        const nextLevel = firstFittingLevel(opts, claims, maxTokens, level + 1, budget);
+        if (nextLevel !== undefined) {
+          level = nextLevel;
+          continue;
+        }
+        if (claims.length > 1) {
+          const midpoint = Math.ceil(claims.length / 2);
+          const children = [claims.slice(0, midpoint), claims.slice(midpoint)]
+            .map(child => ({
+              claims: child,
+              initialLevel: firstFittingLevel(
+                opts,
+                child,
+                outputAllocation(child.length, recordedResults.length),
+                0,
+                budget,
+              ) ?? 0,
+              contextRetries: contextRetries,
+            }));
+          groups.splice(groupIndex, 1, ...children);
+          groupIndex--;
+          break;
+        }
+        const message = `Reproduction judge cannot fit essential evidence (${budget.diagnostic(request)}).`;
+        await diagnostic(opts.onDiagnostic, message);
+        throw new ContextBudgetError(message);
+      }
+
+      const remaining = JUDGE_TIMEOUT_MS - (Date.now() - started);
+      if (remaining <= 0) {
+        await diagnostic(opts.onDiagnostic, "Reproduction judge deadline exhausted; remaining claims are inconclusive.");
+        summaries.push(`No judged verdict was produced for ${claims.map(claim => claim.id).join(", ")}; claims remain inconclusive.`);
+        break;
+      }
+      try {
+        const response = await generateWithConfig(opts.config, opts.prompt, input, {
+          maxTokens,
+          temperature: 0.1,
+          contextRequest: true,
+          timeoutMs: remaining,
+        });
+        parsed = parseJudgeOutput(response.content);
+        if (parsed.results.length === 0) {
+          await diagnostic(opts.onDiagnostic, "Judge returned no parseable claim verdicts; claims remain inconclusive.");
+          summaries.push(`The judge returned no parseable verdicts for ${claims.map(claim => claim.id).join(", ")}; claims remain inconclusive.`);
+        }
+        completed = true;
+        break;
+      } catch (error) {
+        if (judgeContextOverflow(error)) {
+          contextRetries++;
+          if (contextRetries > MAX_CONTEXT_RETRIES || !reduceJudgeBudget(budget, error, request)) {
+            const message = `Reproduction judge exhausted context retries (${budget.diagnostic(request)}).`;
+            await diagnostic(opts.onDiagnostic, message);
+            throw new ContextBudgetError(message);
+          }
+          observedInputLimit = Math.min(observedInputLimit, budget.inputLimit);
+          const nextLevel = firstFittingLevel(opts, claims, maxTokens, level + 1, budget);
+          if (nextLevel === undefined) {
+            if (claims.length > 1) {
+              const midpoint = Math.ceil(claims.length / 2);
+              const children = [claims.slice(0, midpoint), claims.slice(midpoint)]
+                .map(child => ({
+                  claims: child,
+                  initialLevel: firstFittingLevel(
+                    opts,
+                    child,
+                    outputAllocation(child.length, recordedResults.length),
+                    0,
+                    budget,
+                  ) ?? 0,
+                  contextRetries,
+                }));
+              groups.splice(groupIndex, 1, ...children);
+              groupIndex--;
+              break;
+            }
+            const message = `Reproduction judge cannot fit essential evidence after provider reduction (${budget.diagnostic(request)}).`;
+            await diagnostic(opts.onDiagnostic, message);
+            throw new ContextBudgetError(message);
+          }
+          level = nextLevel;
+          await diagnostic(opts.onDiagnostic, `Judge provider rejected context; retrying with reduced context (${budget.diagnostic(request)}).`);
+          continue;
+        }
+        if (error instanceof ContextBudgetError) throw error;
+        await diagnostic(opts.onDiagnostic, `Judge batch failed; its claims remain inconclusive.`);
+        summaries.push(`The judge request failed for ${claims.map(claim => claim.id).join(", ")}; claims remain inconclusive.`);
+        break;
+      }
+    }
+
+    if (!completed || !parsed) continue;
+    if (parsed.summary.trim()) summaries.push(parsed.summary.trim());
+    const groupIds = new Set(claims.map(claim => claim.id));
+    for (const verdict of parsed.results) {
+      // Foreign IDs and duplicate IDs are never allowed to affect a claim.
+      if (!groupIds.has(verdict.id) || judged.has(verdict.id)) continue;
+      judged.set(verdict.id, verdict);
+    }
+  }
+
+  return {
+    summary: summaries.join("\n\n"),
+    results: aggregate(recordedResults, judged),
+  };
+}
