@@ -10,6 +10,7 @@ vi.mock("openai", () => ({
 
 import { generateWithConfig, runToolLoop } from "../model-service";
 import { isContextOverflow } from "../llm-context";
+import { ReproductionSession } from "../reproduction-session";
 
 const config = {
   providerMode: "platform" as const,
@@ -81,6 +82,68 @@ describe("tool-loop context protection", () => {
     }
     expect(String((thrown as Error).message)).not.toContain("prompt is too long");
     expect(createMock.mock.calls.length).toBeLessThanOrEqual(3);
+  });
+
+  it("preserves forced-final STOP after archiving long drafts and repair instructions", async () => {
+    const session = new ReproductionSession(() => []);
+    const draft = "UNFINISHED_DRAFT ".repeat(4000);
+    const repair = "Continue repair of the pending claims. ".repeat(1500);
+    createMock
+      .mockResolvedValueOnce({ choices: [{ message: { content: draft } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: null, tool_calls: [call] } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: "Honest resource-stop logbook." } }] });
+    const execute = vi.fn(async () => "exit code 0\nMEASURED=1");
+    const result = await runToolLoop(config, "IMMUTABLE CUSTOM SCIENTIFIC INSTRUCTIONS", "paper", [
+      { name: "run_command", description: "run", parameters: { type: "object" } },
+    ], execute, {
+      maxToolCalls: 1,
+      deadlineMs: Date.now() + 60000,
+      maxPrematureStopRecoveries: 2,
+      onPrematureStop: () => repair,
+      contextProtection: {
+        getState: maxBytes => session.contextState(maxBytes),
+        archiveContext: (key, text) => session.archiveContext(key, text),
+      },
+    });
+    expect(result.stoppedBy).toBe("tool-budget");
+    expect(result.content).toBe("Honest resource-stop logbook.");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(createMock).toHaveBeenCalledTimes(3);
+    const forced = createMock.mock.calls[2][0];
+    expect(forced.tools).toBeUndefined();
+    expect(forced.messages[0].content).toBe("IMMUTABLE CUSTOM SCIENTIFIC INSTRUCTIONS");
+    expect(forced.messages.some((message: any) =>
+      message.role === "user" && message.content.startsWith("STOP:") && message.content.includes("Do not call any more tools"))).toBe(true);
+    expect(JSON.stringify(forced)).not.toContain(draft);
+    const indexPage = JSON.parse(session.readContext({}));
+    expect(indexPage.text).toContain("assistant-2");
+    expect(indexPage.text).toContain("user-3");
+  });
+
+  it("keeps resource-stop fallback when local fitting fails and reports only sizes", async () => {
+    let state = "small initial state";
+    const diagnostic = vi.fn();
+    createMock.mockResolvedValueOnce({ choices: [{ message: { content: null, tool_calls: [call] } }] });
+    const execute = vi.fn(async () => {
+      state = "PRIVATE_GENERATED_STATE ".repeat(4000);
+      return "exit code 0";
+    });
+    const result = await runToolLoop(config, "system", "paper", [
+      { name: "run_command", description: "run", parameters: { type: "object" } },
+    ], execute, {
+      maxToolCalls: 1,
+      deadlineMs: Date.now() + 60000,
+      allowResourceStopFallback: true,
+      contextProtection: { getState: () => state, onDiagnostic: diagnostic },
+    });
+    expect(result).toMatchObject({ content: "", stoppedBy: "tool-budget" });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(diagnostic).toHaveBeenCalledTimes(1);
+    expect(diagnostic.mock.calls[0][0]).toContain("generated-state");
+    expect(diagnostic.mock.calls[0][0]).toMatch(/state=\d+/);
+    expect(diagnostic.mock.calls[0][0]).not.toContain("PRIVATE_GENERATED_STATE");
+    expect(diagnostic.mock.calls[0][0]).not.toContain("Shorten custom instructions");
   });
 
   it("does not issue a context retry after diagnostics consume the deadline", async () => {

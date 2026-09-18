@@ -20,3 +20,9 @@ Routed context limits need an execution-specific policy, separate from advertise
 **Why:** A routed DeepSeek reproduction was rejected by DeepInfra at 32,768 tokens despite the advertised 64,000-token window. Changing global model metadata would also change literature-review reading capacity. Retrying the whole reproduction would repeat paid experiments instead of repairing the rejected language-model request.
 
 **How to apply:** Treat upstream limits as serving constraints, preserve source evidence independently of presentation context, and test recovery inside the same run. Keep paid GPU verification separate from mocked provider/sandbox replays.
+
+Generated “protected” context is still disposable presentation, not immutable scientific truth. Only fixed instructions are irreducible; omitted generated content needs a working retrieval path.
+
+**Why:** A later run failed locally even after provider budgeting was added: the most recent draft, repair continuation, and full claim-state projection could remain larger than the entire input allowance. Command-output retrieval alone could not recover omitted rejected submissions or logbook details.
+
+**How to apply:** Cover long latest drafts and verbose multi-claim repair state with the real prompts and orchestration, not only small fitting fixtures. Preserve full scientific values separately, reserve runtime retrieval headroom before paid startup, and resize page payloads with truthful source offsets rather than slicing their serialized wrappers. Retrieval must not count as new scientific progress.

@@ -22,6 +22,7 @@ import { deriveContributionKeywords } from "./prompts/peer-review";
 import { ReproductionSession } from "./reproduction-session";
 import { ContextBudgetError, isContextOverflow, RequestContextBudget } from "./llm-context";
 import { runBoundedReproductionJudge } from "./reproduction-judge";
+import { describeToolContext, RUNTIME_CONTEXT_HEADROOM } from "./tool-context";
 
 // "Generous" budget: close to what the ICML hackathon agents were given.
 export const REPRODUCTION_BUDGET = {
@@ -298,6 +299,18 @@ export function finalizeBudgetExhaustedResults(input: {
 
 const TOOLS: ToolSpec[] = [
   {
+    name: "read_reproduction_context",
+    description: "Read archived claim state, rejected submissions, drafts, or repair instructions. Omit ref for the paged index. These are context, NOT scientific evidence; cite original command/file IDs via read_tool_result.",
+    parameters: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "Stable reference from the state or archive index." },
+        offset: { type: "integer", description: "Character offset; follow the returned continuation offset." },
+        max_chars: { type: "integer", description: "Requested page length, further limited by serialized byte size." },
+      },
+    },
+  },
+  {
     name: "read_tool_result",
     description: "Retrieve an earlier command/file output without rerunning it, even after context compaction. Omit tool_call_id to list prior evidence IDs. Cite the ORIGINAL evidence ID in record_result.",
     parameters: {
@@ -382,13 +395,22 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
   const startTime = Date.now();
   const { projectId, journalId, initiativeDocId, initiativeSlug, journalDisplayName, documentId, paperTitle, modelConfig, judgeModelConfig, gpu, emitEvent } = opts;
   const effectivePrompt = buildEffectiveReproducerPrompt(opts.reproducerPrompt);
-  // Reject irreducible custom instructions before booting a paid sandbox.
-  new RequestContextBudget(modelConfig, 8000, "reproduction instructions", getContextWindow(modelConfig)).assertFits({
+  // Fixed input must leave room for bounded state and a useful retrieval page,
+  // not merely fit an empty first turn before booting a paid sandbox.
+  const instructionBudget = new RequestContextBudget(modelConfig, 8000, "reproduction instructions", getContextWindow(modelConfig));
+  const fixedRequest = {
     model: modelConfig.modelName,
     messages: [{ role: "system", content: effectivePrompt }],
     tools: TOOLS.map(tool => ({ type: "function", function: tool })),
     max_tokens: 8000,
-  });
+    temperature: 0.2,
+    tool_choice: "auto",
+  };
+  if (instructionBudget.estimate(fixedRequest) + RUNTIME_CONTEXT_HEADROOM > instructionBudget.inputLimit) {
+    throw new ContextBudgetError(
+      `Reproduction fixed instructions and tool schemas leave insufficient runtime state/retrieval headroom before sandbox startup (${instructionBudget.diagnostic(fixedRequest)}, runtime_headroom=${RUNTIME_CONTEXT_HEADROOM}; ${describeToolContext(fixedRequest)}). Shorten custom scientific instructions; mandatory tool contracts and output allowances cannot be removed.`,
+    );
+  }
   new RequestContextBudget(judgeModelConfig, 6000, "judge instructions", getContextWindow(judgeModelConfig)).assertFits({
     model: judgeModelConfig.modelName,
     messages: [{ role: "system", content: opts.judgePrompt }],
@@ -446,6 +468,8 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
 
     const executeTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
       switch (name) {
+        case "read_reproduction_context":
+          return session.readContext(args);
         case "read_tool_result":
           return session.readToolResult(args);
         case "list_files": {
@@ -535,9 +559,11 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
       numberToolResults: true,
       allowResourceStopFallback: true,
       contextProtection: {
-        getState: () => session.contextState(),
+        getState: maxBytes => session.contextState(maxBytes),
+        archiveContext: (key, text) => session.archiveContext(key, text),
+        resizeRetrieval: (name, args, result, maxBytes) => session.resizeRetrieval(name, args, result, maxBytes),
         compactUserMessage: [
-          `Target paper: ${title}. Journal: ${journalDisplayName}.`,
+          "Target paper and scientific goals are unchanged.",
           "Inline paper, abstract and README omitted to fit the request. Read the full paper at /work/paper.md and the complete material inventory at /work/MATERIALS_INDEX.md; shipped files are already uploaded.",
           `Budget unchanged: ${REPRODUCTION_BUDGET.maxToolCalls} tool calls, ${REPRODUCTION_BUDGET.wallClockMs / 60000} minutes wall-clock.`,
           "Extract all core claims, reproduce using shipped materials, and finalize every claim with validated evidence. Retrieve prior output by original ID with read_tool_result instead of repeating experiments.",

@@ -26,6 +26,7 @@ vi.mock("../modal-sandbox", () => ({
 
 import { runReproduction, REPRODUCTION_BUDGET } from "../reproduce";
 import type { ModelProviderConfig } from "../model-service";
+import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt } from "../prompts/reproduce";
 
 const config: ModelProviderConfig = {
   providerMode: "platform",
@@ -189,6 +190,122 @@ afterEach(() => {
 });
 
 describe("runReproduction bounded context orchestration", () => {
+  it("repairs a long latest draft and verbose multi-claim state through real paged retrieval, without repeating execution", async () => {
+    const sandbox = makeSandbox();
+    createSandbox.mockResolvedValue(sandbox);
+    const ids = Array.from({ length: 8 }, (_, i) => `R${i + 1}`);
+    const claims = Object.fromEntries(ids.map(id => [id, `${id} scientific claim ${"detailed claim ".repeat(70)}`.trim()]));
+    const originals = Object.fromEntries(ids.map(id => [id, `${id} original observations ${"reported value ".repeat(65)}`]));
+    const notes = `Full scientific notes: ${"important detail ".repeat(130)} END_NOTES`;
+    const draft = `${logbook}\n${'Long proposed logbook "測定🧪"\n'.repeat(1800)}END_DRAFT`;
+    const evidence = `${"noise".repeat(1400)}\nEXPENSIVE_METRIC=0.91`;
+    sandbox.exec.mockImplementation(async (command: string[]) => ({
+      stdout: command.join(" ").includes("nvidia-smi") ? "Test GPU, 16 GB" : evidence,
+      stderr: "", exitCode: 0, timedOut: false, durationMs: 1,
+    }));
+    const requests: any[] = [];
+    const judgeClaims: any[] = [];
+    let turn = 0;
+    let firstDraftPage: any;
+    let recoveredDraft = "";
+    let evidenceOffset = 0;
+    let evidenceText = "";
+    const toolMessage = (request: any) => [...request.messages].reverse().find((message: any) => message.role === "tool");
+    createCompletion.mockImplementation(async (request: any) => {
+      requests.push(JSON.parse(JSON.stringify(request)));
+      if (!request.tools) {
+        const input = request.messages[1].content as string;
+        const batch = JSON.parse(input.split("# AGENT'S RECORDED RESULTS (proposals, not verdicts)\n")[1].split("\n\n# AGENT'S LOGBOOK")[0]);
+        judgeClaims.push(...batch);
+        expect(input).toContain("Original tool #9");
+        expect(input).toContain("EXPENSIVE_METRIC=0.91");
+        return judgeCompletion(batch.map((claim: any) => claim.id));
+      }
+      expect(request.messages[0].content).toBe(buildEffectiveReproducerPrompt(REPRODUCER_PROMPT));
+      turn++;
+      if (turn === 1) return completion(null, ids.map(id => call(`pending-${id}`, "record_result", {
+        id, claim: claims[id], original_value: originals[id], status: "pending",
+      })));
+      if (turn === 2) return completion(null, [call("expensive", "run_command", { command: "python expensive.py" })]);
+      if (turn === 3) return completion(null, ids.map(id => call(`rejected-${id}`, "record_result", {
+        id, status: "verified", reproduced_value: "0.91", method: "rerun",
+        evidence_tool_call_ids: [999], evidence_excerpt: "EXPENSIVE_METRIC=0.91", notes,
+      })));
+      if (turn === 4) return completion(draft);
+      if (turn === 5) {
+        expect(requestText(request)).not.toContain("END_DRAFT");
+        const archivedDraft = request.messages.find((message: any) =>
+          message.role === "assistant" && !message.tool_calls && String(message.content).includes("read_reproduction_context"));
+        expect(archivedDraft).toBeDefined();
+        const notice = JSON.parse(archivedDraft.content);
+        expect(notice.ref).toBeTruthy();
+        return completion(null, [call("draft-page-1", "read_reproduction_context", { ref: notice.ref, max_chars: 3000 })]);
+      }
+      if (turn === 6 || turn === 7) {
+        const raw = toolMessage(request).content.replace(/^\[Tool call #\d+\]\n/, "");
+        const page = JSON.parse(raw);
+        expect(Buffer.byteLength(JSON.stringify(raw))).toBeLessThanOrEqual(6000);
+        expect(page.text).toBe(draft.slice(page.offset, page.end));
+        if (turn === 6) {
+          firstDraftPage = page;
+          recoveredDraft = page.text;
+          return completion(null, [call("draft-page-2", "read_reproduction_context", { ref: page.ref, offset: page.next_offset })]);
+        }
+        expect(page.offset).toBe(firstDraftPage.next_offset);
+        recoveredDraft += page.text;
+        expect(recoveredDraft).toBe(draft.slice(0, page.end));
+        const state = JSON.parse(request.messages.at(-1).content);
+        expect(state.totals.claims).toBe(8);
+        expect(state.totals.pending).toBe(8);
+        const repair = state.claims.find((claim: any) => claim.repair);
+        expect(repair).toBeDefined();
+        return completion(null, [call("claim-state", "read_reproduction_context", { ref: repair.ref })]);
+      }
+      if (turn === 8) {
+        const page = JSON.parse(toolMessage(request).content.replace(/^\[Tool call #\d+\]\n/, ""));
+        expect(page.notice).toMatch(/not scientifically valid evidence/);
+        expect(page.text).toContain('"accepted"');
+        return completion(null, [call("evidence-page-1", "read_tool_result", { tool_call_id: 9, max_chars: 4000 })]);
+      }
+      if (turn === 9) {
+        evidenceText = toolMessage(request).content;
+        expect(evidenceText).toContain("Original evidence tool call #9");
+        evidenceOffset = Number(evidenceText.match(/\[Use offset=(\d+) to continue/)[1]);
+        return completion(null, [call("evidence-page-2", "read_tool_result", { tool_call_id: 9, offset: evidenceOffset })]);
+      }
+      if (turn === 10) {
+        const page = toolMessage(request).content;
+        expect(page).toContain(`characters ${evidenceOffset}-`);
+        expect(page).toContain("EXPENSIVE_METRIC=0.91");
+        return completion(null, ids.map(id => call(`accepted-${id}`, "record_result", {
+          id, status: "verified", method: "rerun", evidence_tool_call_ids: [9],
+          evidence_excerpt: "EXPENSIVE_METRIC=0.91", reproduced_value: "0.91",
+        })));
+      }
+      return completion(logbook);
+    });
+    const result = await runReproduction(options({ reproducerPrompt: REPRODUCER_PROMPT, judgePrompt: JUDGE_PROMPT }));
+    expect(result.results).toHaveLength(8);
+    expect(result.results.every(item => item.verdict === "verified")).toBe(true);
+    expect(result.logbook).toBe(logbook);
+    expect(judgeClaims.map(claim => claim.id).sort()).toEqual(ids);
+    for (const claim of judgeClaims) {
+      expect(claim.claim).toBe(claims[claim.id]);
+      expect(claim.originalValue).toBe(originals[claim.id]);
+      expect(claim.notes).toBe(notes);
+      expect(claim.evidenceToolCallIds).toEqual([9]);
+    }
+    expect(sandbox.exec.mock.calls.filter(args => String(args[0]).includes("expensive.py"))).toHaveLength(1);
+    expect(sandbox.terminate).toHaveBeenCalledTimes(1);
+    expectBoundedRequests(requests);
+    for (const request of requests) {
+      const declarations = new Set(request.messages.flatMap((message: any) => (message.tool_calls ?? []).map((item: any) => item.id)));
+      for (const message of request.messages) {
+        if (message.role === "tool") expect(declarations.has(message.tool_call_id)).toBe(true);
+      }
+    }
+  });
+
   it("recovers original evidence after a 35175/32768 provider rejection without rerunning the expensive command", async () => {
     const sandbox = makeSandbox();
     createSandbox.mockResolvedValue(sandbox);
@@ -465,6 +582,24 @@ describe("runReproduction bounded context orchestration", () => {
     }
     expect(String((judgeError as Error)?.message)).toMatch(/reproduction(?:-judge)?|context|budget/i);
     expect(String((judgeError as Error)?.message)).not.toContain("X".repeat(100));
+    expect(createSandbox).not.toHaveBeenCalled();
+    expect(createCompletion).not.toHaveBeenCalled();
+  });
+
+  it("rejects fixed instructions that fit alone but leave no retrieval headroom, before paid work", async () => {
+    let failure: Error | undefined;
+    try {
+      await runReproduction(options({ reproducerPrompt: "PRIVATE_CUSTOM_INSTRUCTION ".repeat(320) }));
+    } catch (error) {
+      failure = error as Error;
+    }
+    expect(failure?.message).toContain("runtime state/retrieval headroom before sandbox startup");
+    const estimated = Number(failure!.message.match(/estimated_input=(\d+)/)?.[1]);
+    const limit = Number(failure!.message.match(/input_limit=(\d+)/)?.[1]);
+    expect(estimated).toBeLessThan(limit);
+    expect(failure?.message).not.toContain("PRIVATE_CUSTOM_INSTRUCTION");
+    expect(failure?.message).toMatch(/instructions=\d+/);
+    expect(failure?.message).toMatch(/schemas=\d+/);
     expect(createSandbox).not.toHaveBeenCalled();
     expect(createCompletion).not.toHaveBeenCalled();
   });

@@ -5,7 +5,7 @@ import {
   isContextOverflow,
   reportedContextLimit,
 } from "./llm-context";
-import { fitToolContext, type ToolContextProtection } from "./tool-context";
+import { describeToolContext, fitToolContext, type ToolContextProtection } from "./tool-context";
 
 export interface ModelProviderConfig {
   providerMode: "platform" | "byoc";
@@ -431,9 +431,15 @@ async function reportContextDiagnostic(
   model: string,
   protection: ToolContextProtection | undefined,
 ): Promise<void> {
-  const message = `[ToolLoop] context budget stage=tool-loop model=${model}: ${budget.diagnostic(request)}`;
+  const message = `[ToolLoop] context budget stage=tool-loop model=${model}: ${budget.diagnostic(request)}; ${fittedContextSizes(request)}`;
   console.warn(message);
   await protection?.onDiagnostic?.(message);
+}
+
+function fittedContextSizes(request: unknown): string {
+  const fitted = request as Record<string, any>;
+  // fitToolContext appends the current bounded state as the final user message.
+  return describeToolContext(fitted, fitted.messages?.at(-1)?.content);
 }
 
 function terminalContextError(
@@ -442,7 +448,7 @@ function terminalContextError(
   model: string,
 ): ContextBudgetError {
   return new ContextBudgetError(
-    `Tool-loop context request remained too large (stage=tool-loop model=${model}; ${budget.diagnostic(request)}).`,
+    `Tool-loop context request remained too large (stage=tool-loop model=${model}; ${budget.diagnostic(request)}; ${fittedContextSizes(request)}).`,
   );
 }
 
@@ -529,14 +535,27 @@ export async function runToolLoop(
     let completion: any;
     let contextReductions = 0;
     while (true) {
-      const request = requestBudget
-        ? fitToolContext(baseRequest, {
-          budget: requestBudget,
-          protection: options.contextProtection!,
-          elidedToolOutputMessage,
-          numberToolResults: options.numberToolResults,
-        })
-        : baseRequest;
+      let request: Record<string, unknown>;
+      try {
+        request = requestBudget
+          ? fitToolContext(baseRequest, {
+            budget: requestBudget,
+            protection: options.contextProtection!,
+            elidedToolOutputMessage,
+            numberToolResults: options.numberToolResults,
+          })
+          : baseRequest;
+      } catch (error) {
+        if (error instanceof ContextBudgetError) {
+          console.warn(`[ToolLoop] ${error.message}`);
+          await options.contextProtection?.onDiagnostic?.(error.message);
+          if (options.allowResourceStopFallback) {
+            const fallback = fallbackAfterResourceStop();
+            if (fallback) return fallback;
+          }
+        }
+        throw error;
+      }
       if (requestBudget && !requestWasForcedFinal && Date.now() >= options.deadlineMs) {
         stoppedBy = "deadline";
         return { content: "", toolCalls, rounds: round, stoppedBy };
@@ -749,14 +768,26 @@ export async function runToolLoop(
   let finalCompletion: any;
   let finalReductions = 0;
   while (true) {
-    const request = requestBudget
-      ? fitToolContext(finalRequest, {
-        budget: requestBudget,
-        protection: options.contextProtection!,
-        elidedToolOutputMessage,
-        numberToolResults: options.numberToolResults,
-      })
-      : finalRequest;
+    let request: Record<string, unknown>;
+    try {
+      request = requestBudget
+        ? fitToolContext(finalRequest, {
+          budget: requestBudget,
+          protection: options.contextProtection!,
+          elidedToolOutputMessage,
+          numberToolResults: options.numberToolResults,
+        })
+        : finalRequest;
+    } catch (error) {
+      if (error instanceof ContextBudgetError) {
+        console.warn(`[ToolLoop] ${error.message}`);
+        await options.contextProtection?.onDiagnostic?.(error.message);
+        if (options.allowResourceStopFallback && (stoppedBy === "deadline" || stoppedBy === "tool-budget")) {
+          return { content: "", toolCalls, rounds: maxRounds + 1, stoppedBy };
+        }
+      }
+      throw error;
+    }
     try {
       finalCompletion = await client.chat.completions.create(
         request as any,

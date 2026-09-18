@@ -64,7 +64,7 @@ describe("fitToolContext", () => {
     expect(JSON.stringify(fitted).length).toBeLessThan(JSON.stringify(request).length);
   });
 
-  it("keeps the newest retrieval evidence bounded instead of blanking it", () => {
+  it("keeps the newest complete retrieval page when older groups can be removed", () => {
     const request = {
       messages: [
         { role: "system", content: "system" },
@@ -81,10 +81,9 @@ describe("fitToolContext", () => {
       protection: { getState: () => "state" },
     });
     const latest = fitted.messages.find((message: any) => message.tool_call_id === "retrieval-1");
-    expect(latest.content).toContain("read_tool_result");
     expect(latest.content).toContain("BEGIN");
-    expect(latest.content).toMatch(/evidence|nce/);
-    expect(latest.content).toContain("output shortened");
+    expect(latest.content).toContain("END evidence");
+    expect(latest.content).not.toContain("output shortened");
   });
 
   it("throws before a request when system plus exact state is irreducible", () => {
@@ -92,5 +91,217 @@ describe("fitToolContext", () => {
       { messages: [{ role: "system", content: "instructions" }] },
       { budget: budget(1), protection: { getState: () => "state" } },
     )).toThrow(ContextBudgetError);
+  });
+
+  it("archives generated prose under stable canonical keys without mutating history", () => {
+    const draft = "latest draft ".repeat(3_000);
+    const repair = "repair the unfinished analysis " + "r".repeat(10_000);
+    const page = JSON.stringify({
+      source_offset: 500,
+      next_offset: 6_000,
+      content: "NEWEST PAGE\n" + "e".repeat(5_400) + "\nEND PAGE",
+    });
+    const request = {
+      tools: [{
+        type: "function",
+        function: {
+          name: "read_reproduction_context",
+          description: "schema ".repeat(500),
+          parameters: { type: "object" },
+        },
+      }],
+      messages: [
+        { role: "system", content: "fixed ".repeat(1_100) },
+        { role: "user", content: "immutable initial instructions " + "i".repeat(1_000) },
+        { role: "assistant", content: draft },
+        { role: "user", content: repair },
+        { role: "assistant", content: "", tool_calls: [{ id: "read-1", type: "function", function: { name: "read_reproduction_context", arguments: "{}" } }] },
+        { role: "tool", tool_call_id: "read-1", content: page },
+      ],
+    };
+    const archive = new Map<string, string>();
+    const seenBounds: number[] = [];
+    const protection = {
+      getState: (maxBytes = 2_500) => {
+        seenBounds.push(maxBytes);
+        return "s".repeat(Math.max(0, maxBytes - 2));
+      },
+      archiveContext: (key: string, text: string) => {
+        const existing = archive.get(key);
+        if (existing !== undefined && existing !== text) throw new Error("archive changed");
+        archive.set(key, text);
+        return `[Archived ${key}; use read_reproduction_context.]`;
+      },
+    };
+
+    const first = fitToolContext(request, { budget: budget(23_744), protection });
+    const second = fitToolContext(request, { budget: budget(23_744), protection });
+    expect(request.messages[2].content).toBe(draft);
+    expect(request.messages[3].content).toBe(repair);
+    expect(archive.get("assistant-2")).toBe(draft);
+    expect(archive.get("user-3")).toBe(repair);
+    expect(archive.size).toBe(2);
+    expect(seenBounds).toContain(2_500);
+    for (const fitted of [first, second]) {
+      expect(fitted.messages.find((message: any) => message.tool_call_id === "read-1")?.content).toBe(page);
+      const ids = fitted.messages.filter((message: any) => message.role === "tool")
+        .map((message: any) => message.tool_call_id);
+      const declared = fitted.messages.flatMap((message: any) => message.tool_calls ?? [])
+        .map((call: any) => call.id);
+      expect(ids.every((id: string) => declared.includes(id))).toBe(true);
+    }
+  });
+
+  it("does not archive the latest forced-final STOP control", () => {
+    const archived: string[] = [];
+    const stop = "STOP: do not call tools; write the final logbook.";
+    const fitted = fitToolContext({
+      messages: [
+        { role: "system", content: "x".repeat(500) },
+        { role: "user", content: "initial" },
+        { role: "assistant", content: "draft ".repeat(500) },
+        { role: "user", content: stop },
+      ],
+    }, {
+      budget: budget(1_500),
+      protection: {
+        getState: () => "state",
+        archiveContext: (key, text) => {
+          archived.push(key);
+          return `[Archived ${key}: ${text.length}]`;
+        },
+      },
+    });
+    expect(archived).toContain("assistant-2");
+    expect(archived).not.toContain("user-3");
+    expect(fitted.messages.some((message: any) => message.content === stop)).toBe(true);
+    expect((fitted as any).tools).toBeUndefined();
+  });
+
+  it("fails explicitly rather than corrupting an irreducible newest context page", () => {
+    const page = JSON.stringify({
+      source_offset: 500,
+      next_offset: 2_500,
+      content: "λ".repeat(2_000),
+    });
+    const request = {
+      tools: [{ type: "function", function: { name: "read_reproduction_context", parameters: {} } }],
+      messages: [
+        { role: "system", content: "fixed" },
+        { role: "user", content: "initial" },
+        { role: "assistant", content: "", tool_calls: [{ id: "context-1", type: "function", function: { name: "read_reproduction_context", arguments: JSON.stringify({ key: "assistant-2", offset: 500 }) } }] },
+        { role: "tool", tool_call_id: "context-1", content: page },
+      ],
+    };
+    expect(() => fitToolContext(request, {
+      budget: budget(1_500),
+      protection: {
+        getState: maxBytes => "s".repeat(Math.min(100, maxBytes ?? 100)),
+        archiveContext: key => `[Archived ${key}]`,
+      },
+    })).toThrow(/newest retrieval page is irreducible/);
+    expect(request.messages[3].content).toBe(page);
+    expect(JSON.parse(request.messages[3].content).source_offset).toBe(500);
+  });
+
+  it("uses the opt-in retrieval resizer with canonical source arguments and valid paging JSON", () => {
+    const prefix = "[Tool call #9]\n";
+    const fullPage = JSON.stringify({
+      source_offset: 500,
+      next_offset: 6_500,
+      content: "z".repeat(6_000),
+    });
+    const canonicalArgs = JSON.stringify({ key: "assistant-2", offset: 500, max_chars: 6_000 });
+    const seen: Array<{ name: string; args: Record<string, unknown>; original: string; maxBytes: number }> = [];
+    const request = {
+      tools: [{ type: "function", function: { name: "read_reproduction_context", parameters: {} } }],
+      messages: [
+        { role: "system", content: "fixed ".repeat(150) },
+        { role: "user", content: "initial" },
+        { role: "assistant", content: "", tool_calls: [{ id: "context-9", type: "function", function: { name: "read_reproduction_context", arguments: canonicalArgs } }] },
+        { role: "tool", tool_call_id: "context-9", content: prefix + fullPage },
+      ],
+    };
+    const fitted = fitToolContext(request, {
+      budget: budget(5_000),
+      protection: {
+        getState: () => "state",
+        archiveContext: key => `[Archived ${key}]`,
+        resizeRetrieval: (name, args, original, maxBytes) => {
+          seen.push({ name, args, original, maxBytes });
+          const parsed = JSON.parse(original);
+          const length = Math.max(1, maxBytes - 120);
+          return JSON.stringify({
+            source_offset: parsed.source_offset,
+            next_offset: parsed.source_offset + length,
+            content: parsed.content.slice(0, length),
+          });
+        },
+      },
+    });
+    const result = fitted.messages.find((message: any) => message.tool_call_id === "context-9").content;
+    expect(result.match(/\[Tool call #9\]/g)).toHaveLength(1);
+    const resized = JSON.parse(result.slice(prefix.length));
+    expect(resized.source_offset).toBe(500);
+    expect(resized.next_offset).toBe(500 + resized.content.length);
+    expect(seen[0]).toMatchObject({
+      name: "read_reproduction_context",
+      args: { key: "assistant-2", offset: 500, max_chars: 6_000 },
+      original: fullPage,
+      maxBytes: 4_000,
+    });
+    expect(request.messages[2].tool_calls[0].function.arguments).toBe(canonicalArgs);
+    expect(request.messages[3].content).toBe(prefix + fullPage);
+  });
+
+  it("evicts nonprotected call/result members from a multi-call retrieval group", () => {
+    const ordinaryCalls = Array.from({ length: 20 }, (_, index) => ({
+      id: `ordinary-${index}`,
+      type: "function",
+      function: { name: "run_command", arguments: JSON.stringify({ command: `echo ${index}` }) },
+    }));
+    const latestCall = {
+      id: "latest-context",
+      type: "function",
+      function: { name: "read_reproduction_context", arguments: JSON.stringify({ offset: 500 }) },
+    };
+    const request = {
+      tools: [
+        { type: "function", function: { name: "run_command", parameters: {} } },
+        { type: "function", function: { name: "read_reproduction_context", parameters: {} } },
+      ],
+      messages: [
+        { role: "system", content: "fixed" },
+        { role: "user", content: "initial" },
+        { role: "assistant", content: "", tool_calls: [...ordinaryCalls, latestCall] },
+        ...ordinaryCalls.map(call => ({
+          role: "tool",
+          tool_call_id: call.id,
+          content: "old result ".repeat(300),
+        })),
+        {
+          role: "tool",
+          tool_call_id: latestCall.id,
+          content: JSON.stringify({ source_offset: 500, next_offset: 1_500, content: "n".repeat(1_000) }),
+        },
+      ],
+    };
+    const fitted = fitToolContext(request, {
+      budget: budget(3_500),
+      protection: {
+        getState: () => "state",
+        archiveContext: key => `[Archived ${key}]`,
+      },
+    });
+    const declaration = fitted.messages.find((message: any) =>
+      message.role === "assistant" && message.tool_calls?.some((call: any) => call.id === "latest-context"));
+    expect(declaration.tool_calls.map((call: any) => call.id)).toEqual(["latest-context"]);
+    expect(fitted.messages.find((message: any) => message.tool_call_id === "latest-context")).toBeTruthy();
+    const resultIds = fitted.messages.filter((message: any) => message.role === "tool")
+      .map((message: any) => message.tool_call_id);
+    const declaredIds = fitted.messages.flatMap((message: any) => message.tool_calls ?? [])
+      .map((call: any) => call.id);
+    expect(resultIds.every((id: string) => declaredIds.includes(id))).toBe(true);
+    expect(request.messages[2].tool_calls).toHaveLength(21);
   });
 });

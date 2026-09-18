@@ -1,8 +1,17 @@
 import type { ModelProviderConfig } from "./model-service";
 import { ContextBudgetError, RequestContextBudget } from "./llm-context";
+import { describeToolContext } from "./context-diagnostics";
+export { describeToolContext } from "./context-diagnostics";
 
 export interface ToolContextProtection {
-  getState: () => string;
+  getState: (maxBytes?: number) => string;
+  archiveContext?: (key: string, text: string) => string;
+  resizeRetrieval?: (
+    name: string,
+    args: Record<string, unknown>,
+    originalResult: string,
+    maxBytes: number,
+  ) => string | undefined;
   compactUserMessage?: string;
   onDiagnostic?: (message: string) => Promise<void> | void;
 }
@@ -18,6 +27,9 @@ const OLD_OUTPUT_NOTE =
   "[Earlier output elided. Use read_tool_result with the original tool call ID; do not rerun the experiment to retrieve it.]";
 const OLD_ARGUMENTS_NOTE =
   "[old command arguments omitted; use read_file on the existing file and read_tool_result for evidence]";
+export const RUNTIME_CONTEXT_HEADROOM = 10_000;
+const DEFAULT_STATE_BYTES = 2_500;
+const MINIMUM_STATE_BYTES = 600;
 
 type Message = Record<string, any>;
 
@@ -59,7 +71,8 @@ function isRetrievalResult(messages: Message[], index: number): boolean {
   const assistant = toolCallForResult(messages, index);
   if (!assistant) return false;
   return assistant.tool_calls.some((call: any) =>
-    call?.id === toolId(messages[index]) && /read_tool_result/i.test(String(call?.function?.name ?? "")));
+    call?.id === toolId(messages[index])
+      && /read_(?:tool_result|reproduction_context)/i.test(String(call?.function?.name ?? "")));
 }
 
 function oldOutput(message: Message, note: string): string {
@@ -73,10 +86,14 @@ function shortenedOutput(message: Message, content: string, maxChars = 700): str
   const prefix = typeof message.content === "string"
     ? message.content.match(/^\[Tool call #\d+\]\n/)?.[0] ?? ""
     : "";
-  const note = "\n[output shortened; use read_tool_result with the original tool call ID for the remaining evidence]\n";
+  const note =
+    "\n[output shortened with a middle omission; repeat the original retrieval tool call arguments with a smaller max_chars to obtain a genuine page]\n";
   const available = Math.max(0, maxChars - prefix.length - note.length);
-  const head = content.slice(0, Math.ceil(available * 0.65));
-  const tail = content.slice(-Math.floor(available * 0.35));
+  const headLength = Math.ceil(available * 0.65);
+  const tailLength = Math.floor(available * 0.35);
+  const head = headLength > 0 ? content.slice(0, headLength) : "";
+  // slice(-0) means slice(0), which used to restore the complete output.
+  const tail = tailLength > 0 ? content.slice(-tailLength) : "";
   return `${prefix}${head}${note}${tail}`;
 }
 
@@ -107,7 +124,7 @@ function compactToolOutputs(
     const message = messages[index];
     const original = typeof message.content === "string" ? message.content : "";
     const replacement = oldOutput(message, note);
-    if (isRetrievalResult(messages, index) && original.length > replacement.length) {
+    if (includeRetrieval && isRetrievalResult(messages, index) && original.length > replacement.length) {
       // Retrieval output is evidence, not disposable noise. Retain a bounded
       // prefix/tail and an explicit paging instruction before falling back to
       // the tiny elision note.
@@ -136,6 +153,58 @@ function compactToolOutputs(
       if (fits()) return true;
     }
   }
+  return changed;
+}
+
+function serializedBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
+}
+
+function boundedState(protection: ToolContextProtection, maxBytes: number): string {
+  let state = protection.getState(maxBytes);
+  if (typeof state !== "string") state = String(state ?? "");
+  // A bounded-state provider may have conservative accounting of its own. Only
+  // ask it for progressively smaller renderings; never byte-slice structured
+  // state, especially in the middle of a Unicode code point.
+  if (serializedBytes(state) > maxBytes && maxBytes > MINIMUM_STATE_BYTES) {
+    state = protection.getState(MINIMUM_STATE_BYTES);
+    if (typeof state !== "string") state = String(state ?? "");
+  }
+  return state;
+}
+
+function archiveGeneratedContext(
+  messages: Message[],
+  archive: (key: string, text: string) => string,
+  state: string,
+): boolean {
+  const firstUser = messages.findIndex(message => message.role === "user");
+  const latestUser = messages.reduce((found, message, index) =>
+    message.role === "user" && message.content !== state ? index : found, -1);
+  const latestIsStop = latestUser >= 0
+    && /^STOP:/i.test(String(messages[latestUser]?.content ?? "").trim());
+  let changed = false;
+
+  // Keys use canonical, pre-deletion indexes. fitToolContext always operates on
+  // a fresh clone, making them stable across retries and progressively tighter
+  // fits of the same transcript.
+  messages.forEach((message, index) => {
+    const content = typeof message.content === "string" ? message.content : "";
+    const generatedAssistant = message.role === "assistant" && content.length > 0;
+    // In a tool loop, subsequent user turns are generated repair/control
+    // messages. The sole exceptions are the explicitly appended state and the
+    // latest forced-final STOP control, both of which must remain verbatim.
+    const repair = message.role === "user"
+      && index !== firstUser
+      && content !== state
+      && !(latestIsStop && index === latestUser);
+    if (!generatedAssistant && !repair) return;
+    const notice = archive(`${message.role}-${index}`, content);
+    if (typeof notice === "string" && notice.length < content.length) {
+      message.content = notice;
+      changed = true;
+    }
+  });
   return changed;
 }
 
@@ -211,7 +280,22 @@ function removeOldestCompleteGroup(messages: Message[], protectedIds: Set<string
     const message = messages[i];
     if (message.role !== "assistant" || !hasCompletedCall(messages, i)) continue;
     const ids = callIds(message);
-    if (ids.some(id => protectedIds.has(id))) continue;
+    const removableIds = ids.filter(id => !protectedIds.has(id));
+    if (removableIds.length === 0) continue;
+    if (removableIds.length < ids.length) {
+      // A single assistant turn may declare several independent calls. Keep
+      // the protected newest retrieval declaration while removing each older
+      // declaration together with its paired result.
+      const removeResults = new Set(removableIds);
+      message.tool_calls = (message.tool_calls as any[])
+        .filter(call => !removeResults.has(String(call?.id ?? "")));
+      messages.splice(
+        0,
+        messages.length,
+        ...messages.filter(candidate => !removeResults.has(toolId(candidate) ?? "")),
+      );
+      return true;
+    }
     const remove = new Set<number>([i]);
     for (const id of ids) {
       const resultIndex = toolResultIndex(messages, id);
@@ -227,6 +311,43 @@ function removeOldestCompleteGroup(messages: Message[], protectedIds: Set<string
     return true;
   }
   return false;
+}
+
+function resizeLatestRetrieval(
+  messages: Message[],
+  resize: NonNullable<ToolContextProtection["resizeRetrieval"]>,
+  originals: Map<string, string>,
+  originalCalls: Map<string, { name: string; args: Record<string, unknown> }>,
+  fits: () => boolean,
+): boolean {
+  const protectedIds = latestRetrievalIds(messages);
+  const id = protectedIds.values().next().value as string | undefined;
+  if (!id) return false;
+  const resultIndex = messages.findIndex(message => toolId(message) === id);
+  if (resultIndex < 0) return false;
+  const originalCall = originalCalls.get(id);
+  if (!originalCall) return false;
+  const { name, args } = originalCall;
+  if (!name) return false;
+
+  const original = originals.get(id) ?? String(messages[resultIndex].content ?? "");
+  const prefix = original.match(/^\[Tool call #\d+\]\n/)?.[0] ?? "";
+  const originalBody = prefix ? original.slice(prefix.length) : original;
+  let previousBytes = serializedBytes(messages[resultIndex].content);
+  let changed = false;
+  for (const maxBytes of [4_000, 2_500, 1_500, 800, 400]) {
+    const resized = resize(name, clone(args), originalBody, maxBytes);
+    if (typeof resized !== "string") continue;
+    const returnedBody = resized.replace(/^\[Tool call #\d+\]\n/, "");
+    const candidate = `${prefix}${returnedBody}`;
+    const candidateBytes = serializedBytes(candidate);
+    if (candidateBytes >= previousBytes) continue;
+    messages[resultIndex].content = candidate;
+    previousBytes = candidateBytes;
+    changed = true;
+    if (fits()) return true;
+  }
+  return changed;
 }
 
 function latestRetrievalIds(messages: Message[]): Set<string> {
@@ -247,13 +368,16 @@ function restoreRetrievalDetail(
   originals.forEach((original, id) => {
     const index = messages.findIndex(message => toolId(message) === id);
     if (index < 0 || !isRetrievalResult(messages, index)) return;
-    let best = String(messages[index].content ?? "");
+    const compact = String(messages[index].content ?? "");
+    messages[index].content = original;
+    if (fits()) return;
+    messages[index].content = compact;
     for (const maxChars of [700, 520, 360, 240, 160, 110]) {
       const candidate = shortenedOutput(messages[index], original, maxChars);
       messages[index].content = candidate;
-      if (fits()) best = candidate;
-      else messages[index].content = best;
+      if (fits()) return;
     }
+    messages[index].content = compact;
   });
 }
 
@@ -274,22 +398,41 @@ export function fitToolContext<T extends Record<string, any>>(
 ): T {
   const fitted = clone(request);
   const messages = Array.isArray(fitted.messages) ? fitted.messages as Message[] : [];
-  const state = options.protection.getState();
+  let state = boundedState(options.protection, DEFAULT_STATE_BYTES);
   ensureStateMessage(messages, state);
   const retrievalOriginals = new Map<string, string>();
+  const retrievalCalls = new Map<string, { name: string; args: Record<string, unknown> }>();
   messages.forEach((message, index) => {
     const id = toolId(message);
     if (id && isRetrievalResult(messages, index) && typeof message.content === "string") {
       retrievalOriginals.set(id, message.content);
+      const assistant = toolCallForResult(messages, index);
+      const call = assistant?.tool_calls?.find((candidate: any) => candidate?.id === id);
+      try {
+        const parsed = JSON.parse(String(call?.function?.arguments ?? "{}"));
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          retrievalCalls.set(id, {
+            name: String(call?.function?.name ?? ""),
+            args: parsed as Record<string, unknown>,
+          });
+        }
+      } catch {
+        // A malformed canonical call cannot be safely regenerated.
+      }
     }
   });
 
   const fits = () => options.budget.fits(fitted);
   if (fits()) return fitted;
 
-  // The initial user payload is the only user message that may be replaced.
-  // System instructions and the exact state message are intentionally never
-  // elided.
+  if (options.protection.archiveContext) {
+    archiveGeneratedContext(messages, options.protection.archiveContext, state);
+    if (fits()) return fitted;
+  }
+
+  // Only an explicitly supplied compact replacement may replace the initial
+  // payload. Reproduction's initial paper/material preview is generated;
+  // scientific/custom instructions live in the immutable system message.
   if (options.protection.compactUserMessage !== undefined) {
     const initialUser = messages.find(message => message.role === "user");
     if (initialUser && initialUser.content !== state) {
@@ -307,7 +450,7 @@ export function fitToolContext<T extends Record<string, any>>(
     // Remove old repair scaffolding before sacrificing current evidence.
   }
   if (fits()) return fitted;
-  compactToolOutputs(messages, note, fits);
+  compactToolOutputs(messages, note, fits, 8, false);
   if (fits()) return fitted;
 
   while (!fits()) {
@@ -315,18 +458,61 @@ export function fitToolContext<T extends Record<string, any>>(
     if (!removeOldestCompleteGroup(messages, latestRetrievalIds(messages))) break;
   }
   if (fits()) return fitted;
-  compactToolOutputs(messages, note, fits, 8, true);
+
+  // State is generated for this request and has an explicit bounded rendering
+  // contract. Spend its final reduction only after historical groups/prose.
+  const smallerState = boundedState(options.protection, MINIMUM_STATE_BYTES);
+  if (smallerState !== state) {
+    const stateIndex = messages.map((message, index) =>
+      message.role === "user" && message.content === state ? index : -1)
+      .filter(index => index >= 0).at(-1) ?? -1;
+    if (stateIndex >= 0) messages[stateIndex].content = smallerState;
+    else ensureStateMessage(messages, smallerState);
+    state = smallerState;
+    if (fits()) return fitted;
+  }
+
+  if (
+    options.protection.archiveContext
+    && options.protection.resizeRetrieval
+    && resizeLatestRetrieval(
+      messages,
+      options.protection.resizeRetrieval,
+      retrievalOriginals,
+      retrievalCalls,
+      fits,
+    )
+    && fits()
+  ) {
+    return fitted;
+  }
+
+  // Archive-enabled reproduction retrieval pages have structured paging
+  // metadata and may start at a non-zero source offset. Never manufacture a
+  // page by slicing their serialized wrapper. Legacy generic callers retain
+  // the historical bounded evidence fallback with an honest omission note.
+  compactToolOutputs(messages, note, fits, 8, !options.protection.archiveContext);
   if (fits()) return fitted;
   while (!fits()) {
     if (removeOldestCompleteGroup(messages, latestRetrievalIds(messages))) continue;
     break;
   }
-  restoreRetrievalDetail(messages, retrievalOriginals, fits);
+  if (!options.protection.archiveContext) {
+    restoreRetrievalDetail(messages, retrievalOriginals, fits);
+  }
+  if (fits()) return fitted;
 
-  // assertFits gives callers the shared, structured budget error rather than
-  // silently dropping system instructions or the latest state.
-  options.budget.assertFits(fitted);
-  throw new ContextBudgetError("Tool-loop request exceeds its irreducible context budget.");
+  const stateSize = serializedBytes(state);
+  const latestRetrieval = latestRetrievalIds(messages).size > 0;
+  const cause = options.protection.archiveContext && latestRetrieval
+    ? "the newest retrieval page is irreducible and was preserved intact"
+    : stateSize > MINIMUM_STATE_BYTES
+      ? "generated-state remains larger than its requested bound"
+      : "fixed input (instructions and tool schemas) plus irreducible generated-state exceeds the limit";
+  throw new ContextBudgetError(
+    `Tool-loop request exceeds its irreducible context budget: ${cause}; `
+    + `${options.budget.diagnostic(fitted)}; staged_sizes=${describeToolContext(fitted, state)}`,
+  );
 }
 
 export function isToolContextBudgetError(error: unknown): error is ContextBudgetError {
