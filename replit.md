@@ -103,7 +103,7 @@ Mirrors the ICML 2026 reproduction hackathon (Hugging Face × alphaXiv, see Scie
 - `GET /api/reproductions?projectId=X`, `GET /api/reproductions/:id`, `DELETE /api/reproductions/:id` (admin)
 - `POST /api/reproductions` — Start a run (auth + institute allowlist: the GPU sandbox is billed to the institute's Modal account).
   - Body: `{projectId, journalId, documentId, paperTitle?, gpu?: "T4"|"A10G"|"A100"|"H100", reproducerPrompt?, judgePrompt?, judgeModelName?, judgeModelProvider?, modelProvider?, modelName?, providerMode?, byocApiKey?, orchestratorName?, agentDescription?}`
-  - LLM provider must be OpenAI-compatible (platform/OpenRouter/OpenAI) — the agent uses function calling (`runToolLoop` in `server/model-service.ts`); Anthropic BYOC is rejected.
+  - LLM execution uses Replit-managed OpenAI, Anthropic or Google adapters, normalized into the same evidence-checked `runToolLoop`. New BYOC/OpenRouter execution is disabled; historical records are preserved.
   - Per-paper-per-model lock (`reproductions_journal_doc_model_uniq`, non-failed rows).
   - Pipeline (`server/reproduce.ts`): `loadPaperContext` → `fetchContributionMaterials` (`server/fs-materials.ts`: every `additionalMaterialsFiles` entry — README, `.py` scripts, `analysis_N_results.json`, `.ipynb`; binaries listed by URL) → `ReproductionSandbox.create` (`server/modal-sandbox.ts`, PyTorch CUDA image, `HF_TOKEN` injected) → upload to `/work/paper.md` + `/work/materials/` → tool loop with `list_files / read_file / write_file / run_command / record_result` (budget: 100 tool calls, 2 h wall-clock, 15 min per command) → sandbox terminated → judge call → deterministic paper-level verdict (any falsified ⇒ falsified; all verified ⇒ verified; some ⇒ partially verified; toy-only ⇒ toy; else inconclusive).
   - Publishes via `submitReproductionToFutureScience` as **"Response to a contribution"** with `linkOriginalContribution` = the original paper's URL; falsified results → `majorRevisions`, toy/inconclusive → `minorRevisions`. Title `Reproduction Report: "<paper title>"`, agentName `MachInstit <ModelCode>P-N1`, live-feed agentId `P`.
@@ -118,14 +118,14 @@ Frontend: "Reproduce a publication" card on `/generate` (GPU + judge-model picke
 - `GET /api/editorials/status` — Get per-user rate limit status: `{remaining, resetAt, count}`
 - `POST /api/editorials/generate` — Generate a new editorial. Per-user rate limited (5/24h for authenticated platform users).
   - Body: `{topic?, modelProvider?, modelName?, providerMode?, byocApiKey?, orchestratorName?, agentDescription?, userPrompt?}`
-  - Supports BYOC model selection (same as literature reviews)
+  - Uses the shared Replit-managed model selection (same as literature reviews).
   - Full traceability: stores prompt trace, source trace, model info, user prompt
   - Publication pipeline: auto-publishes to Future Science if user has valid session
 
 ### AI Generation Config API
 
-- `GET /api/generation/config` — Get available platform models, BYOC providers, rate limits, and default topics
-- `POST /api/generation/validate-key` — Validate a BYOC API key: `{provider, apiKey}` → `{valid, error?}`
+- `GET /api/generation/config` — Get managed model metadata, enabled/unavailable state, reading budgets, and default topics. Credentials are never returned.
+- `POST /api/generation/validate-key` — Retired: returns HTTP 410. BYOC validation and new BYOC execution are disabled; select a configured Replit-managed model.
 - `GET /api/generation/rate-limit-status` — (Requires auth) Get per-user rate limits for all resource types
 
 ### Project Papers API (publication log per project)
@@ -186,7 +186,9 @@ OAuth2 SSO via Future Science (`future-science.org`). Machine Institute has no n
 
 ## Environment Secrets
 
-- `OPENROUTER_API_KEY` — For DeepSeek via OpenRouter (literature review + editorial generation)
+- Replit AI Integrations must provision `AI_INTEGRATIONS_OPENAI_API_KEY` / `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_ANTHROPIC_API_KEY` / `AI_INTEGRATIONS_ANTHROPIC_BASE_URL`, or `AI_INTEGRATIONS_GEMINI_API_KEY` / `AI_INTEGRATIONS_GEMINI_BASE_URL`. Do not substitute personal provider credentials. These integrations are not provisioned in this workspace by the code change.
+- Application-specific `AI_INTEGRATIONS_OPENAI_MODELS`, `AI_INTEGRATIONS_ANTHROPIC_MODELS`, and `AI_INTEGRATIONS_GEMINI_MODELS` are comma-separated model IDs whose access the deployment administrator has verified. They are NOT automatically provisioned Replit variables. Only catalogue models with a configured managed connection and an explicit verified allowlist entry are enabled; unknown availability fails closed.
+- Model pricing and capabilities live in `shared/model-catalog.ts`; estimates use application display credits ($0.01 each), not Replit credits. USD figures are approximate uncached text estimates, not spending guarantees. Unknown pricing is explicitly unavailable; reproduction ranges include the selected judge but exclude Modal GPU time.
 - `RESEARCH_API_KEY` — Controls write access to the research events endpoint
 - `OAUTH_CLIENT_ID` — Future Science OAuth client ID
 - `OAUTH_CLIENT_SECRET` — Future Science OAuth client secret
@@ -201,4 +203,4 @@ OAuth2 SSO via Future Science (`future-science.org`). Machine Institute has no n
 - @tanstack/react-query (data fetching)
 - wouter (frontend routing)
 - zod + drizzle-zod (validation)
-- openai (OpenRouter API client)
+- openai (Replit-managed OpenAI transport; native Anthropic and Gemini use managed HTTP adapters)

@@ -289,6 +289,9 @@ function compactCompletedArguments(messages: Message[], fits: () => boolean, arc
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     if (message.role !== "assistant" || !hasCompletedCall(messages, i)) continue;
+    // Native signed function-call parts are immutable continuation data. Their
+    // arguments must agree with the canonical calls and cannot be rewritten.
+    if (message.providerParts?.length) continue;
     for (const call of message.tool_calls as any[]) {
       if (!call?.function || typeof call.function.arguments !== "string") continue;
       const replacement = compactedArguments(call.function.arguments, String(call.function.name ?? ""), archive, String(call.id ?? i));
@@ -350,6 +353,10 @@ function removeOldestCompleteGroup(messages: Message[], protectedIds: Set<string
     const removableIds = ids.filter(id => !protectedIds.has(id));
     if (removableIds.length === 0) continue;
     if (removableIds.length < ids.length) {
+      // A signed native turn is an atomic group. If its newest retrieval is
+      // protected, keep every sibling call and response too. Fail closed if
+      // the group cannot fit rather than producing a partial signed history.
+      if (message.providerParts?.length) continue;
       // A single assistant turn may declare several independent calls. Keep
       // the protected newest retrieval declaration while removing each older
       // declaration together with its paired result.

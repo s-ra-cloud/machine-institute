@@ -22,12 +22,14 @@ function assistantFinal(content: string) {
   return { choices: [{ message: { content, tool_calls: [] } }] };
 }
 
-const platform = { providerMode: "platform" as const, provider: "openrouter", modelName: "test/model" };
+const platform = { providerMode: "platform" as const, provider: "openai", modelName: "gpt-4o" };
 
 describe("runToolLoop", () => {
   beforeEach(() => {
     createMock.mockReset();
-    process.env.OPENROUTER_API_KEY = "test-key";
+    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
+    process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
   });
 
   it("executes tool calls and returns the final assistant message", async () => {
@@ -90,11 +92,11 @@ describe("runToolLoop", () => {
     expect(result.toolCalls[0].result).toContain("kaboom");
   });
 
-  it("rejects Anthropic BYOC, which has no OpenAI-compatible tool calling here", async () => {
+  it("rejects legacy Anthropic BYOC rather than silently switching to managed billing", async () => {
     await expect(runToolLoop(
       { providerMode: "byoc", provider: "anthropic", modelName: "claude", apiKey: "k" },
       "sys", "user", tools, async () => "", { maxToolCalls: 1, deadlineMs: Date.now() + 1000 },
-    )).rejects.toThrow(/OpenAI-compatible/);
+    )).rejects.toThrow(/Replit-managed/);
     expect(createMock).not.toHaveBeenCalled();
   });
 });

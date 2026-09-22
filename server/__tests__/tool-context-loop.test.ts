@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../shared/model-catalog", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../shared/model-catalog")>();
+  return { ...actual, MANAGED_MODELS: actual.MANAGED_MODELS.map(m => ({ ...m, contextWindow: 32768 })) };
+});
 
 const createMock = vi.hoisted(() => vi.fn());
 vi.mock("openai", () => ({
@@ -17,8 +21,8 @@ import { ReproductionSession } from "../reproduction-session";
 
 const config = {
   providerMode: "platform" as const,
-  provider: "openrouter",
-  modelName: "deepinfra/meta-llama/Llama-3.1-8B-Instruct",
+  provider: "openai",
+  modelName: "gpt-4o",
 };
 const call = {
   id: "call-1",
@@ -29,7 +33,12 @@ const call = {
 describe("tool-loop context protection", () => {
   beforeEach(() => {
     createMock.mockReset();
-    process.env.OPENROUTER_API_KEY = "test-key";
+    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
+    process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
+    process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY = "test-key";
+    process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL = "https://managed.example.test";
+    process.env.AI_INTEGRATIONS_ANTHROPIC_MODELS = "claude-sonnet-4-6";
   });
 
   it("retries a context rejection in place without rerunning the tool", async () => {
@@ -120,7 +129,7 @@ describe("tool-loop context protection", () => {
       thrown = error;
     }
     expect(thrown).not.toBe(original);
-    expect((thrown as Error).message).toBe("LLM context request failed (503)");
+    expect((thrown as Error).message).toBe("LLM request failed (503). Retry later or ask an administrator to check the managed integration.");
     expect((thrown as Error).message).not.toContain("service unavailable");
     expect(createMock).toHaveBeenCalledTimes(1);
   });
@@ -223,7 +232,7 @@ describe("tool-loop context protection", () => {
     let thrown: unknown;
     try {
       await generateWithConfig(
-        { providerMode: "byoc", provider: "anthropic", modelName: "claude-sonnet-4-20250514", apiKey: "test" },
+        { providerMode: "platform", provider: "anthropic", modelName: "claude-sonnet-4-6" },
         "system",
         "PRIVATE_USER_PROMPT",
         { contextRequest: true, timeoutMs: 50 },
@@ -328,7 +337,7 @@ describe("tool-loop context protection", () => {
       providerCode: "payment_required", model: "model",
     });
     expect(sanitized.message).not.toContain("PRIVATE");
-    expect(sanitized.message).toContain("application OpenRouter account");
+    expect(sanitized.message).toContain("Replit-managed model request");
     expect(sanitizeContextRequestError(
       { status: 402 }, "model", { providerMode: "byoc" },
     ).message).toContain("Your model provider account");

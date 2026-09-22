@@ -12,6 +12,15 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { randomUUID } from "crypto";
 
+// These tests isolate reservation/concurrency behavior; managed availability is
+// covered separately by the route guard tests without any paid provider calls.
+vi.mock("../managed-models", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../managed-models")>(),
+  resolveManagedSelection: (config: any) => ({
+    providerMode: "platform", provider: "openai", modelName: config.modelName,
+  }),
+}));
+
 // ---------------------------------------------------------------------------
 // In-memory fake of the peer_reviews table with the partial unique index.
 // ---------------------------------------------------------------------------

@@ -168,7 +168,12 @@ function post(path: string, body: any) {
 }
 
 beforeAll(async () => {
-  process.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "test-key";
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
+  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
+  process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-5";
+  process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY = "test-key";
+  process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL = "https://managed.example.test";
+  process.env.AI_INTEGRATIONS_ANTHROPIC_MODELS = "claude-sonnet-4-5";
   process.env.FUTURE_SCIENCE_API_KEY = process.env.FUTURE_SCIENCE_API_KEY || "test-fs-key";
   const express = (await import("express")).default;
   const { createServer } = await import("http");

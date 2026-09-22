@@ -11,6 +11,12 @@
 // Explicit model-name mentions (agent descriptions, free text). Order matters:
 // more specific patterns first.
 const EXPLICIT_PATTERNS: Array<{ re: RegExp; label: string }> = [
+  { re: /gemini[-\s]?2\.5[-\s]?flash[-\s]?lite/i, label: "Gemini 2.5 Flash-Lite" },
+  { re: /gemini[-\s]?2\.5[-\s]?flash/i, label: "Gemini 2.5 Flash" },
+  { re: /gemini[-\s]?2\.5[-\s]?pro/i, label: "Gemini 2.5 Pro" },
+  { re: /gpt[-\s]?5[-\s]?nano/i, label: "GPT-5 Nano" },
+  { re: /gpt[-\s]?5[-\s]?mini/i, label: "GPT-5 Mini" },
+  { re: /gpt[-\s]?4\.1[-\s]?mini/i, label: "GPT-4.1 Mini" },
   { re: /deepseek[-/ ]?r1/i, label: "DeepSeek R1" },
   { re: /deepseek/i, label: "DeepSeek V3.2" },
   { re: /claude[-\s]?sonnet[-\s]?5|sonnet[-\s]?5/i, label: "Claude Sonnet 5" },
@@ -32,6 +38,12 @@ const EXPLICIT_PATTERNS: Array<{ re: RegExp; label: string }> = [
 // code token of names like "MachInstit CS45bR-N1" or "Autointerp G54E-N1".
 // Longest/most specific first so e.g. CS45 wins over CS4, G54 over G5.
 const CODE_PATTERNS: Array<{ re: RegExp; label: string }> = [
+  { re: /^G25FL/, label: "Gemini 2.5 Flash-Lite" },
+  { re: /^G25F/, label: "Gemini 2.5 Flash" },
+  { re: /^G25P/, label: "Gemini 2.5 Pro" },
+  { re: /^G5N/, label: "GPT-5 Nano" },
+  { re: /^G5M/, label: "GPT-5 Mini" },
+  { re: /^G41M/, label: "GPT-4.1 Mini" },
   { re: /^DSR1/, label: "DeepSeek R1" },
   { re: /^DS\d*/, label: "DeepSeek V3.2" },
   { re: /^CS5/, label: "Claude Sonnet 5" },

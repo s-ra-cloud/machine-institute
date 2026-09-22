@@ -34,8 +34,8 @@ import type { ModelProviderConfig } from "../model-service";
 
 const config: ModelProviderConfig = {
   providerMode: "platform",
-  provider: "openrouter",
-  modelName: "deepseek/deepseek-chat",
+  provider: "openai",
+  modelName: "gpt-4o",
 };
 
 const logbook = [
@@ -51,6 +51,7 @@ const logbook = [
 
 const completion = (content: string | null, toolCalls?: unknown[]) => ({
   choices: [{
+    finish_reason: toolCalls ? "tool_calls" : "stop",
     message: {
       content,
       ...(toolCalls ? { tool_calls: toolCalls } : {}),
@@ -204,7 +205,9 @@ beforeEach(() => {
   createSandbox.mockReset();
   loadPaperContext.mockReset();
   fetchContributionMaterials.mockReset();
-  process.env.OPENROUTER_API_KEY = "test-key";
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
+  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
+  process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
   setupContext();
 });
 

@@ -1,4 +1,5 @@
 import type { ModelProviderConfig } from "./model-service";
+import { MANAGED_MODELS } from "../shared/model-catalog";
 
 // Routed endpoints may expose a smaller serving window than the advertised
 // model. Keep this separate from literature-review/model capability metadata.
@@ -58,9 +59,9 @@ export class ProviderPaymentError extends Error {
     super(providerMode === "platform"
       ? transient
         ? delayed
-          ? "The application OpenRouter account is temporarily at its in-flight spending limit. OpenRouter requested a longer retry delay; retry later."
-          : "The application OpenRouter account is temporarily at its in-flight spending limit. Retry shortly."
-        : "The application OpenRouter account cannot cover this request. An administrator must check OpenRouter credits or API key spending caps, then retry."
+          ? "The model provider temporarily reached its in-flight spending limit and requested a longer retry delay; retry later."
+          : "The model provider temporarily reached its in-flight spending limit. Retry shortly."
+        : "The Replit-managed model request could not be funded. An administrator must check this deployment's Replit AI usage and spending limits before retrying."
       : transient
         ? delayed
           ? "The model provider account is temporarily at its in-flight spending limit. The provider requested a longer retry delay; retry later."
@@ -108,6 +109,10 @@ export function providerPaymentReason(error: unknown): "payment_required" | "pro
   if (error instanceof ProviderPaymentError) return error.providerCode;
   const status = explicitHttpStatus(error);
   if (status === 402) return "payment_required";
+  // OpenAI uses HTTP 429 both for transient rate limits and a separately named
+  // exhausted paid quota. Only that exact machine code denotes funding.
+  const value = error && typeof error === "object" ? error as Record<string, any> : {};
+  if (status === 429 && [value.code, value.error?.code, value.error?.type].includes("insufficient_quota")) return "provider_credit";
   if (status !== undefined) return undefined;
   if (nestedPaymentCode(error)) return "payment_required";
   return /\b(?:insufficient|not enough|more)\s+(?:provider\s+)?credits?\b|\bcan only afford\b|\brequires? more credits?\b/i.test(errorText(error))
@@ -295,7 +300,8 @@ export class RequestContextBudget {
     advertisedWindow = CONSERVATIVE_CONTEXT_LIMIT,
     protectedInputFloor = 0,
   ) {
-    const knownDirect = config.providerMode === "byoc" && (
+    const knownManaged = config.providerMode === "platform" && MANAGED_MODELS.some(m => m.provider === config.provider && m.model === config.modelName);
+    const knownDirect = knownManaged || config.providerMode === "byoc" && (
       (config.provider === "openai" && /^(?:openai\/)?gpt-(?:4o|5)(?:-|$)/.test(config.modelName))
       || (config.provider === "anthropic" && /^claude-(?:sonnet|opus|haiku)-/.test(config.modelName))
     );

@@ -1,4 +1,5 @@
-import OpenAI from "openai";
+import { MANAGED_MODELS } from "../shared/model-catalog";
+import { createManagedChatClient, type ManagedChatClient } from "./managed-adapter";
 import {
   ContextBudgetError,
   MAX_CONTEXT_RETRIES,
@@ -32,15 +33,7 @@ export interface GenerationResult {
 
 // `contextWindow` is the model's real total token window; the reading-budget helper
 // below uses it to decide how many papers a literature review can read in full.
-export const PLATFORM_MODELS = [
-  { provider: "openrouter", model: "deepseek/deepseek-chat", label: "DeepSeek Chat (via OpenRouter)", credits: 1, default: true, contextWindow: 64000 },
-  { provider: "openrouter", model: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4 (via OpenRouter)", credits: 5, contextWindow: 200000 },
-  { provider: "openrouter", model: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5 (via OpenRouter)", credits: 9, contextWindow: 200000 },
-  { provider: "openrouter", model: "openai/gpt-4o", label: "GPT-4o (via OpenRouter)", credits: 5, contextWindow: 128000 },
-  { provider: "openrouter", model: "openai/gpt-5", label: "GPT-5 (via OpenRouter)", credits: 10, contextWindow: 400000 },
-  { provider: "openrouter", model: "openai/gpt-5.6-luna", label: "GPT-5.6 Luna (via OpenRouter)", credits: 12, contextWindow: 1000000 },
-  { provider: "openrouter", model: "anthropic/claude-opus-4", label: "Claude Opus 4 (via OpenRouter)", credits: 15, contextWindow: 200000 },
-];
+export const PLATFORM_MODELS = MANAGED_MODELS;
 
 // `defaultContextWindow` is used for bring-your-own-key models where we don't know
 // the exact model, so we fall back to a sensible per-provider window.
@@ -97,38 +90,8 @@ export function getReadingBudget(config: ModelProviderConfig): ReadingBudget {
   return { contextWindow, maxInputTokens, maxFullTextPapers, fullTextPerPaperChars };
 }
 
-const OPENAI_COMPAT_BASE_URLS: Record<string, string> = {
-  openai: "https://api.openai.com/v1",
-  openrouter: "https://openrouter.ai/api/v1",
-};
-
-export function createLLMClient(config: ModelProviderConfig, options: { maxRetries?: number } = {}): OpenAI | null {
-  if (config.providerMode === "platform") {
-    const platformKey = process.env.OPENROUTER_API_KEY;
-    if (!platformKey) {
-      throw new Error("Platform model generation is not configured. OPENROUTER_API_KEY is missing.");
-    }
-    return new OpenAI({
-      baseURL: "https://openrouter.ai/api/v1",
-      apiKey: platformKey,
-      ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-    });
-  }
-
-  if (!config.apiKey) {
-    throw new Error("BYOC mode requires an API key.");
-  }
-
-  if (config.provider === "anthropic") {
-    return null;
-  }
-
-  const baseURL = OPENAI_COMPAT_BASE_URLS[config.provider] || OPENAI_COMPAT_BASE_URLS.openrouter;
-  return new OpenAI({
-    baseURL,
-    apiKey: config.apiKey,
-    ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-  });
+export function createLLMClient(config: ModelProviderConfig, options: { maxRetries?: number } = {}): ManagedChatClient {
+  return createManagedChatClient(config, options);
 }
 
 export async function generateWithConfig(
@@ -148,48 +111,6 @@ export async function generateWithConfig(
   const temperature = options.temperature || 0.3;
   const timeoutMs = options.timeoutMs ?? 600_000;
   const contextRequest = options.contextRequest === true;
-
-  if (config.provider === "anthropic" && config.providerMode === "byoc") {
-    if (!config.apiKey) {
-      throw new Error("BYOC Anthropic mode requires an API key.");
-    }
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        temperature,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userMessage }],
-      }),
-      ...(contextRequest ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      if (contextRequest) {
-        throw sanitizeContextRequestError(
-          { status: response.status, message: errorText },
-          model, config,
-        );
-      }
-      throw new Error(`Anthropic API request failed (${response.status})`);
-    }
-
-    const result: AnthropicMessagesResponse = await response.json() as AnthropicMessagesResponse;
-    if (contextRequest && (result.type === "error" || (result as any).error)) {
-      throw sanitizeContextRequestError((result as any).error ?? result, model, config);
-    }
-    const textBlock = result.content?.find((block) => block.type === "text");
-    const content = textBlock?.text || "";
-
-    return { content, model, provider: "anthropic" };
-  }
 
   const client = createLLMClient(config, contextRequest ? { maxRetries: 0 } : {});
   if (!client) {
@@ -213,16 +134,11 @@ export async function generateWithConfig(
   } catch (err: any) {
     const status = err?.status ?? err?.statusCode ?? "unknown";
     const body = err?.error ?? err?.message ?? String(err);
-    if (contextRequest) {
-      throw sanitizeContextRequestError({ ...err, status, message: body }, model, config);
-    }
-    const diagnostic = safeProviderErrorDiagnostic(err);
-    console.error(`[LLM] API request failed — model=${model} provider=${config.provider} status=${diagnostic.providerStatus ?? "unknown"} code=${diagnostic.providerCode ?? "unknown"}`);
-    throw new Error(`LLM request failed (${diagnostic.providerStatus ?? "unknown"}; code=${diagnostic.providerCode ?? "unknown"})`);
+    throw sanitizeContextRequestError({ ...err, status, message: body }, model, config);
   }
 
   if (completion?.error) {
-    if (contextRequest) {
+    if (contextRequest || isProviderPaymentFailure(completion.error)) {
       throw sanitizeContextRequestError(completion.error, model, config);
     }
     const diagnostic = safeProviderErrorDiagnostic(completion.error);
@@ -230,13 +146,16 @@ export async function generateWithConfig(
     throw new Error(`LLM API error (${diagnostic.providerStatus ?? "unknown"}; code=${diagnostic.providerCode ?? "unknown"})`);
   }
 
-  const content = completion.choices?.[0]?.message?.content || "";
-  if (!content) {
+  const choice = completion?.choices?.[0];
+  if (choice?.finish_reason !== "stop" || choice?.message?.refusal != null || choice?.message?.tool_calls?.length) {
+    throw new Error(`Managed model did not return a complete, non-refused text answer (model=${model}). No result was accepted.`);
+  }
+  const content = choice.message?.content;
+  if (typeof content !== "string" || !content.trim()) {
     if (contextRequest) {
       throw new Error(`LLM returned empty response for context request (model=${model})`);
     }
-    console.error(`[LLM] Empty content returned — model=${model} choices:`, JSON.stringify(completion.choices));
-    throw new Error(`LLM returned empty response (choices: ${JSON.stringify(completion.choices)})`);
+    throw new Error(`LLM returned empty response (model=${model}).`);
   }
   return { content, model, provider: config.provider };
 }
@@ -264,7 +183,9 @@ export function sanitizeContextRequestError(
   const contextLike = isContextOverflow(error);
   const message = contextLike
     ? `Context length exceeded (${status ?? "unknown"})`
-    : `LLM context request failed (${status ?? "unknown"})`;
+    : Number(status) === 429 ? "Managed model rate limit reached. Wait before retrying."
+    : Number(status) === 401 || Number(status) === 403 ? "Managed model access was rejected. An administrator must check the Replit integration configuration."
+    : `LLM request failed (${status ?? "unknown"}). Retry later or ask an administrator to check the managed integration.`;
   const result = new Error(message);
   const constraint = providerContextConstraint(error);
   const reportedLimit = constraint?.limit ?? reportedContextLimit(error);
@@ -295,67 +216,13 @@ function contextRequestErrorText(error: unknown, depth = 0): string {
     .join(" ");
 }
 
-interface AnthropicMessagesResponse {
-  id: string;
-  type: string;
-  role: string;
-  content: Array<{ type: string; text: string }>;
-  model: string;
-  stop_reason: string | null;
-}
-
 export function resolveModelName(config: ModelProviderConfig): string {
   if (config.modelName) return config.modelName;
-
-  if (config.providerMode === "platform") {
-    const defaultPlatform = PLATFORM_MODELS.find(m => m.default);
-    return defaultPlatform?.model || "deepseek/deepseek-chat";
-  }
-
-  const byocProvider = BYOC_PROVIDERS.find(p => p.id === config.provider);
-  return byocProvider?.defaultModel || "deepseek/deepseek-chat";
+  throw new Error("Select a Replit-managed model explicitly.");
 }
 
 export async function validateApiKey(provider: string, apiKey: string): Promise<{ valid: boolean; error?: string }> {
-  try {
-    if (provider === "anthropic") {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1,
-          messages: [{ role: "user", content: "test" }],
-        }),
-      });
-
-      if (response.status === 401 || response.status === 403) {
-        return { valid: false, error: "Invalid Anthropic API key. Please check your credentials." };
-      }
-      return { valid: true };
-    }
-
-    const baseURL = OPENAI_COMPAT_BASE_URLS[provider];
-    if (!baseURL) {
-      return { valid: false, error: `Unknown provider: ${provider}` };
-    }
-
-    const client = new OpenAI({ baseURL, apiKey });
-    await client.models.list();
-    return { valid: true };
-  } catch (err: any) {
-    if (err.status === 401 || err.status === 403) {
-      return { valid: false, error: "Invalid API key. Please check your credentials." };
-    }
-    if (err.status === 404 || err.status === 405) {
-      return { valid: true };
-    }
-    return { valid: false, error: "Could not validate API key. Please check your credentials and try again." };
-  }
+  return { valid: false, error: "BYOC validation is disabled. Select a Replit-managed model." };
 }
 
 // ---------------------------------------------------------------------------
@@ -639,9 +506,6 @@ export async function runToolLoop(
   execute: (name: string, args: Record<string, unknown>) => Promise<string>,
   options: ToolLoopOptions,
 ): Promise<ToolLoopResult> {
-  if (config.provider === "anthropic" && config.providerMode === "byoc") {
-    throw new Error("Tool-using agents require an OpenAI-compatible provider (platform, OpenAI, or OpenRouter). Anthropic BYOC is not supported for this workflow yet.");
-  }
   const client = createLLMClient(config, { maxRetries: 0 });
   if (!client) throw new Error(`Could not create LLM client for provider: ${config.provider}`);
   const model = resolveModelName(config);
@@ -851,6 +715,7 @@ export async function runToolLoop(
       role: "assistant",
       content: assistantText ?? "",
       ...(calls.length ? { tool_calls: calls } : {}),
+      ...(msg.providerParts ? { providerParts: msg.providerParts } : {}),
     });
     await options.onRound?.(round, assistantText);
 

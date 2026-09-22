@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// Replay the deliberately small serving window that originally exposed this
+// recovery failure, independently of the newly selected managed model's size.
+vi.mock("../../shared/model-catalog", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../shared/model-catalog")>();
+  return { ...actual, MANAGED_MODELS: actual.MANAGED_MODELS.map(m => ({ ...m, contextWindow: 32768 })) };
+});
 import { estimateRequestTokens } from "../llm-context";
 
 const createCompletion = vi.hoisted(() => vi.fn());
@@ -53,7 +59,7 @@ const call = (id: string, name: string, args: Record<string, unknown>) =>
   rawCall(id, name, JSON.stringify(args));
 
 function options() {
-  const config = { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
+  const config = { providerMode: "platform" as const, provider: "openai", modelName: "gpt-4o" };
   return {
     reproductionId: "replay-1", projectId: "project-1", journalId: "journal-1",
     initiativeDocId: "initiative-1", initiativeSlug: "initiative",
@@ -79,7 +85,9 @@ function sandbox() {
 }
 
 beforeEach(() => {
-  vi.stubEnv("OPENROUTER_API_KEY", "synthetic-test-key");
+  vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "synthetic-test-key");
+  vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
+  vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-4o");
   createCompletion.mockReset();
   createSandbox.mockReset();
   loadPaperContext.mockResolvedValue({

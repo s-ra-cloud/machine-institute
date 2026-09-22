@@ -1,3 +1,5 @@
+import { MANAGED_MODELS } from "../shared/model-catalog";
+
 export const ROLE_LABELS: Record<string, string> = {
   bR:  "Balanced Reviewer",
   aR:  "Adversarial Reviewer",
@@ -10,9 +12,16 @@ export const ROLE_LABELS: Record<string, string> = {
 
 export function modelInitials(modelName: string): string {
   const m = (modelName || "").toLowerCase();
+  if (m.startsWith("gemini-2.5-flash-lite")) return "G25FL";
+  if (m.startsWith("gemini-2.5-flash")) return "G25F";
+  if (m.startsWith("gemini-2.5-pro")) return "G25P";
+  if (m === "gpt-5-nano") return "G5N";
+  if (m === "gpt-5-mini") return "G5M";
+  if (m === "gpt-4.1-mini") return "G41M";
   if (m.includes("deepseek-r1")) return "DSR1";
   if (m.includes("deepseek")) return "DS32";
   if (m.includes("claude-sonnet-5") || m.includes("sonnet-5")) return "CS5";
+  if (m.includes("claude-sonnet-4-6") || m.includes("sonnet-4-6")) return "CS46";
   if (m.includes("claude-sonnet-4-5") || m.includes("sonnet-4-5")) return "CS45";
   if (m.includes("claude-sonnet-4") || m.includes("sonnet-4")) return "CS4";
   if (m.includes("claude-opus")) return "CO";
@@ -55,7 +64,9 @@ export function buildFsAgentDescription(opts: {
   const role     = ROLE_LABELS[opts.agentId] || opts.agentId;
   const provider = opts.providerMode === "byoc"
     ? "BYOC (user-supplied key)"
-    : "Machine Institute Platform (via OpenRouter)";
+    : MANAGED_MODELS.some(model => model.model === opts.model)
+      ? "Machine Institute Platform (Replit-managed)"
+      : "Machine Institute Platform (via OpenRouter)";
   const parts = [
     `Agent: ${opts.agentId} (${role})`,
     `Model: ${opts.model}`,

@@ -16,6 +16,11 @@ vi.mock("wouter", () => ({
 vi.mock("@/components/Navigation", () => ({ Navigation: () => null }));
 vi.mock("@/components/Footer", () => ({ Footer: () => null }));
 vi.mock("@/components/ReviewProgress", () => ({ ReviewProgress: () => null }));
+// This suite verifies diagnostic authorization/disclosure, not model setup.
+vi.mock("@/components/ModelSelector", async importOriginal => ({
+  ...await importOriginal<typeof import("../../client/src/components/ModelSelector")>(),
+  useGenerationConfig: () => ({ data: { platformModels: [] }, loading: false, error: false }),
+}));
 vi.mock("@/components/ui/motion", () => ({ FadeIn: ({ children }: any) => children }));
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children, variant: _variant, ...props }: any) => React.createElement("button", props, children),

@@ -8,7 +8,7 @@ import { ReproductionSession } from "../reproduction-session";
 import { fitToolContext } from "../tool-context";
 import { RequestContextBudget } from "../llm-context";
 
-const config = { providerMode: "platform" as const, provider: "openrouter", modelName: "test" };
+const config = { providerMode: "platform" as const, provider: "openai", modelName: "gpt-4o" };
 const tools: ToolSpec[] = [{
   name: "run_command", description: "execute",
   parameters: { type: "object", required: ["command"], properties: {
@@ -23,7 +23,12 @@ const turn = (raw: string, finish_reason = "tool_calls") => ({
   ] } }],
 });
 
-beforeEach(() => { create.mockReset(); process.env.OPENROUTER_API_KEY = "test"; });
+beforeEach(() => {
+  create.mockReset();
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test";
+  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
+  process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
+});
 
 describe("strict tool argument recovery", () => {
   it.each([

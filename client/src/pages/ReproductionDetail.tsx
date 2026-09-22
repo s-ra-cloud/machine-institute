@@ -7,6 +7,7 @@ import { FadeIn } from "@/components/ui/motion";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { ReviewProgress } from "@/components/ReviewProgress";
+import { ModelSelector, useGenerationConfig, type ModelConfig } from "@/components/ModelSelector";
 import { useAuth } from "@/lib/auth";
 import type { Reproduction } from "@shared/schema";
 
@@ -45,6 +46,11 @@ export function providerPaymentGuidance(diagnostics: unknown): string | null {
   }
   const isKeyCap = events.some(event => event && typeof event === "object"
     && (event as { providerLimitSource?: unknown }).providerLimitSource === "openrouter_key_limit");
+  const legacyOpenRouter = isTransient || isKeyCap || events.some(event => event && typeof event === "object"
+    && String((event as { providerLimitSource?: unknown }).providerLimitSource || "").startsWith("openrouter_"));
+  if (!legacyOpenRouter) {
+    return "The Replit-managed model provider could not authorize this request. Check the managed integration and its billing status, then retry with an enabled model.";
+  }
   return isKeyCap
     ? "The OpenRouter API key reached its spending cap. Raise or reset that key limit before retrying; this is managed in OpenRouter, not through a Replit subscription or Replit platform support."
     : "OpenRouter could not fund the model request. Add OpenRouter credits or check the API key's spending limit before retrying; this is managed in OpenRouter, not through a Replit subscription or Replit platform support.";
@@ -103,6 +109,13 @@ export default function ReproductionDetail() {
   const [, navigate] = useLocation();
   const [republishMessage, setRepublishMessage] = useState<string | null>(null);
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
+  const managedConfig = useGenerationConfig();
+  const [retryModelConfig, setRetryModelConfig] = useState<ModelConfig>({
+    providerMode: "platform", provider: "", modelName: "",
+  });
+  const [retryJudgeConfig, setRetryJudgeConfig] = useState<ModelConfig>({
+    providerMode: "platform", provider: "", modelName: "",
+  });
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -124,7 +137,16 @@ export default function ReproductionDetail() {
   });
   const retryMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/reproductions/${id}/retry`, { method: "POST" });
+      const res = await fetch(`/api/reproductions/${id}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerMode: "platform",
+          modelProvider: retryModelConfig.provider,
+          modelName: retryModelConfig.modelName,
+          judgeModelName: retryJudgeConfig.modelName,
+        }),
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error || "Retry failed");
       return body as Reproduction;
@@ -179,6 +201,15 @@ export default function ReproductionDetail() {
   const createdDate = new Date(run.createdAt);
   const completedDate = run.completedAt ? new Date(run.completedAt) : null;
   const durationSec = completedDate ? Math.round((completedDate.getTime() - createdDate.getTime()) / 1000) : null;
+  const mayRetry = authenticated && user?.id === run.userId
+    && REPRODUCTION_ACCESS_EMAILS.includes(user.email || "")
+    && (run.status === "failed" || (run.status === "completed" && run.overallVerdict === "inconclusive"));
+  const retryModel = managedConfig.data?.platformModels.find(model => model.model === retryModelConfig.modelName);
+  const retryJudge = managedConfig.data?.platformModels.find(model => model.model === retryJudgeConfig.modelName);
+  const retryModelsReady = Boolean(
+    retryModel && retryModel.enabled !== false && retryModel.tools
+    && retryJudge && retryJudge.enabled !== false,
+  );
   let verdicts: ClaimVerdict[] = [];
   try { verdicts = JSON.parse(run.verdictsJson || "[]"); } catch {}
 
@@ -316,6 +347,44 @@ export default function ReproductionDetail() {
             </FadeIn>
           )}
 
+          {mayRetry && (
+            <FadeIn delay={0.28}>
+              <section className="mb-8 border border-border/40 bg-muted/5 p-5 space-y-5" data-testid="section-retry-models">
+                <div>
+                  <h2 className="text-sm font-heading font-semibold">Choose models for the new run</h2>
+                  <p className="mt-1 text-[10px] font-mono text-muted-foreground/60">
+                    A retry is a new run. Select an enabled Replit-managed reproducer and judge explicitly; the original run’s model history remains unchanged.
+                  </p>
+                </div>
+                <ModelSelector
+                  value={retryModelConfig}
+                  onChange={setRetryModelConfig}
+                  activeType="reproduction"
+                  label="Replacement reproducer"
+                  models={managedConfig.data?.platformModels ?? []}
+                  configLoading={managedConfig.loading}
+                  configError={managedConfig.error}
+                  setupMessage={managedConfig.data?.setupMessage}
+                  costOptions={{ judgeModelName: retryJudgeConfig.modelName }}
+                  compact
+                  requireExplicitSelection
+                />
+                <ModelSelector
+                  value={retryJudgeConfig}
+                  onChange={setRetryJudgeConfig}
+                  activeType="judge"
+                  label="Replacement judge"
+                  models={managedConfig.data?.platformModels ?? []}
+                  configLoading={managedConfig.loading}
+                  configError={managedConfig.error}
+                  setupMessage={managedConfig.data?.setupMessage}
+                  compact
+                  requireExplicitSelection
+                />
+              </section>
+            </FadeIn>
+          )}
+
           <FadeIn delay={0.3}>
             {run.status === "pending" || run.status === "generating" ? (
               <ReviewProgress
@@ -336,11 +405,11 @@ export default function ReproductionDetail() {
               <div className="border border-red-500/20 bg-red-500/5 p-8">
                 <p className="text-red-400 font-mono text-sm">Reproduction failed.</p>
                 <p className="mt-4 text-sm text-red-300/70">No report was completed. Eligible institute members can retry this run.</p>
-                {authenticated && user?.id === run.userId && REPRODUCTION_ACCESS_EMAILS.includes(user.email || "") && (
+                {mayRetry && (
                   <>
                     <Button
                       onClick={() => { setRetryMessage(null); retryMutation.mutate(); }}
-                      disabled={retryMutation.isPending}
+                      disabled={retryMutation.isPending || !retryModelsReady}
                       className="mt-6 rounded-none font-mono text-xs"
                       data-testid="button-retry-reproduction"
                     >
@@ -364,16 +433,15 @@ export default function ReproductionDetail() {
           )}
 
           {run.status === "completed" && run.overallVerdict === "inconclusive"
-            && authenticated && user?.id === run.userId
-            && REPRODUCTION_ACCESS_EMAILS.includes(user.email || "") && (
+            && mayRetry && (
             <FadeIn delay={0.31}>
               <div className="mb-10 border border-yellow-400/20 bg-yellow-400/5 p-6">
                 <p className="text-sm text-yellow-200/80">
-                  This reproduction was inconclusive. You can rerun it with the same model, GPU, and prompts.
+                  This reproduction was inconclusive. You can rerun it with the selected managed models while preserving the original run’s history.
                 </p>
                 <Button
                   onClick={() => { setRetryMessage(null); retryMutation.mutate(); }}
-                  disabled={retryMutation.isPending}
+                  disabled={retryMutation.isPending || !retryModelsReady}
                   className="mt-4 rounded-none font-mono text-xs"
                   data-testid="button-rerun-inconclusive-reproduction"
                 >

@@ -12,8 +12,8 @@ import { runToolLoop, type ModelProviderConfig } from "../model-service";
 
 const config: ModelProviderConfig = {
   providerMode: "platform",
-  provider: "openrouter",
-  modelName: "deepseek/deepseek-chat",
+  provider: "openai",
+  modelName: "gpt-4o",
 };
 
 const completion = (content: string | null, toolCalls?: unknown[]) => ({
@@ -28,7 +28,9 @@ const completion = (content: string | null, toolCalls?: unknown[]) => ({
 describe("Tool loop — premature-stop recovery", () => {
   beforeEach(() => {
     createCompletion.mockReset();
-    process.env.OPENROUTER_API_KEY = "test-key";
+    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
+    process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
   });
 
   it("adds the continuation after a premature stop and re-enables tools", async () => {
@@ -500,7 +502,7 @@ describe("Tool loop — premature-stop recovery", () => {
         deadlineMs: Date.now() + 60_000,
         allowResourceStopFallback: true,
       },
-    )).rejects.toThrow("LLM context request failed");
+    )).rejects.toThrow("LLM request failed");
   });
 
   it("falls back when a request crosses the deadline before failing", async () => {

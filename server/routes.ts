@@ -1,4 +1,4 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertPaperSchema, insertResearchEventSchema, insertLiteratureReviewSchema, insertProjectPaperSchema, insertEditorialSchema, insertAgentMemberSchema, insertEthicsReportSchema, insertPeerReviewSchema, type LiteratureReview, type EditorialRecord, type ResearchEvent, type EthicsReport, type PeerReview, type InsertEthicsReport } from "@shared/schema";
@@ -18,21 +18,42 @@ import OpenAI from "openai";
 import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
-import { createLLMClient, resolveModelName, generateWithConfig, validateApiKey, PLATFORM_MODELS, BYOC_PROVIDERS, getReadingBudget, READING_BUDGET, type ModelProviderConfig } from "./model-service";
+import { createLLMClient, resolveModelName, generateWithConfig, getReadingBudget, READING_BUDGET, type ModelProviderConfig } from "./model-service";
 import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, fetchAbstractsAndKeywordsCached, extractTrendsAndGaps, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
-import { storeEphemeralKey, getEphemeralKey } from "./ephemeral-keys";
 import { submitReproductionToFutureScience } from "./future-science";
 import { buildConventionName, withMbSuffix, buildFsAgentDescription } from "./agent-naming";
 import { INITIATIVE_DOC_IDS, JOURNAL_DISPLAY_NAMES, INITIATIVE_SLUGS, getJournalDisplayName, resolveJournalId } from "./journals";
 import { fetchJournalPaperCatalogue } from "./paper-catalogue";
 import { runReproduction } from "./reproduce";
 import { canRetryReproduction } from "./reproduction-retry";
+import { getManagedModels, resolveManagedSelection, ManagedModelError } from "./managed-models";
 import { assertReproductionProviderCredit, ProviderCredentialPreflightError, ProviderCreditPreflightError } from "./provider-credit-preflight";
 import { isProviderPaymentFailure, ProviderPaymentError } from "./llm-context";
 import { createFallbackReproductionDiagnostics, getReproductionFailureDiagnostics, type ReproductionFailureDiagnostics } from "./reproduction-diagnostics";
 import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt, verdictsToRevisions, type ClaimVerdict } from "./prompts/reproduce";
 import { GPU_OPTIONS, DEFAULT_GPU, resolveGpu, isModalConfigured } from "./modal-sandbox";
 import { insertReproductionSchema, type Reproduction } from "@shared/schema";
+
+function managedGeneration(task: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    try {
+      (req as any).managedModel = resolveManagedSelection({
+        providerMode: req.body.providerMode,
+        provider: req.body.modelProvider,
+        modelName: req.body.modelName,
+      }, task);
+      if (task === "reproduction") {
+        (req as any).managedJudge = resolveManagedSelection({
+          providerMode: "platform", modelName: req.body.judgeModelName,
+        }, "judge");
+      }
+      next();
+    } catch (error) {
+      if (error instanceof ManagedModelError) return res.status(error.status).json({ error: error.message });
+      throw error;
+    }
+  };
+}
 
 // Map publication-audit flags to Future Science revision arrays:
 // CRITICAL + MAJOR flags become majorRevisions, MINOR flags become
@@ -859,17 +880,17 @@ I will now provide the papers.`;
   });
 
   app.get("/api/generation/config", (_req, res) => {
+    const models = getManagedModels();
+    const defaultModel = models.find(m => m.enabled && m.default) || models.find(m => m.enabled);
     return res.json({
       // Attach the per-model max full-text papers so the dashboard's Step 5 slider
       // can scale its maximum with the selected model's context window.
-      platformModels: PLATFORM_MODELS.map(m => ({
+      platformModels: models.map(m => ({
         ...m,
         maxFullTextPapers: getReadingBudget({ providerMode: "platform", provider: m.provider, modelName: m.model }).maxFullTextPapers,
       })),
-      byocProviders: BYOC_PROVIDERS.map(p => ({
-        ...p,
-        maxFullTextPapers: getReadingBudget({ providerMode: "byoc", provider: p.id, modelName: "" }).maxFullTextPapers,
-      })),
+      byocProviders: [],
+      defaultModel: defaultModel ? { provider: defaultModel.provider, model: defaultModel.model } : null,
       limits: {},
       defaultTopics: {
         editorial: "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability",
@@ -916,16 +937,7 @@ I will now provide the papers.`;
   });
 
   app.post("/api/generation/validate-key", requireAuth, async (req, res) => {
-    try {
-      const { provider, apiKey } = req.body;
-      if (!provider || !apiKey) {
-        return res.status(400).json({ error: "Provider and API key are required." });
-      }
-      const result = await validateApiKey(provider, apiKey);
-      return res.json(result);
-    } catch (err: any) {
-      return res.status(500).json({ error: "Validation failed." });
-    }
+    return res.status(410).json({ error: "BYOC key validation is retired. Select a Replit-managed model." });
   });
 
   app.delete("/api/generation/history", adminAuth, async (req: Request, res: Response) => {
@@ -952,18 +964,14 @@ I will now provide the papers.`;
     });
   });
 
-  app.post("/api/literature-reviews", requireAuth, async (req, res) => {
+  app.post("/api/literature-reviews", requireAuth, managedGeneration("literature-review"), async (req, res) => {
     try {
       const { projectId, agentId, researchQuestion, prompt, topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, journalId, fullTextCount, includeArxiv } = req.body;
 
       // Number of top-relevance papers to read in FULL TEXT (rest use abstracts).
       // The maximum scales with the selected model's context window (see getReadingBudget):
       // bigger models can read more papers in full. Default reads the model's full allowance.
-      const FULL_TEXT_MAX = getReadingBudget({
-        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
-        provider: modelProvider || "openrouter",
-        modelName: modelName || "",
-      }).maxFullTextPapers;
+      const FULL_TEXT_MAX = getReadingBudget((req as any).managedModel).maxFullTextPapers;
       const parsedFullText = Number(fullTextCount);
       // Only honor a real positive number; null/""/non-numeric all fall back to the model's max.
       const effectiveFullTextCount = (fullTextCount !== undefined && fullTextCount !== null && fullTextCount !== "" && Number.isFinite(parsedFullText) && parsedFullText >= 1)
@@ -973,7 +981,7 @@ I will now provide the papers.`;
       const effectiveIncludeArxiv = includeArxiv !== false;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) {
         return res.status(400).json({ error: `Invalid providerMode. Must be one of: ${VALID_PROVIDER_MODES.join(", ")}` });
       }
@@ -986,37 +994,16 @@ I will now provide the papers.`;
       const isPlatform = providerMode !== "byoc";
 
       if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
+        return res.status(403).json({ error: "Managed model access is restricted to institute members." });
       }
 
-      if (isPlatform) {
-        if (!process.env.OPENROUTER_API_KEY) {
-          return res.status(503).json({ error: "Literature review generation is not configured. OPENROUTER_API_KEY is missing." });
-        }
-      }
-
-      if (providerMode === "byoc") {
-        if (!byocApiKey) {
-          return res.status(400).json({ error: "BYOC mode requires an API key." });
-        }
-        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
-        if (!keyValidation.valid) {
-          return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
-        }
-        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
-      }
 
       const defaultPrompt = (agentId && agentId.includes("aLR")) ? DEFAULT_ALR_PROMPT : DEFAULT_BLR_PROMPT;
       const rawAgentId = agentId && agentId.includes("MachInstit") ? (agentId.includes("aLR") ? "aLR" : "bLR") : (agentId || "bLR");
       const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", rawAgentId);
       const effectiveTopic = topic || "Autonomous AI research agents and their role in scientific discovery";
 
-      const modelConfig: ModelProviderConfig = {
-        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
-        provider: modelProvider || "openrouter",
-        modelName: modelName || "",
-        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
-      };
+      const modelConfig: ModelProviderConfig = (req as any).managedModel;
 
       const result = insertLiteratureReviewSchema.safeParse({
         projectId,
@@ -1331,7 +1318,7 @@ I will now provide the papers.`;
       // Number of top-ranked papers Stage 5 will read in full text (rest stay abstract-only).
       // The cap scales with the selected model's context window (see getReadingBudget),
       // so bigger models read more papers in full and the input budget grows with them.
-      const readingBudget = getReadingBudget(modelConfig || { providerMode: "platform", provider: "openrouter", modelName: "" });
+      const readingBudget = getReadingBudget(resolveManagedSelection(modelConfig || {}, "literature-review"));
       const FULL_TEXT_TARGET = Math.min(readingBudget.maxFullTextPapers, Math.max(1, data.fullTextCount ?? readingBudget.maxFullTextPapers));
       // Keep the shortlist at least 3× the full-text read target so the full-text stage
       // always has a healthy candidate pool (e.g. 45 papers when 15 are read in full).
@@ -1357,11 +1344,7 @@ I will now provide the papers.`;
       const corpusSource: "future-science" | "project-log-fallback" = fsHasPapers ? "future-science" : "project-log-fallback";
 
       // Resolve the model config up front — the selection stages below call the model too.
-      const config = modelConfig || { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
-      if (config.providerMode === "byoc" && !config.apiKey && data.userId) {
-        const storedKey = getEphemeralKey(data.userId, config.provider);
-        if (storedKey) config.apiKey = storedKey;
-      }
+      const config = resolveManagedSelection(modelConfig || {}, "literature-review");
       const model = resolveModelName(config);
 
       // Best-effort JSON extraction from a model response (handles code fences / stray prose).
@@ -2104,7 +2087,7 @@ I will now provide the papers.`;
 
   const MAX_BATCH_PEER_REVIEWS = 25;
 
-  app.post("/api/peer-reviews/batch", requireAuth, async (req, res) => {
+  app.post("/api/peer-reviews/batch", requireAuth, managedGeneration("peer-review"), async (req, res) => {
     try {
       const {
         journalId, persona, count,
@@ -2118,7 +2101,7 @@ I will now provide the papers.`;
       const effectivePriority = VALID_PRIORITIES.includes(prioritize) ? prioritize : "random";
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
       const VALID_PERSONAS: PeerReviewPersona[] = ["bR", "iR", "aR", "rR"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
       if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
@@ -2133,25 +2116,11 @@ I will now provide the papers.`;
       const isPlatform = providerMode !== "byoc";
 
       if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
-      }
-      if (isPlatform && !process.env.OPENROUTER_API_KEY) {
-        return res.status(503).json({ error: "Peer review generation is not configured. OPENROUTER_API_KEY is missing." });
-      }
-      if (providerMode === "byoc") {
-        if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
-        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
-        if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
-        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
+        return res.status(403).json({ error: "Managed model access is restricted to institute members." });
       }
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
 
-      const modelConfig: ModelProviderConfig = {
-        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
-        provider: modelProvider || "openrouter",
-        modelName: modelName || "",
-        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
-      };
+      const modelConfig: ModelProviderConfig = (req as any).managedModel;
       const resolvedModel = resolveModelName(modelConfig);
 
       // Pick N papers at random among those not yet reviewed by this persona+model.
@@ -2288,7 +2257,7 @@ I will now provide the papers.`;
     }
   });
 
-  app.post("/api/peer-reviews", requireAuth, async (req, res) => {
+  app.post("/api/peer-reviews", requireAuth, managedGeneration("peer-review"), async (req, res) => {
     try {
       const {
         projectId, journalId, persona, documentId, paperTitle,
@@ -2299,7 +2268,7 @@ I will now provide the papers.`;
       } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
       const VALID_PERSONAS: PeerReviewPersona[] = ["bR", "iR", "aR", "rR"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
       if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
@@ -2310,26 +2279,12 @@ I will now provide the papers.`;
       const isPlatform = providerMode !== "byoc";
 
       if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
-      }
-      if (isPlatform) {
-        if (!process.env.OPENROUTER_API_KEY) return res.status(503).json({ error: "Peer review generation is not configured. OPENROUTER_API_KEY is missing." });
-      }
-      if (providerMode === "byoc") {
-        if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
-        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
-        if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
-        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
+        return res.status(403).json({ error: "Managed model access is restricted to institute members." });
       }
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
       if (!documentId || typeof documentId !== "string") return res.status(400).json({ error: "documentId is required." });
 
-      const modelConfig: ModelProviderConfig = {
-        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
-        provider: modelProvider || "openrouter",
-        modelName: modelName || "",
-        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
-      };
+      const modelConfig: ModelProviderConfig = (req as any).managedModel;
 
       // Per-paper-per-persona-per-model lock
       const reviewed = await storage.getReviewedPaperPersonasForJournal(effectiveJournalId);
@@ -2389,10 +2344,6 @@ I will now provide the papers.`;
     includeEthicsCoauthor: boolean,
   ) {
     const initiativeDocId = INITIATIVE_DOC_IDS[data.journalId] || INITIATIVE_DOC_IDS["mirror"];
-    if (modelConfig.providerMode === "byoc" && !modelConfig.apiKey && data.userId) {
-      const stored = getEphemeralKey(data.userId, modelConfig.provider);
-      if (stored) modelConfig.apiKey = stored;
-    }
     const resolvedModel = resolveModelName(modelConfig);
     const persona = data.persona as PeerReviewPersona;
     const isModelBlind = !!data.modelBlind;
@@ -2408,6 +2359,7 @@ I will now provide the papers.`;
     }
 
     try {
+      modelConfig = resolveManagedSelection(modelConfig, "peer-review");
       await storage.updatePeerReview(reviewId, { status: "generating" });
       await emit("peer-review-init", `${persona} peer review started for paper ${data.documentId} in ${data.journalId}.`);
 
@@ -2837,7 +2789,7 @@ I will now provide the papers.`;
     }
   });
 
-  app.post("/api/reproductions", requireAuth, async (req, res) => {
+  app.post("/api/reproductions", requireAuth, managedGeneration("reproduction"), async (req, res) => {
     try {
       const {
         projectId, journalId, documentId, paperTitle, gpu,
@@ -2848,10 +2800,9 @@ I will now provide the papers.`;
       } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
       if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
-      if (judgeModelProvider && !VALID_PROVIDERS.includes(judgeModelProvider)) return res.status(400).json({ error: "Invalid judgeModelProvider." });
       if (!documentId || typeof documentId !== "string") return res.status(400).json({ error: "documentId is required." });
 
       const user = (req as any).user;
@@ -2862,34 +2813,10 @@ I will now provide the papers.`;
         return res.status(503).json({ error: "Reproduction sandboxes are not configured. MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are missing." });
       }
       const isPlatform = providerMode !== "byoc";
-      if (isPlatform && !process.env.OPENROUTER_API_KEY) {
-        return res.status(503).json({ error: "Platform model generation is not configured. OPENROUTER_API_KEY is missing." });
-      }
-      if (!isPlatform) {
-        if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
-        if ((modelProvider || "openrouter") === "anthropic") {
-          return res.status(400).json({ error: "The reproduction agent needs tool calling through an OpenAI-compatible API. Use OpenAI or OpenRouter for BYOC." });
-        }
-        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
-        if (!keyValidation.valid) return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
-        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
-      }
       const effectiveJournalId = resolveJournalId(journalId);
-      const modelConfig: ModelProviderConfig = {
-        providerMode: isPlatform ? "platform" : "byoc",
-        provider: modelProvider || "openrouter",
-        modelName: modelName || "",
-        apiKey: isPlatform ? undefined : byocApiKey,
-      };
+      const modelConfig: ModelProviderConfig = (req as any).managedModel;
       const resolvedModel = resolveModelName(modelConfig);
-      // The judge shares the reproducer's provider mode and key; in BYOC mode it
-      // must therefore use the same provider as the key it was given.
-      const judgeConfig: ModelProviderConfig = {
-        providerMode: modelConfig.providerMode,
-        provider: isPlatform ? (judgeModelProvider || modelConfig.provider) : modelConfig.provider,
-        modelName: judgeModelName || resolvedModel,
-        apiKey: modelConfig.apiKey,
-      };
+      const judgeConfig: ModelProviderConfig = (req as any).managedJudge;
 
       try {
         await assertReproductionProviderCredit(modelConfig, message => console.warn(message));
@@ -2957,31 +2884,17 @@ I will now provide the papers.`;
         return res.status(503).json({ error: "Reproduction sandboxes are not configured. MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are missing." });
       }
 
-      const providerMode = source.providerMode === "byoc" ? "byoc" : "platform";
-      const provider = source.modelProvider || "openrouter";
-      const apiKey = providerMode === "byoc" && source.userId
-        ? getEphemeralKey(source.userId, provider) || undefined
-        : undefined;
-      if (providerMode === "platform" && !process.env.OPENROUTER_API_KEY) {
-        return res.status(503).json({ error: "Platform model generation is not configured. OPENROUTER_API_KEY is missing." });
-      }
-      if (providerMode === "byoc" && !apiKey) {
-        return res.status(400).json({ error: "The saved BYOC API key is no longer available. Start a new reproduction to provide it again." });
-      }
-
-      const modelConfig: ModelProviderConfig = {
-        providerMode,
-        provider,
-        modelName: source.modelName || "",
-        apiKey,
-      };
+      // Require explicit replacements, never reinterpret historical model IDs.
+      const modelConfig = resolveManagedSelection({
+        providerMode: req.body.providerMode,
+        provider: req.body.modelProvider,
+        modelName: req.body.modelName,
+      }, "reproduction");
+      const { providerMode, provider } = modelConfig;
       const resolvedModel = resolveModelName(modelConfig);
-      const judgeConfig: ModelProviderConfig = {
-        providerMode,
-        provider: providerMode === "byoc" ? provider : (source.judgeModelProvider || provider),
-        modelName: source.judgeModelName || resolvedModel,
-        apiKey,
-      };
+      const judgeConfig = resolveManagedSelection({
+        providerMode: "platform", modelName: req.body.judgeModelName,
+      }, "judge");
       try {
         await assertReproductionProviderCredit(modelConfig, message => console.warn(message));
       } catch (error) {
@@ -3019,6 +2932,7 @@ I will now provide the papers.`;
         console.error("Background reproduction retry failed to persist its terminal status.");
       });
     } catch (err: any) {
+      if (err instanceof ManagedModelError) return res.status(err.status).json({ error: err.message });
       console.error("Error retrying reproduction:", err);
       return res.status(500).json({ error: "Internal server error" });
     }
@@ -3031,13 +2945,6 @@ I will now provide the papers.`;
     judgeConfig: ModelProviderConfig,
   ) {
     const initiativeDocId = INITIATIVE_DOC_IDS[data.journalId] || INITIATIVE_DOC_IDS["mirror"];
-    if (modelConfig.providerMode === "byoc" && !modelConfig.apiKey && data.userId) {
-      const stored = getEphemeralKey(data.userId, modelConfig.provider);
-      if (stored) {
-        modelConfig.apiKey = stored;
-        judgeConfig.apiKey = stored;
-      }
-    }
     const resolvedModel = resolveModelName(modelConfig);
     const robotAgentName = buildConventionName(resolvedModel, "P");
     const gpu = resolveGpu(data.gpu);
@@ -3052,6 +2959,8 @@ I will now provide the papers.`;
     }
 
     try {
+      modelConfig = resolveManagedSelection(modelConfig, "reproduction");
+      judgeConfig = resolveManagedSelection(judgeConfig, "judge");
       await storage.updateReproduction(reproductionId, { status: "generating" });
       const result = await runReproduction({
         reproductionId,
@@ -3400,7 +3309,7 @@ I will now provide the papers.`;
     }
   });
 
-  app.post("/api/ethics-reports", requireAuth, async (req, res) => {
+  app.post("/api/ethics-reports", requireAuth, managedGeneration("ethics-report"), async (req, res) => {
     try {
       const {
         projectId, agentId, journalId, keywords, topic, prompt1, prompt2, prompt3,
@@ -3410,7 +3319,7 @@ I will now provide the papers.`;
       } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) {
         return res.status(400).json({ error: `Invalid providerMode.` });
       }
@@ -3423,23 +3332,9 @@ I will now provide the papers.`;
       const isPlatform = providerMode !== "byoc";
 
       if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
+        return res.status(403).json({ error: "Managed model access is restricted to institute members." });
       }
 
-      if (isPlatform) {
-        if (!process.env.OPENROUTER_API_KEY) {
-          return res.status(503).json({ error: "Ethics report generation is not configured. OPENROUTER_API_KEY is missing." });
-        }
-      }
-
-      if (providerMode === "byoc") {
-        if (!byocApiKey) return res.status(400).json({ error: "BYOC mode requires an API key." });
-        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
-        if (!keyValidation.valid) {
-          return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
-        }
-        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
-      }
 
       const effectiveJournalId = journalId && INITIATIVE_DOC_IDS[journalId] ? journalId : "mirror";
       const effectiveKeywords: string[] = Array.isArray(keywords)
@@ -3463,12 +3358,7 @@ I will now provide the papers.`;
         ? `Publication audit of "${effectivePaperTitle || effectiveDocumentId}" in ${getJournalDisplayName(effectiveJournalId)}`
         : `Field-level publication audit of ${getJournalDisplayName(effectiveJournalId)}${effectiveTopic ? ` — topic: ${effectiveTopic}` : ""}${effectiveKeywords.length ? ` (filters: ${effectiveKeywords.join(", ")})` : ""}`;
 
-      const modelConfig: ModelProviderConfig = {
-        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
-        provider: modelProvider || "openrouter",
-        modelName: modelName || "",
-        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
-      };
+      const modelConfig: ModelProviderConfig = (req as any).managedModel;
 
       const parsed = insertEthicsReportSchema.safeParse({
         projectId,
@@ -3521,10 +3411,6 @@ I will now provide the papers.`;
     modelConfig: ModelProviderConfig,
   ) {
     const initiativeDocId = INITIATIVE_DOC_IDS[data.journalId] || INITIATIVE_DOC_IDS["mirror"];
-    if (modelConfig.providerMode === "byoc" && !modelConfig.apiKey && data.userId) {
-      const stored = getEphemeralKey(data.userId, modelConfig.provider);
-      if (stored) modelConfig.apiKey = stored;
-    }
     const resolvedModel = resolveModelName(modelConfig);
     const robotAgentName = buildConventionName(resolvedModel, "H");
 
@@ -3537,6 +3423,7 @@ I will now provide the papers.`;
     }
 
     try {
+      modelConfig = resolveManagedSelection(modelConfig, "ethics-report");
       await storage.updateEthicsReport(reportId, { status: "generating" });
       await emit("ethics-init", `Field ethics report started for journal ${data.journalId}.`);
 
@@ -3771,12 +3658,12 @@ List every cited paper in Chicago author-date bibliography format:
     }
   });
 
-  app.post("/api/editorials/generate", requireAuth, async (req, res) => {
+  app.post("/api/editorials/generate", requireAuth, managedGeneration("editorial"), async (req, res) => {
     try {
       const { topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, userPrompt, prompt, journalId } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "openrouter"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) {
         return res.status(400).json({ error: `Invalid providerMode. Must be one of: ${VALID_PROVIDER_MODES.join(", ")}` });
       }
@@ -3789,35 +3676,14 @@ List every cited paper in Chicago author-date bibliography format:
       const isPlatform = providerMode !== "byoc";
 
       if (isPlatform && !PLATFORM_ACCESS_EMAILS.includes(user.email)) {
-        return res.status(403).json({ error: "Platform model access is restricted to institute members. Please use Bring Your Own Key mode." });
+        return res.status(403).json({ error: "Managed model access is restricted to institute members." });
       }
 
-      if (isPlatform) {
-        if (!process.env.OPENROUTER_API_KEY) {
-          return res.status(503).json({ error: "Editorial generation is not configured. OPENROUTER_API_KEY is missing." });
-        }
-      }
-
-      if (providerMode === "byoc") {
-        if (!byocApiKey) {
-          return res.status(400).json({ error: "BYOC mode requires an API key." });
-        }
-        const keyValidation = await validateApiKey(modelProvider || "openrouter", byocApiKey);
-        if (!keyValidation.valid) {
-          return res.status(400).json({ error: keyValidation.error || "Invalid BYOC API key." });
-        }
-        await storeEphemeralKey(user.id, modelProvider || "openrouter", byocApiKey);
-      }
 
       const effectiveOrchestratorName = orchestratorName || buildConventionName(modelName || "", "O");
       const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability";
 
-      const modelConfig: ModelProviderConfig = {
-        providerMode: (providerMode === "byoc" ? "byoc" : "platform") as "platform" | "byoc",
-        provider: modelProvider || "openrouter",
-        modelName: modelName || "",
-        apiKey: providerMode === "byoc" ? byocApiKey : undefined,
-      };
+      const modelConfig: ModelProviderConfig = (req as any).managedModel;
 
       const slug = "editorial-" + Date.now().toString(36);
       const editorial = await storage.createEditorial({
@@ -4161,14 +4027,7 @@ List every cited paper in Chicago author-date bibliography format:
           }).join("\n\n---\n\n")
         : "";
 
-      const config = modelConfig || { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
-      if (config.providerMode === "byoc" && !config.apiKey) {
-        const editorialForKey = await storage.getEditorialById(editorialId);
-        if (editorialForKey?.userId) {
-          const storedKey = getEphemeralKey(editorialForKey.userId, config.provider);
-          if (storedKey) config.apiKey = storedKey;
-        }
-      }
+      const config = resolveManagedSelection(modelConfig || {}, "editorial");
       const model = resolveModelName(config);
 
       const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability";

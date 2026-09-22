@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// Keep this stress replay at the original small serving window.
+vi.mock("../../shared/model-catalog", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../shared/model-catalog")>();
+  return { ...actual, MANAGED_MODELS: actual.MANAGED_MODELS.map(m => ({ ...m, contextWindow: 32768 })) };
+});
 import { estimateRequestTokens } from "../llm-context";
 
 const createCompletion = vi.hoisted(() => vi.fn());
@@ -32,8 +37,8 @@ import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt } from 
 
 const config: ModelProviderConfig = {
   providerMode: "platform",
-  provider: "openrouter",
-  modelName: "deepseek/deepseek-chat",
+  provider: "openai",
+  modelName: "gpt-4o",
 };
 
 const logbook = [
@@ -49,6 +54,7 @@ const logbook = [
 
 const completion = (content: string | null, toolCalls?: unknown[]) => ({
   choices: [{
+    finish_reason: toolCalls ? "tool_calls" : "stop",
     message: {
       content,
       ...(toolCalls ? { tool_calls: toolCalls } : {}),
@@ -203,7 +209,9 @@ beforeEach(() => {
   createSandbox.mockReset();
   loadPaperContext.mockReset();
   fetchContributionMaterials.mockReset();
-  process.env.OPENROUTER_API_KEY = "test-key";
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
+  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
+  process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
   setupContext();
 });
 

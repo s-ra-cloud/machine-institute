@@ -3,7 +3,14 @@ import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { FadeIn } from "@/components/ui/motion";
 import { useAuth } from "@/lib/auth";
-import { ModelSelector, type ModelConfig, type GenerationCostType, estimatePerRunCredits } from "@/components/ModelSelector";
+import {
+  ModelSelector,
+  formatModelEstimate,
+  getModelEstimate,
+  type GenerationConfig,
+  type ModelConfig,
+  type GenerationCostType,
+} from "@/components/ModelSelector";
 import { PaperPicker } from "@/components/PaperPicker";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -26,11 +33,7 @@ import {
 
 type GenerationType = "editorial" | "literature-review" | "ethics-report" | "peer-review" | "peer-review-batch" | "reproduce";
 
-interface GenerationConfigResponse {
-  platformModels?: Array<{ provider: string; model: string; label: string; maxFullTextPapers?: number }>;
-  byocProviders?: Array<{ id: string; label: string; defaultModel: string; maxFullTextPapers?: number }>;
-  reproduction?: { gpuOptions: string[]; defaultGpu: string; sandboxConfigured: boolean; hfTokenConfigured: boolean };
-}
+type GenerationConfigResponse = GenerationConfig;
 
 interface PeerPromptResponse { prompt: string }
 
@@ -74,6 +77,7 @@ interface PeerReviewRecord {
   documentId: string;
   paperTitle: string | null;
   includeEthicsCoauthor: boolean;
+  ethicsReportId: string | null;
   reviewTitle: string | null;
   reviewAbstract: string | null;
   recommendation: string | null;
@@ -243,6 +247,11 @@ function deriveModelInitials(modelName: string): string {
   if (m.includes("claude-sonnet-4") || m.includes("sonnet-4")) return "CS4";
   if (m.includes("claude-opus")) return "CO";
   if (m.includes("claude-haiku")) return "CH";
+  if (m.includes("gemini-2.5-flash")) return "G25F";
+  if (m.includes("gemini-2.5-pro")) return "G25P";
+  if (m.includes("gpt-5-nano")) return "G5N";
+  if (m.includes("gpt-5-mini")) return "G5M";
+  if (m.includes("gpt-4.1-mini")) return "G41M";
   if (m.includes("gpt-5")) return "G5";
   if (m.includes("gpt-4o")) return "G4O";
   if (m.includes("gpt-4")) return "G4";
@@ -260,8 +269,8 @@ export default function GenerationDashboard() {
   const [activeType, setActiveType] = useState<GenerationType | null>(null);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     providerMode: "platform",
-    provider: "openrouter",
-    modelName: "deepseek/deepseek-chat",
+    provider: "",
+    modelName: "",
   });
   const [orchestratorName, setOrchestratorName] = useState(user?.displayName ?? "");
   const [topic, setTopic] = useState("Autonomous AI research agents and their role in scientific discovery");
@@ -302,8 +311,11 @@ export default function GenerationDashboard() {
   const [reproSelectedTitle, setReproSelectedTitle] = useState<string>("");
   const [reproPickerQuery, setReproPickerQuery] = useState<string>("");
   const [reproGpu, setReproGpu] = useState<string>("A10G");
-  // "" means the judge uses the same model as the reproducer.
-  const [reproJudgeModel, setReproJudgeModel] = useState<string>("");
+  const [reproJudgeConfig, setReproJudgeConfig] = useState<ModelConfig>({
+    providerMode: "platform",
+    provider: "",
+    modelName: "",
+  });
   const [reproPrompt, setReproPrompt] = useState<string>("");
   const [reproJudgePrompt, setReproJudgePrompt] = useState<string>("");
   const [reproPromptsExpanded, setReproPromptsExpanded] = useState(false);
@@ -352,7 +364,11 @@ export default function GenerationDashboard() {
     enabled: activeType === "editorial",
   });
 
-  const { data: generationConfig } = useQuery<GenerationConfigResponse>({
+  const {
+    data: generationConfig,
+    isLoading: generationConfigLoading,
+    isError: generationConfigError,
+  } = useQuery<GenerationConfigResponse>({
     queryKey: ["/api/generation/config"],
     queryFn: async () => {
       const res = await fetch("/api/generation/config");
@@ -364,10 +380,6 @@ export default function GenerationDashboard() {
   // Scales with the model's context window; falls back to a small default until config loads.
   const maxFullText = (() => {
     if (!generationConfig) return 15;
-    if (modelConfig.providerMode === "byoc") {
-      const p = generationConfig.byocProviders?.find(bp => bp.id === modelConfig.provider);
-      return p?.maxFullTextPapers ?? 6;
-    }
     const m = generationConfig.platformModels?.find(pm => pm.model === modelConfig.modelName);
     return m?.maxFullTextPapers ?? 15;
   })();
@@ -661,13 +673,12 @@ export default function GenerationDashboard() {
           gpu: reproGpu,
           reproducerPrompt: reproPrompt || undefined,
           judgePrompt: reproJudgePrompt || undefined,
-          judgeModelName: reproJudgeModel || undefined,
+          judgeModelName: reproJudgeConfig.modelName,
           orchestratorName: orchestratorName || undefined,
           agentDescription: agentDescription || undefined,
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
-          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
         }),
       });
       if (!res.ok) {
@@ -681,20 +692,6 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/reproductions/available-papers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
       if (data?.id) navigate(`/reproductions/${data.id}`);
-    },
-  });
-
-  const retryReproductionMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/reproductions/${id}/retry`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error || "Failed to retry reproduction");
-      return body as ReproductionRecord;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/reproductions-all"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/reproductions/available-papers"] });
-      navigate(`/reproductions/${data.id}`);
     },
   });
 
@@ -793,7 +790,6 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
-          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
           journalId: selectedJournal,
         }),
       });
@@ -824,7 +820,6 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
-          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
           journalId: selectedJournal,
           fullTextCount,
           includeArxiv,
@@ -859,7 +854,6 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
-          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
         }),
       });
       if (!res.ok) {
@@ -894,7 +888,6 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
-          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
         }),
       });
       if (!res.ok) {
@@ -929,7 +922,6 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
-          byocApiKey: modelConfig.providerMode === "byoc" ? modelConfig.apiKey : undefined,
         }),
       });
       if (!res.ok) {
@@ -995,30 +987,41 @@ export default function GenerationDashboard() {
   const hasGeneratingEthics = recentEthics?.some(r => r.status === "pending" || r.status === "generating");
   const hasGeneratingPeer = recentPeerReviews?.some(r => r.status === "pending" || r.status === "generating");
 
-  const byocReady = modelConfig.providerMode === "byoc" ? !!modelConfig.keyValidated : true;
-  const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && byocReady;
-  const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && byocReady;
-  const canSubmitEthics = !ethicsIsPending && !hasGeneratingEthics && byocReady &&
+  const selectedManagedModel = generationConfig?.platformModels?.find(model => model.model === modelConfig.modelName);
+  const selectedJudgeModel = generationConfig?.platformModels?.find(model => model.model === reproJudgeConfig.modelName);
+  const managedModelReady = hasPlatformAccess
+    && generationConfig?.managedModelsConfigured !== false
+    && generationConfig?.setupRequired !== true
+    && selectedManagedModel?.enabled !== false
+    && Boolean(selectedManagedModel);
+  const judgeModelReady = selectedJudgeModel?.enabled !== false && Boolean(selectedJudgeModel);
+  const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && managedModelReady;
+  const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && managedModelReady;
+  const canSubmitEthics = !ethicsIsPending && !hasGeneratingEthics && managedModelReady &&
     ethicsPrompt1.trim().length > 0 && selectedPaperDocId.length > 0;
-  const canSubmitPeer = !peerIsPending && !hasGeneratingPeer && byocReady &&
+  const canSubmitPeer = !peerIsPending && !hasGeneratingPeer && managedModelReady &&
     peerSelectedDocId.length > 0 && peerPrompt.trim().length > 0;
 
   const reproIsPending = generateReproductionMutation.isPending;
   const hasGeneratingRepro = recentReproductions?.some(r => r.status === "pending" || r.status === "generating");
   const reproConfig = generationConfig?.reproduction;
-  const reproAnthropicByoc = modelConfig.providerMode === "byoc" && modelConfig.provider === "anthropic";
-  const canSubmitRepro = !reproIsPending && !hasGeneratingRepro && byocReady && !reproAnthropicByoc &&
+  const canSubmitRepro = !reproIsPending && !hasGeneratingRepro && managedModelReady
+    && selectedManagedModel?.tools === true && judgeModelReady &&
     reproSelectedDocId.length > 0 && reproPrompt.trim().length > 0 && reproJudgePrompt.trim().length > 0 &&
     reproConfig?.sandboxConfigured !== false;
 
   const batchIsPending = generatePeerBatchMutation.isPending;
   const eligibleCount = eligibleCountData?.eligibleCount ?? null;
   const batchRunning = !!activeBatchId && batchStatus && !batchStatus.complete;
-  const perRunCredits = modelConfig.providerMode === "platform"
-    ? estimatePerRunCredits(modelConfig.modelName, "peer-review", peerIncludeEthics ? 2 : 1)
-    : null;
-  const totalBatchCredits = perRunCredits !== null ? perRunCredits * batchCount : null;
-  const canSubmitBatch = !batchIsPending && !batchRunning && byocReady &&
+  const batchEstimate = getModelEstimate(
+    selectedManagedModel,
+    "peer-review",
+    1,
+    batchCount,
+    { includeEthics: peerIncludeEthics },
+  );
+  const batchEstimateText = formatModelEstimate(batchEstimate);
+  const canSubmitBatch = !batchIsPending && !batchRunning && managedModelReady &&
     peerPrompt.trim().length > 0 && batchCount >= 1 &&
     (eligibleCount === null || batchCount <= eligibleCount);
 
@@ -1028,7 +1031,16 @@ export default function GenerationDashboard() {
       onChange={setModelConfig}
       hasPlatformAccess={hasPlatformAccess}
       activeType={(activeType === "peer-review-batch" ? "peer-review" : activeType === "reproduce" ? "reproduction" : activeType) as GenerationCostType}
-      costMultiplier={(activeType === "peer-review" || activeType === "peer-review-batch") && peerIncludeEthics ? 2 : 1}
+      quantity={activeType === "peer-review-batch" ? batchCount : 1}
+      costOptions={{
+        includeEthics: (activeType === "peer-review" || activeType === "peer-review-batch") && peerIncludeEthics,
+        fullTextCount: activeType === "literature-review" ? fullTextCount : undefined,
+        judgeModelName: activeType === "reproduce" ? reproJudgeConfig.modelName : undefined,
+      }}
+      models={generationConfig?.platformModels ?? []}
+      configLoading={generationConfigLoading}
+      configError={generationConfigError}
+      setupMessage={generationConfig?.setupMessage}
     />
   );
 
@@ -1077,7 +1089,7 @@ export default function GenerationDashboard() {
             </h1>
             <div className="h-1 w-20 bg-primary/50 mb-6" />
             <p className="text-muted-foreground max-w-2xl">
-              Use your own API keys to plug Machine Institute agents to one of our journals and produce research.
+              Choose a Replit-managed model, review the estimated usage, and run a Machine Institute agent in one of our journals.
             </p>
           </FadeIn>
 
@@ -1619,7 +1631,6 @@ export default function GenerationDashboard() {
                 {activeType === "reproduce" && (() => {
                   const papers = reproAvailableData?.papers || [];
                   const currentModel = modelConfig.modelName || "";
-                  const platformModels = generationConfig?.platformModels || [];
                   const gpuOptions = reproConfig?.gpuOptions || ["T4", "A10G", "A100", "H100"];
                   return (
                     <>
@@ -1637,7 +1648,7 @@ export default function GenerationDashboard() {
                             {gpuOptions.map(g => <option key={g} value={g}>{g}</option>)}
                           </select>
                           <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
-                            Modal GPU sandbox, billed to the institute. A10G (24 GB) fits 8B models in fp16; pick A100/H100 for larger models. Budget: 100 tool calls, 2 h wall-clock, 15 min per command.
+                            Modal GPU sandbox, billed separately to the institute and excluded from the model estimate. A GPU price estimate is not available here. A10G (24 GB) fits 8B models in fp16; pick A100/H100 for larger models. Budget: 100 tool calls, 2 h wall-clock, 15 min per command.
                           </p>
                           {reproConfig && !reproConfig.sandboxConfigured && (
                             <p className="text-[10px] font-mono text-red-400 mt-2" data-testid="text-repro-sandbox-missing">
@@ -1654,34 +1665,21 @@ export default function GenerationDashboard() {
                           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
                             Judge model
                           </label>
-                          {modelConfig.providerMode === "platform" ? (
-                            <select
-                              value={reproJudgeModel}
-                              onChange={(e) => setReproJudgeModel(e.target.value)}
-                              className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
-                              data-testid="select-repro-judge-model"
-                            >
-                              <option value="">Same as reproduction agent</option>
-                              {platformModels.map(m => <option key={m.model} value={m.model}>{m.label}</option>)}
-                            </select>
-                          ) : (
-                            <input
-                              type="text"
-                              value={reproJudgeModel}
-                              onChange={(e) => setReproJudgeModel(e.target.value)}
-                              placeholder="Same as reproduction agent"
-                              className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-primary/50"
-                              data-testid="input-repro-judge-model"
-                            />
-                          )}
+                          <ModelSelector
+                            value={reproJudgeConfig}
+                            onChange={setReproJudgeConfig}
+                            hasPlatformAccess={hasPlatformAccess}
+                            activeType="judge"
+                            label="Judge model"
+                            models={generationConfig?.platformModels ?? []}
+                            configLoading={generationConfigLoading}
+                            configError={generationConfigError}
+                            setupMessage={generationConfig?.setupMessage}
+                            compact
+                          />
                           <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
-                            A separate model reads the agent's logbook and every command output, then issues verified / falsified / toy / inconclusive per result (in the ICML hackathon, GLM-5.2 played this role). Uses the same provider and key as the reproduction agent.
+                            A separately selected managed model reads the agent's logbook and every command output, then issues verified / falsified / toy / inconclusive per result. Its estimated model usage is shown above; Modal GPU usage is separate.
                           </p>
-                          {reproAnthropicByoc && (
-                            <p className="text-[10px] font-mono text-red-400 mt-2" data-testid="text-repro-anthropic-unsupported">
-                              The reproduction agent needs tool calling through an OpenAI-compatible API — choose OpenAI or OpenRouter for BYOC.
-                            </p>
-                          )}
                         </div>
                       </div>
 
@@ -2055,9 +2053,9 @@ export default function GenerationDashboard() {
                     </button>
                     {activeType === "peer-review-batch" && (
                       <span className="text-xs font-mono text-muted-foreground/70" data-testid="text-batch-credits">
-                        {totalBatchCredits !== null
-                          ? `Estimated total: ~${totalBatchCredits} credit${totalBatchCredits === 1 ? "" : "s"} (${perRunCredits}/review × ${batchCount})`
-                          : "Uses your own API key (BYOC) — no platform credits."}
+                        {batchEstimateText
+                          ? `Estimated batch total: ${batchEstimateText} (${batchCount} review${batchCount === 1 ? "" : "s"}${peerIncludeEthics ? " with H co-author audits" : ""})`
+                          : "Pricing estimate unavailable. Actual Replit model usage is billed separately."}
                       </span>
                     )}
                   </div>
@@ -2531,20 +2529,14 @@ export default function GenerationDashboard() {
                       >
                         View failure details
                       </Link>
-                      <button
-                        onClick={() => retryReproductionMutation.mutate(run.id)}
-                        disabled={retryReproductionMutation.isPending && retryReproductionMutation.variables === run.id}
-                        className="text-[10px] font-mono text-primary hover:underline flex items-center gap-1 disabled:opacity-40"
+                      <Link
+                        href={`/reproductions/${run.id}`}
+                        className="text-[10px] font-mono text-primary hover:underline flex items-center gap-1"
                         data-testid={`button-retry-repro-${run.id}`}
                       >
-                        {retryReproductionMutation.isPending && retryReproductionMutation.variables === run.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-                        Retry reproduction
-                      </button>
-                      {retryReproductionMutation.isError && retryReproductionMutation.variables === run.id && (
-                        <span className="text-[10px] font-mono text-red-400" data-testid="text-retry-repro-error">
-                          {retryReproductionMutation.error.message}
-                        </span>
-                      )}
+                        <RotateCcw className="w-3 h-3" />
+                        Choose models and retry
+                      </Link>
                     </div>
                   )}
 
@@ -2566,20 +2558,14 @@ export default function GenerationDashboard() {
                         {showMetadata === run.id ? "Hide" : "Show"} metadata
                       </button>
                       {run.overallVerdict === "inconclusive" && hasPlatformAccess && user?.id === run.userId && (
-                        <button
-                          onClick={() => retryReproductionMutation.mutate(run.id)}
-                          disabled={retryReproductionMutation.isPending && retryReproductionMutation.variables === run.id}
-                          className="text-[10px] font-mono text-yellow-300 hover:underline flex items-center gap-1 disabled:opacity-40"
+                        <Link
+                          href={`/reproductions/${run.id}`}
+                          className="text-[10px] font-mono text-yellow-300 hover:underline flex items-center gap-1"
                           data-testid={`button-rerun-inconclusive-${run.id}`}
                         >
-                          {retryReproductionMutation.isPending && retryReproductionMutation.variables === run.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-                          Rerun reproduction
-                        </button>
-                      )}
-                      {retryReproductionMutation.isError && retryReproductionMutation.variables === run.id && (
-                        <span className="text-[10px] font-mono text-red-400" data-testid="text-rerun-repro-error">
-                          {retryReproductionMutation.error.message}
-                        </span>
+                          <RotateCcw className="w-3 h-3" />
+                          Choose models and rerun
+                        </Link>
                       )}
                     </div>
                   )}
