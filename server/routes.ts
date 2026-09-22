@@ -27,6 +27,8 @@ import { INITIATIVE_DOC_IDS, JOURNAL_DISPLAY_NAMES, INITIATIVE_SLUGS, getJournal
 import { fetchJournalPaperCatalogue } from "./paper-catalogue";
 import { runReproduction } from "./reproduce";
 import { canRetryReproduction } from "./reproduction-retry";
+import { assertReproductionProviderCredit, ProviderCredentialPreflightError, ProviderCreditPreflightError } from "./provider-credit-preflight";
+import { isProviderPaymentFailure, ProviderPaymentError } from "./llm-context";
 import { createFallbackReproductionDiagnostics, getReproductionFailureDiagnostics, type ReproductionFailureDiagnostics } from "./reproduction-diagnostics";
 import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt, verdictsToRevisions, type ClaimVerdict } from "./prompts/reproduce";
 import { GPU_OPTIONS, DEFAULT_GPU, resolveGpu, isModalConfigured } from "./modal-sandbox";
@@ -2889,6 +2891,15 @@ I will now provide the papers.`;
         apiKey: modelConfig.apiKey,
       };
 
+      try {
+        await assertReproductionProviderCredit(modelConfig, message => console.warn(message));
+      } catch (error) {
+        if (error instanceof ProviderCreditPreflightError || error instanceof ProviderCredentialPreflightError) {
+          return res.status(error instanceof ProviderCreditPreflightError ? 402 : 400).json({ error: error.message });
+        }
+        throw error;
+      }
+
       const existing = await storage.getReproducedPapersForJournal(effectiveJournalId);
       if (existing.some(r => r.documentId === documentId && r.modelName === resolvedModel)) {
         return res.status(409).json({ error: "This paper already has a reproduction run with this model. Select a different model to reproduce it again." });
@@ -2971,6 +2982,14 @@ I will now provide the papers.`;
         modelName: source.judgeModelName || resolvedModel,
         apiKey,
       };
+      try {
+        await assertReproductionProviderCredit(modelConfig, message => console.warn(message));
+      } catch (error) {
+        if (error instanceof ProviderCreditPreflightError || error instanceof ProviderCredentialPreflightError) {
+          return res.status(error instanceof ProviderCreditPreflightError ? 402 : 400).json({ error: error.message });
+        }
+        throw error;
+      }
       const parsed = insertReproductionSchema.safeParse({
         projectId: source.projectId,
         agentId: source.agentId,
@@ -3131,6 +3150,7 @@ I will now provide the papers.`;
       await emit("reproduction-completed", `Reproduction completed — overall verdict: ${result.overall} (${result.counts.verified}/${result.counts.total} verified).`);
     } catch (err: any) {
       console.error(`[Reproduction ${reproductionId}] Generation failed.`);
+      const paymentFailure = isProviderPaymentFailure(err);
       // Release the active-run lock before any best-effort diagnostic/event I/O.
       // A snapshot storage outage must not strand a run in "generating".
       await storage.updateReproduction(reproductionId, {
@@ -3149,7 +3169,19 @@ I will now provide the papers.`;
       } catch {
         console.error(`[Reproduction ${reproductionId}] Private diagnostic snapshot could not be saved.`);
       }
-      await emit("failure", "Reproduction failed. No report was completed; institute members can retry the run.");
+      if (paymentFailure) {
+        const transient = err instanceof ProviderPaymentError
+          && err.limitSource === "openrouter_in_flight_budget"
+          && err.paymentReason === "in_flight_budget_exhausted";
+        const owner = modelConfig.providerMode === "byoc"
+          ? "your OpenRouter account"
+          : "the deployment's OpenRouter account";
+        await emit("failure", transient
+          ? `Reproduction stopped because ${owner} temporarily reached its in-flight spending limit. No report was completed; retry after the temporary limit clears.`
+          : `Reproduction stopped because ${owner} could not fund the model request. No report was completed; add OpenRouter credits or check the key's spending limit before retrying. OpenRouter credits are separate from a Replit subscription.`);
+      } else {
+        await emit("failure", "Reproduction failed. No report was completed; institute members can retry the run.");
+      }
     }
   }
 

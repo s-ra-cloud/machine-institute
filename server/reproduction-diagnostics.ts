@@ -59,6 +59,9 @@ export class ReproductionDiagnostics {
     argumentParse?: string; toolName?: string; validationErrors?: readonly string[];
     responseExcerpt?: string; toolExcerpt?: string; stopReason?: string;
     providerStatus?: number; providerCode?: string; contextLimit?: number;
+    providerReason?: string;
+    providerLimitSource?: string; providerPaymentReason?: string;
+    providerRetryAfterMs?: number;
     requestedInputTokens?: number; requestedOutputTokens?: number; requestedTotalTokens?: number;
   }): void {
     this.data.rounds = Math.max(this.data.rounds, safeNumber(event.round));
@@ -79,7 +82,15 @@ export class ReproductionDiagnostics {
     if (event.providerStatus !== undefined) safe.providerStatus = safeNumber(event.providerStatus);
     if (event.providerCode !== undefined) safe.providerCode = enumValue(event.providerCode,
       ["context_length_exceeded", "prompt_too_long", "invalid_request_error",
-        "max_tokens", "max_num_tokens", "request_too_large", "unknown"]);
+        "max_tokens", "max_num_tokens", "request_too_large",
+        "payment_required", "provider_credit", "unknown"]);
+    if (event.providerReason !== undefined) safe.providerReason = enumValue(event.providerReason,
+      ["provider-credit", "payment", "context", "unknown"]);
+    if (event.providerLimitSource !== undefined) safe.providerLimitSource = enumValue(event.providerLimitSource,
+      ["openrouter_in_flight_budget", "openrouter_key_limit", "openrouter_credits"]);
+    if (event.providerPaymentReason !== undefined) safe.providerPaymentReason = enumValue(event.providerPaymentReason,
+      ["in_flight_budget_exhausted", "weight_exceeds_budget"]);
+    if (event.providerRetryAfterMs !== undefined) safe.providerRetryAfterMs = safeNumber(event.providerRetryAfterMs);
     if (event.contextLimit !== undefined) safe.contextLimit = safeNumber(event.contextLimit);
     if (event.requestedInputTokens !== undefined) safe.requestedInputTokens = safeNumber(event.requestedInputTokens);
     if (event.requestedOutputTokens !== undefined) safe.requestedOutputTokens = safeNumber(event.requestedOutputTokens);
@@ -103,7 +114,9 @@ export class ReproductionDiagnostics {
 
   stop(reason: string): void {
     this.data.stopReason = enumValue(reason,
-      ["model", "tool-budget", "deadline", "round-cap", "no-progress", "exception", "context-budget", "completion-validation", "cleanup-failed"]);
+      ["model", "tool-budget", "deadline", "round-cap", "no-progress", "exception",
+        "context-budget", "provider-payment", "provider-credit",
+        "completion-validation", "cleanup-failed"]);
   }
 
   private dropEvent(): void {

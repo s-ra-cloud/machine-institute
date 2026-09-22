@@ -2,8 +2,16 @@ import OpenAI from "openai";
 import {
   ContextBudgetError,
   MAX_CONTEXT_RETRIES,
+  MAX_PROVIDER_PAYMENT_RETRIES,
+  MAX_PROVIDER_RETRY_DELAY_MS,
+  ProviderPaymentError,
   RequestContextBudget,
   isContextOverflow,
+  isProviderPaymentFailure,
+  isTransientProviderPaymentFailure,
+  providerPaymentMetadata,
+  providerPaymentReason,
+  providerRetryAfterMs,
   providerContextConstraint,
   reportedContextLimit,
 } from "./llm-context";
@@ -167,7 +175,7 @@ export async function generateWithConfig(
       if (contextRequest) {
         throw sanitizeContextRequestError(
           { status: response.status, message: errorText },
-          model,
+          model, config,
         );
       }
       throw new Error(`Anthropic API request failed (${response.status})`);
@@ -175,7 +183,7 @@ export async function generateWithConfig(
 
     const result: AnthropicMessagesResponse = await response.json() as AnthropicMessagesResponse;
     if (contextRequest && (result.type === "error" || (result as any).error)) {
-      throw sanitizeContextRequestError((result as any).error ?? result, model);
+      throw sanitizeContextRequestError((result as any).error ?? result, model, config);
     }
     const textBlock = result.content?.find((block) => block.type === "text");
     const content = textBlock?.text || "";
@@ -206,7 +214,7 @@ export async function generateWithConfig(
     const status = err?.status ?? err?.statusCode ?? "unknown";
     const body = err?.error ?? err?.message ?? String(err);
     if (contextRequest) {
-      throw sanitizeContextRequestError({ ...err, status, message: body }, model);
+      throw sanitizeContextRequestError({ ...err, status, message: body }, model, config);
     }
     const diagnostic = safeProviderErrorDiagnostic(err);
     console.error(`[LLM] API request failed — model=${model} provider=${config.provider} status=${diagnostic.providerStatus ?? "unknown"} code=${diagnostic.providerCode ?? "unknown"}`);
@@ -215,7 +223,7 @@ export async function generateWithConfig(
 
   if (completion?.error) {
     if (contextRequest) {
-      throw sanitizeContextRequestError(completion.error, model);
+      throw sanitizeContextRequestError(completion.error, model, config);
     }
     const diagnostic = safeProviderErrorDiagnostic(completion.error);
     console.error(`[LLM] API returned an error — model=${model} provider=${config.provider} status=${diagnostic.providerStatus ?? "unknown"} code=${diagnostic.providerCode ?? "unknown"}`);
@@ -233,8 +241,24 @@ export async function generateWithConfig(
   return { content, model, provider: config.provider };
 }
 
-function sanitizeContextRequestError(error: any, model: string): Error {
+export function sanitizeContextRequestError(
+  error: any,
+  model: string,
+  config?: Pick<ModelProviderConfig, "providerMode">,
+): Error {
   const status = error?.status ?? error?.statusCode;
+  const paymentReason = providerPaymentReason(error);
+  if (paymentReason) {
+    const numericStatus = Number(status);
+    const paymentStatus = Number.isSafeInteger(numericStatus) ? numericStatus
+      : paymentReason === "payment_required" ? 402 : undefined;
+    const result = new ProviderPaymentError(
+      paymentStatus, paymentReason, providerPaymentMetadata(error), config?.providerMode,
+      providerRetryAfterMs(error) || undefined,
+    );
+    Object.assign(result, { statusCode: paymentStatus, model });
+    return result;
+  }
   const code = error?.code ?? error?.type ?? "context_request_failed";
   const rawMessage = contextRequestErrorText(error);
   const contextLike = isContextOverflow(error);
@@ -366,6 +390,10 @@ export interface ToolLoopOutcome {
   stopReason?: string;
   providerStatus?: number;
   providerCode?: string;
+  providerReason?: "provider-credit" | "payment" | "context" | "unknown";
+  providerLimitSource?: "openrouter_in_flight_budget" | "openrouter_key_limit" | "openrouter_credits";
+  providerPaymentReason?: "in_flight_budget_exhausted" | "weight_exceeds_budget";
+  providerRetryAfterMs?: number;
   contextLimit?: number;
   requestedInputTokens?: number;
   requestedOutputTokens?: number;
@@ -429,20 +457,32 @@ const safeFinishReason = (value: unknown): NonNullable<ToolLoopOutcome["finishRe
 const PROVIDER_CODES = new Set([
   "context_length_exceeded", "prompt_too_long", "invalid_request_error",
   "max_tokens", "max_num_tokens", "request_too_large",
+  "payment_required", "provider_credit",
 ]);
 
 /** Numeric/allowlisted provider facts safe for private diagnostics. */
 export function safeProviderErrorDiagnostic(error: unknown): Pick<ToolLoopOutcome,
-  "providerStatus" | "providerCode" | "contextLimit" | "requestedInputTokens"
-  | "requestedOutputTokens" | "requestedTotalTokens"> {
+  "providerStatus" | "providerCode" | "providerReason" | "contextLimit" | "requestedInputTokens"
+  | "requestedOutputTokens" | "requestedTotalTokens" | "providerLimitSource"
+  | "providerPaymentReason" | "providerRetryAfterMs"> {
   const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
   const statusValue = Number(value.status ?? value.statusCode);
   const rawCode = String(value.code ?? value.type ?? "");
   const constraint = providerContextConstraint(error);
+  const payment = providerPaymentReason(error);
+  const context = !payment && isContextOverflow(error);
+  const paymentMetadata = providerPaymentMetadata(error);
+  const retryAfterMs = providerRetryAfterMs(error);
+  const providerStatus = Number.isSafeInteger(statusValue) && statusValue >= 100 && statusValue <= 599
+    ? statusValue : payment === "payment_required" ? 402 : undefined;
   return {
-    providerStatus: Number.isSafeInteger(statusValue) && statusValue >= 100 && statusValue <= 599
-      ? statusValue : undefined,
-    providerCode: PROVIDER_CODES.has(rawCode) ? rawCode : "unknown",
+    providerStatus,
+    providerCode: payment ?? (PROVIDER_CODES.has(rawCode) ? rawCode : "unknown"),
+    providerReason: payment === "provider_credit" ? "provider-credit"
+      : payment ? "payment" : context ? "context" : "unknown",
+    providerLimitSource: paymentMetadata.limitSource,
+    providerPaymentReason: paymentMetadata.reason,
+    providerRetryAfterMs: retryAfterMs || undefined,
     contextLimit: constraint?.limit,
     requestedInputTokens: constraint?.requestedInputTokens,
     requestedOutputTokens: constraint?.requestedOutputTokens,
@@ -582,6 +622,15 @@ function activeRequestTimeout(deadlineMs: number, protectedRequest: boolean): nu
   return Math.max(1, Math.min(600_000, deadlineMs - Date.now()));
 }
 
+async function waitForTransientProviderPayment(error: unknown, deadlineMs: number): Promise<boolean> {
+  if (!isTransientProviderPaymentFailure(error)) return false;
+  const delayMs = providerRetryAfterMs(error);
+  if (delayMs > MAX_PROVIDER_RETRY_DELAY_MS) return false;
+  if (Date.now() + delayMs >= deadlineMs) return false;
+  if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+  return Date.now() < deadlineMs;
+}
+
 export async function runToolLoop(
   config: ModelProviderConfig,
   systemPrompt: string,
@@ -593,7 +642,7 @@ export async function runToolLoop(
   if (config.provider === "anthropic" && config.providerMode === "byoc") {
     throw new Error("Tool-using agents require an OpenAI-compatible provider (platform, OpenAI, or OpenRouter). Anthropic BYOC is not supported for this workflow yet.");
   }
-  const client = createLLMClient(config, options.contextProtection ? { maxRetries: 0 } : {});
+  const client = createLLMClient(config, { maxRetries: 0 });
   if (!client) throw new Error(`Could not create LLM client for provider: ${config.provider}`);
   const model = resolveModelName(config);
   const maxTokens = options.maxTokens ?? 8000;
@@ -664,6 +713,7 @@ export async function runToolLoop(
     };
     let completion: any;
     let contextReductions = 0;
+    let paymentRetries = 0;
     while (true) {
       let request: Record<string, unknown>;
       try {
@@ -697,6 +747,15 @@ export async function runToolLoop(
         );
       } catch (err: any) {
         if (
+          paymentRetries < MAX_PROVIDER_PAYMENT_RETRIES
+          && await waitForTransientProviderPayment(err, options.deadlineMs)
+        ) {
+          paymentRetries++;
+          await observe({ kind: "provider-error", round, callCount: toolCalls.length,
+            ...safeProviderErrorDiagnostic(err) });
+          continue;
+        }
+        if (
           requestBudget
           && isContextOverflow(err)
            && contextReductions < MAX_CONTEXT_RETRIES
@@ -716,6 +775,8 @@ export async function runToolLoop(
         }
          await observe({ kind: "provider-error", round, callCount: toolCalls.length,
            stopReason: "provider-request-failed", ...safeProviderErrorDiagnostic(err) });
+        const sanitizedError = sanitizeContextRequestError(err, model, config);
+        if (isProviderPaymentFailure(sanitizedError)) throw sanitizedError;
         if (options.allowResourceStopFallback) {
           const fallback = fallbackAfterResourceStop();
           if (fallback) return fallback;
@@ -723,10 +784,19 @@ export async function runToolLoop(
         if (requestBudget && isContextOverflow(err)) {
           throw terminalContextError(requestBudget, request, model);
         }
-         throw sanitizeContextRequestError(err, model);
+         throw sanitizedError;
       }
       if (completion?.error) {
         const completionError = completion.error;
+        if (
+          paymentRetries < MAX_PROVIDER_PAYMENT_RETRIES
+          && await waitForTransientProviderPayment(completionError, options.deadlineMs)
+        ) {
+          paymentRetries++;
+          await observe({ kind: "provider-error", round, callCount: toolCalls.length,
+            ...safeProviderErrorDiagnostic(completionError) });
+          continue;
+        }
         if (
           requestBudget
           && isContextOverflow(completionError)
@@ -747,6 +817,8 @@ export async function runToolLoop(
         }
          await observe({ kind: "provider-error", round, callCount: toolCalls.length,
            stopReason: "provider-error-response", ...safeProviderErrorDiagnostic(completionError) });
+        const sanitizedError = sanitizeContextRequestError(completionError, model, config);
+        if (isProviderPaymentFailure(sanitizedError)) throw sanitizedError;
         if (options.allowResourceStopFallback) {
           const fallback = fallbackAfterResourceStop();
           if (fallback) return fallback;
@@ -754,7 +826,7 @@ export async function runToolLoop(
         if (requestBudget && isContextOverflow(completionError)) {
           throw terminalContextError(requestBudget, request, model);
         }
-        throw sanitizeContextRequestError(completionError, model);
+        throw sanitizedError;
       }
       break;
     }
@@ -927,6 +999,7 @@ export async function runToolLoop(
   };
   let finalCompletion: any;
   let finalReductions = 0;
+  let finalPaymentRetries = 0;
   while (true) {
     let request: Record<string, unknown>;
     try {
@@ -955,6 +1028,15 @@ export async function runToolLoop(
       );
     } catch (err: any) {
       if (
+        finalPaymentRetries < MAX_PROVIDER_PAYMENT_RETRIES
+        && await waitForTransientProviderPayment(err, options.deadlineMs)
+      ) {
+        finalPaymentRetries++;
+        await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
+          ...safeProviderErrorDiagnostic(err) });
+        continue;
+      }
+      if (
         requestBudget
         && isContextOverflow(err)
          && finalReductions < MAX_CONTEXT_RETRIES
@@ -975,10 +1057,19 @@ export async function runToolLoop(
       }
        await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
          stopReason: "provider-request-failed", ...safeProviderErrorDiagnostic(err) });
-       throw sanitizeContextRequestError(err, model);
+       throw sanitizeContextRequestError(err, model, config);
     }
     if (finalCompletion?.error) {
       const completionError = finalCompletion.error;
+      if (
+        finalPaymentRetries < MAX_PROVIDER_PAYMENT_RETRIES
+        && await waitForTransientProviderPayment(completionError, options.deadlineMs)
+      ) {
+        finalPaymentRetries++;
+        await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
+          ...safeProviderErrorDiagnostic(completionError) });
+        continue;
+      }
       if (
         requestBudget
         && isContextOverflow(completionError)
@@ -1000,7 +1091,7 @@ export async function runToolLoop(
       }
        await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
          stopReason: "provider-error-response", ...safeProviderErrorDiagnostic(completionError) });
-      throw sanitizeContextRequestError(completionError, model);
+      throw sanitizeContextRequestError(completionError, model, config);
     }
     break;
   }

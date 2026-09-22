@@ -1,5 +1,6 @@
 import { getContextWindow, runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolCallRecord } from "./model-service";
 import { loadPaperContext } from "./ethics-review";
+import { assertReproductionRuntimeProviderCredits } from "./provider-credit-preflight";
 import { fetchContributionMaterials, materialSandboxPath, formatMaterialsInventory } from "./fs-materials";
 import { ReproductionSandbox, isModalConfigured, type GpuType } from "./modal-sandbox";
 import {
@@ -20,7 +21,7 @@ import {
 } from "./prompts/reproduce";
 import { deriveContributionKeywords } from "./prompts/peer-review";
 import { ReproductionSession } from "./reproduction-session";
-import { ContextBudgetError, isContextOverflow, RequestContextBudget } from "./llm-context";
+import { ContextBudgetError, isContextOverflow, isProviderPaymentFailure, RequestContextBudget } from "./llm-context";
 import { runBoundedReproductionJudge } from "./reproduction-judge";
 import { ACTIVE_INSTRUCTION_MAX_BYTES, describeToolContext, RUNTIME_CONTEXT_HEADROOM } from "./tool-context";
 import { ReproductionDiagnostics, attachReproductionFailureDiagnostics, type ReproductionFailureDiagnostics } from "./reproduction-diagnostics";
@@ -412,7 +413,8 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
     return result;
   } catch (error) {
     try {
-      if (error instanceof ContextBudgetError) diagnostics.stop("context-budget");
+      if (isProviderPaymentFailure(error)) diagnostics.stop("provider-payment");
+      else if (error instanceof ContextBudgetError) diagnostics.stop("context-budget");
     } catch { /* Capture failure must not replace the original error. */ }
     attachReproductionFailureDiagnostics(error, diagnostics);
     throw error;
@@ -449,6 +451,13 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   if (!isModalConfigured()) {
     throw new Error("Reproduction sandboxes are not configured (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET missing).");
   }
+
+  await assertReproductionRuntimeProviderCredits(
+    [modelConfig, judgeModelConfig],
+    message => {
+      try { console.warn(message); } catch { /* Logging must not block runtime entry. */ }
+    },
+  );
 
   await emitEvent("reproduction-init", `Starting reproduction of "${paperTitle || documentId}" in ${journalDisplayName} on a ${gpu} sandbox.`);
 
@@ -723,7 +732,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     results = judged.results;
   } catch (err) {
     // An ungradable context must never become a self-certified reproduction.
-    if (err instanceof ContextBudgetError || isContextOverflow(err)) throw err;
+    if (err instanceof ContextBudgetError || isContextOverflow(err) || isProviderPaymentFailure(err)) throw err;
     await emitEvent("reproduction-judge", `Judge call failed (${err instanceof Error ? err.message : String(err)}); falling back to the agent's own statuses.`);
   }
   if (results.length === 0) {

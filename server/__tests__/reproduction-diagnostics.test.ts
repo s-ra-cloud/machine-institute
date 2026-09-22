@@ -79,6 +79,28 @@ describe("private reproduction diagnostics", () => {
     expect(JSON.stringify(saved)).not.toMatch(/PRIVATE_PROVIDER_BODY|PRIVATE_KEY/);
   });
 
+  it("retains only allowlisted payment reasons and stop classifications", () => {
+    const diagnostics = new ReproductionDiagnostics();
+    diagnostics.observe({
+      kind: "provider-error", providerStatus: 402,
+      providerCode: "payment_required", providerReason: "payment",
+      providerLimitSource: "openrouter_in_flight_budget",
+      providerPaymentReason: "in_flight_budget_exhausted",
+      providerRetryAfterMs: 12_000,
+      rawBody: "PRIVATE_PROVIDER_BILLING_BODY",
+    } as any);
+    diagnostics.stop("provider-payment");
+    const snapshot = diagnostics.snapshot();
+    expect(snapshot.stopReason).toBe("provider-payment");
+    expect(snapshot.events[0]).toMatchObject({
+      providerStatus: 402, providerCode: "payment_required", providerReason: "payment",
+      providerLimitSource: "openrouter_in_flight_budget",
+      providerPaymentReason: "in_flight_budget_exhausted",
+      providerRetryAfterMs: 12_000,
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("PRIVATE_PROVIDER_BILLING_BODY");
+  });
+
   it("capture failure never throws or replaces the original failure", () => {
     const diagnostics = new ReproductionDiagnostics();
     const original = new Error("original");

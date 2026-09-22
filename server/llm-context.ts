@@ -5,6 +5,21 @@ import type { ModelProviderConfig } from "./model-service";
 export const CONSERVATIVE_CONTEXT_LIMIT = 32_768;
 export const CONTEXT_SAFETY_TOKENS = 1_024;
 export const MAX_CONTEXT_RETRIES = 2;
+export const MAX_PROVIDER_PAYMENT_RETRIES = 2;
+export const MAX_PROVIDER_RETRY_DELAY_MS = 30_000;
+
+export type ProviderLimitSource =
+  | "openrouter_in_flight_budget"
+  | "openrouter_key_limit"
+  | "openrouter_credits";
+export type ProviderPaymentReason =
+  | "in_flight_budget_exhausted"
+  | "weight_exceeds_budget";
+
+export interface ProviderPaymentMetadata {
+  limitSource?: ProviderLimitSource;
+  reason?: ProviderPaymentReason;
+}
 
 export interface ProviderContextConstraint {
   /** A total context window includes both input and requested completion. */
@@ -23,6 +38,43 @@ export class ContextBudgetError extends Error {
   }
 }
 
+export class ProviderPaymentError extends Error {
+  readonly code = "PROVIDER_PAYMENT_REQUIRED";
+  readonly status?: number;
+  readonly providerCode: "payment_required" | "provider_credit";
+  readonly limitSource?: ProviderLimitSource;
+  readonly paymentReason?: ProviderPaymentReason;
+  readonly retryAfterMs?: number;
+  constructor(
+    status?: number,
+    reason: "payment_required" | "provider_credit" = "payment_required",
+    metadata: ProviderPaymentMetadata = {},
+    providerMode?: "platform" | "byoc",
+    retryAfterMs?: number,
+  ) {
+    const transient = metadata.limitSource === "openrouter_in_flight_budget"
+      && metadata.reason === "in_flight_budget_exhausted";
+    const delayed = retryAfterMs !== undefined && retryAfterMs > MAX_PROVIDER_RETRY_DELAY_MS;
+    super(providerMode === "platform"
+      ? transient
+        ? delayed
+          ? "The application OpenRouter account is temporarily at its in-flight spending limit. OpenRouter requested a longer retry delay; retry later."
+          : "The application OpenRouter account is temporarily at its in-flight spending limit. Retry shortly."
+        : "The application OpenRouter account cannot cover this request. An administrator must check OpenRouter credits or API key spending caps, then retry."
+      : transient
+        ? delayed
+          ? "The model provider account is temporarily at its in-flight spending limit. The provider requested a longer retry delay; retry later."
+          : "The model provider account is temporarily at its in-flight spending limit. Retry shortly."
+        : `${providerMode === "byoc" ? "Your model provider account" : "The model provider account"} could not authorize this paid request${status === 402 ? " (HTTP 402)" : ""}. Check the account's credits and key limits, then retry.`);
+    this.name = "ProviderPaymentError";
+    this.status = status;
+    this.providerCode = reason;
+    this.limitSource = metadata.limitSource;
+    this.paymentReason = metadata.reason;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
 function errorText(error: unknown, depth = 0): string {
   if (typeof error === "string") return error;
   if (!error || typeof error !== "object" || depth > 4) return "";
@@ -31,8 +83,108 @@ function errorText(error: unknown, depth = 0): string {
     .map(key => errorText(object[key], depth + 1)).filter(Boolean).join(" ");
 }
 
+function explicitHttpStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const value = error as Record<string, unknown>;
+  const candidate = Number(value.status ?? value.statusCode);
+  return Number.isSafeInteger(candidate) && candidate >= 100 && candidate <= 599
+    ? candidate : undefined;
+}
+
+function nestedPaymentCode(error: unknown, depth = 0): boolean {
+  if (!error || typeof error !== "object" || depth > 4) return false;
+  const value = error as Record<string, unknown>;
+  if (Number(value.code) === 402) return true;
+  return ["error", "body", "data", "metadata", "cause"].some(key =>
+    nestedPaymentCode(value[key], depth + 1));
+}
+
+/**
+ * Provider payment detection deliberately precedes context-message matching.
+ * An explicit non-402 HTTP status remains authoritative; only status-less
+ * payloads may use a nested numeric code or unambiguous credit wording.
+ */
+export function providerPaymentReason(error: unknown): "payment_required" | "provider_credit" | undefined {
+  if (error instanceof ProviderPaymentError) return error.providerCode;
+  const status = explicitHttpStatus(error);
+  if (status === 402) return "payment_required";
+  if (status !== undefined) return undefined;
+  if (nestedPaymentCode(error)) return "payment_required";
+  return /\b(?:insufficient|not enough|more)\s+(?:provider\s+)?credits?\b|\bcan only afford\b|\brequires? more credits?\b/i.test(errorText(error))
+    ? "provider_credit" : undefined;
+}
+
+export function isProviderPaymentError(error: unknown): error is ProviderPaymentError {
+  return error instanceof ProviderPaymentError;
+}
+
+export function isProviderPaymentFailure(error: unknown): boolean {
+  return providerPaymentReason(error) !== undefined;
+}
+
+const LIMIT_SOURCES = new Set<ProviderLimitSource>([
+  "openrouter_in_flight_budget", "openrouter_key_limit", "openrouter_credits",
+]);
+const PAYMENT_REASONS = new Set<ProviderPaymentReason>([
+  "in_flight_budget_exhausted", "weight_exceeds_budget",
+]);
+
+/** Extract only documented enum values; provider remedy text is never retained. */
+export function providerPaymentMetadata(error: unknown, depth = 0): ProviderPaymentMetadata {
+  if (error instanceof ProviderPaymentError) {
+    return { limitSource: error.limitSource, reason: error.paymentReason };
+  }
+  if (!error || typeof error !== "object" || depth > 4) return {};
+  const value = error as Record<string, unknown>;
+  const metadata = value.metadata && typeof value.metadata === "object"
+    ? value.metadata as Record<string, unknown> : undefined;
+  const rawSource = String(metadata?.limit_source ?? value.limit_source ?? "");
+  const rawReason = String(metadata?.reason ?? value.reason ?? "");
+  const own: ProviderPaymentMetadata = {
+    limitSource: LIMIT_SOURCES.has(rawSource as ProviderLimitSource)
+      ? rawSource as ProviderLimitSource : undefined,
+    reason: PAYMENT_REASONS.has(rawReason as ProviderPaymentReason)
+      ? rawReason as ProviderPaymentReason : undefined,
+  };
+  if (own.limitSource || own.reason) return own;
+  for (const key of ["error", "body", "data", "cause"]) {
+    const nested = providerPaymentMetadata(value[key], depth + 1);
+    if (nested.limitSource || nested.reason) return nested;
+  }
+  return {};
+}
+
+export function isTransientProviderPaymentFailure(error: unknown): boolean {
+  if (!isProviderPaymentFailure(error)) return false;
+  const metadata = providerPaymentMetadata(error);
+  return metadata.limitSource === "openrouter_in_flight_budget"
+    && metadata.reason === "in_flight_budget_exhausted";
+}
+
+/** Numeric Retry-After seconds only; HTTP dates and arbitrary provider text are ignored. */
+export function providerRetryAfterMs(error: unknown, depth = 0): number {
+  if (!error || typeof error !== "object" || depth > 4) return 0;
+  const value = error as Record<string, any>;
+  const headerValue = typeof value.headers?.get === "function"
+    ? value.headers.get("retry-after")
+    : value.headers?.["retry-after"] ?? value.headers?.["Retry-After"];
+  const raw = value.retryAfter ?? value.retry_after ?? headerValue;
+  if ((typeof raw === "number" || (typeof raw === "string" && /^\d+(?:\.\d+)?$/.test(raw.trim())))) {
+    const milliseconds = Math.ceil(Number(raw) * 1000);
+    if (Number.isFinite(milliseconds) && milliseconds >= 0) {
+      return milliseconds;
+    }
+  }
+  for (const key of ["error", "body", "data", "cause"]) {
+    const nested = providerRetryAfterMs(value[key], depth + 1);
+    if (nested) return nested;
+  }
+  return 0;
+}
+
 export function isContextOverflow(error: unknown): boolean {
   if (error instanceof ContextBudgetError) return false;
+  if (isProviderPaymentFailure(error)) return false;
   return /context_length_exceeded|prompt_too_long|(?:prompt|input|context|request)[\s\S]{0,100}(?:too long|too large|exceed)|maximum context length|max_num_tokens|too many (?:input )?tokens/i.test(errorText(error));
 }
 
@@ -54,6 +206,7 @@ const validTokenCount = (value: unknown): number | undefined => {
  * length is an input cap; a "maximum context length" is a total window.
  */
 export function providerContextConstraint(error: unknown): ProviderContextConstraint | undefined {
+  if (isProviderPaymentFailure(error)) return undefined;
   const root = error && typeof error === "object" ? error as Record<string, unknown> : undefined;
   const structuredLimit = validTokenCount(root?.limit);
   const structuredKind = root?.contextLimitKind;

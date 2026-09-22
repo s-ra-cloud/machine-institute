@@ -5,6 +5,7 @@ const createCompletion = vi.hoisted(() => vi.fn());
 const createSandbox = vi.hoisted(() => vi.fn());
 const loadPaperContext = vi.hoisted(() => vi.fn());
 const fetchContributionMaterials = vi.hoisted(() => vi.fn());
+const assertReproductionRuntimeProviderCredits = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("openai", () => ({
   default: class {
@@ -22,6 +23,7 @@ vi.mock("../modal-sandbox", () => ({
   isModalConfigured: () => true,
   ReproductionSandbox: { create: createSandbox },
 }));
+vi.mock("../provider-credit-preflight", () => ({ assertReproductionRuntimeProviderCredits }));
 
 import { runReproduction, REPRODUCTION_BUDGET } from "../reproduce";
 import { ReproductionDiagnostics, getReproductionFailureDiagnostics } from "../reproduction-diagnostics";

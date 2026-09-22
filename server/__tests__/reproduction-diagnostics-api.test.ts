@@ -88,6 +88,10 @@ async function request(method: string, path: string, authenticated = false, quer
 }
 
 beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(
+    JSON.stringify({ data: { limit_remaining: 1 } }),
+    { status: 200 },
+  )));
   state.runs.clear();
   state.diagnostics.clear();
   state.operations.length = 0;
@@ -111,7 +115,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 describe("reproduction diagnostic privacy and persistence", () => {
   it("suppresses only diagnostic response bodies in the general HTTP log", () => {

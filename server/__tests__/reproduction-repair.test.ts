@@ -4,6 +4,7 @@ const createCompletion = vi.hoisted(() => vi.fn());
 const createSandbox = vi.hoisted(() => vi.fn());
 const loadPaperContext = vi.hoisted(() => vi.fn());
 const fetchContributionMaterials = vi.hoisted(() => vi.fn());
+const assertReproductionRuntimeProviderCredits = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("openai", () => ({
   default: class {
@@ -24,9 +25,11 @@ vi.mock("../modal-sandbox", () => ({
   isModalConfigured: () => true,
   ReproductionSandbox: { create: createSandbox },
 }));
+vi.mock("../provider-credit-preflight", () => ({ assertReproductionRuntimeProviderCredits }));
 
 import { runReproduction, REPRODUCTION_BUDGET } from "../reproduce";
 import { buildEffectiveReproducerPrompt } from "../prompts/reproduce";
+import { getReproductionFailureDiagnostics } from "../reproduction-diagnostics";
 import type { ModelProviderConfig } from "../model-service";
 
 const config: ModelProviderConfig = {
@@ -192,7 +195,7 @@ function options(reproducerPrompt = "CUSTOM SAVED REPAIR INSTRUCTION") {
     modelConfig: config,
     judgeModelConfig: config,
     gpu: "T4" as const,
-    emitEvent: vi.fn(async () => {}),
+    emitEvent: vi.fn(async (_phase: string, _message: string) => {}),
   };
 }
 
@@ -209,6 +212,58 @@ afterEach(() => {
   // In particular, do not let a failed deadline assertion leave Date.now
   // mocked for the following orchestration scenario.
   vi.restoreAllMocks();
+});
+
+describe("runReproduction provider funding failures", () => {
+  it("replays the eight-call failure without misclassifying payment or repeating paid work", async () => {
+    const sandbox = makeSandbox();
+    createSandbox.mockResolvedValue(sandbox);
+    createCompletion
+      .mockResolvedValueOnce(completion(null, [sourceRead()]))
+      .mockResolvedValueOnce(completion(null, [call("page", "read_file", { path: "/work/paper.md", offset: 100 })]))
+      .mockResolvedValueOnce(completion(null, [call("eof", "read_file", { path: "/work/paper.md", offset: 24000 })]))
+      .mockResolvedValueOnce(completion(null, [call("inventory", "read_file", { path: "/work/MATERIALS_INDEX.md" })]))
+      .mockResolvedValueOnce(completion(null, [call("recover-1", "read_tool_result", { tool_call_id: 1 })]))
+      .mockResolvedValueOnce(completion(null, [call("recover-2", "read_tool_result", { tool_call_id: 2 })]))
+      .mockResolvedValueOnce(completion(null, [pendingCall("R1"), pendingCall("R2")]))
+      .mockRejectedValueOnce(Object.assign(new Error(
+        "This request would exceed your credits; use fewer max_tokens. PRIVATE_PROVIDER_BODY",
+      ), { status: 402 }));
+    const opts = options();
+    const error = await runReproduction(opts).catch(error => error);
+    expect(error).toMatchObject({ code: "PROVIDER_PAYMENT_REQUIRED", status: 402 });
+    const snapshot = getReproductionFailureDiagnostics(error);
+    expect(snapshot).toMatchObject({ stage: "tool-loop", stopReason: "provider-payment", rounds: 8, callCount: 8 });
+    expect(snapshot?.claims).toEqual([
+      expect.objectContaining({ id: "R1", status: "pending" }),
+      expect.objectContaining({ id: "R2", status: "pending" }),
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain("PRIVATE_PROVIDER_BODY");
+    expect(error.message).not.toContain("PRIVATE_PROVIDER_BODY");
+    expect(opts.emitEvent.mock.calls.some(([phase]) => phase === "reproduction-context")).toBe(false);
+    expect(createCompletion).toHaveBeenCalledTimes(8);
+    expect(sandbox.exec).toHaveBeenCalledTimes(1); // Environment probe only.
+    expect(sandbox.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not publish a self-graded report when the judge is refused for payment", async () => {
+    const sandbox = makeSandbox();
+    createSandbox.mockResolvedValue(sandbox);
+    createCompletion
+      .mockResolvedValueOnce(completion(null, [sourceRead(), pendingCall("R1")]))
+      .mockResolvedValueOnce(completion(null, [call("experiment", "run_command", { command: "python /work/materials/expensive.py" })]))
+      .mockResolvedValueOnce(completion(null, [call("result", "record_result", {
+        id: "R1", status: "verified", reproduced_value: "0.91", method: "rerun",
+        evidence_tool_call_ids: [3], evidence_excerpt: "expensive output metric=0.91",
+      })]))
+      .mockResolvedValueOnce(completion(logbook))
+      .mockRejectedValueOnce(Object.assign(new Error("Insufficient credits"), { status: 402 }));
+    const error = await runReproduction(options()).catch(error => error);
+    expect(error).toMatchObject({ code: "PROVIDER_PAYMENT_REQUIRED", status: 402 });
+    expect(getReproductionFailureDiagnostics(error)).toMatchObject({ stage: "judge", stopReason: "provider-payment" });
+    expect(createCompletion).toHaveBeenCalledTimes(5);
+    expect(sandbox.terminate).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("runReproduction orchestration repair", () => {

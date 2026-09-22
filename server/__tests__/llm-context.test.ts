@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  ContextBudgetError, RequestContextBudget, estimateRequestTokens, isContextOverflow,
-  providerContextConstraint, reportedContextLimit,
+  ContextBudgetError, ProviderPaymentError, RequestContextBudget, estimateRequestTokens,
+  isContextOverflow, isProviderPaymentError, isProviderPaymentFailure,
+  isTransientProviderPaymentFailure, providerContextConstraint, providerPaymentMetadata,
+  providerPaymentReason, providerRetryAfterMs, reportedContextLimit,
 } from "../llm-context";
 
 const config = { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
@@ -97,5 +99,61 @@ describe("Complete request budgets", () => {
     expect(() => budget.assertFits(request)).toThrow(ContextBudgetError);
     expect(budget.diagnostic(request)).not.toContain("PRIVATE_INSTRUCTION");
     expect(isContextOverflow(new ContextBudgetError("input too large"))).toBe(false);
+  });
+
+  it("gives HTTP payment failures precedence over context-like billing text", () => {
+    const billing = {
+      status: 402,
+      error: {
+        message: "This request requires more credits, or fewer max_tokens. You can only afford 120 tokens.",
+      },
+    };
+    expect(providerPaymentReason(billing)).toBe("payment_required");
+    expect(isProviderPaymentFailure(billing)).toBe(true);
+    expect(isContextOverflow(billing)).toBe(false);
+    expect(providerContextConstraint(billing)).toBeUndefined();
+    expect(new RequestContextBudget(config, 8000, "reproduction").reduce(billing, {})).toBe(false);
+  });
+
+  it("recognizes status-less nested 402 codes and explicit credit wording safely", () => {
+    expect(isProviderPaymentFailure({ error: { code: 402, message: "provider rejected request" } })).toBe(true);
+    expect(providerPaymentReason({ message: "This request requires more credits." })).toBe("provider_credit");
+    expect(isProviderPaymentError(new ProviderPaymentError(402))).toBe(true);
+  });
+
+  it("keeps an explicit non-payment HTTP status authoritative", () => {
+    const context400 = {
+      status: 400,
+      error: {
+        code: 402,
+        message: "maximum context length is 32768 tokens; request exceeds the limit",
+      },
+    };
+    expect(isProviderPaymentFailure(context400)).toBe(false);
+    expect(isContextOverflow(context400)).toBe(true);
+  });
+
+  it("allowlists only documented transient metadata and bounds numeric retry-after", () => {
+    const transient = {
+      status: 402,
+      headers: { "retry-after": "99" },
+      error: {
+        metadata: {
+          limit_source: "openrouter_in_flight_budget",
+          reason: "in_flight_budget_exhausted",
+          remedy_hint: "PRIVATE",
+        },
+      },
+    };
+    expect(providerPaymentMetadata(transient)).toEqual({
+      limitSource: "openrouter_in_flight_budget",
+      reason: "in_flight_budget_exhausted",
+    });
+    expect(isTransientProviderPaymentFailure(transient)).toBe(true);
+    expect(providerRetryAfterMs(transient)).toBe(99_000);
+    expect(providerPaymentMetadata({
+      metadata: { limit_source: "PRIVATE", reason: "PRIVATE", remedy_hint: "PRIVATE" },
+    })).toEqual({});
+    expect(providerRetryAfterMs({ headers: { "retry-after": "tomorrow" } })).toBe(0);
   });
 });

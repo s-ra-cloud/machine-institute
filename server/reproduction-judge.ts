@@ -7,6 +7,7 @@ import {
 import {
   ContextBudgetError,
   isContextOverflow,
+  isProviderPaymentFailure,
   RequestContextBudget,
 } from "./llm-context";
 import {
@@ -191,6 +192,7 @@ async function diagnostic(
 }
 
 function judgeContextOverflow(error: unknown): boolean {
+  if (isProviderPaymentFailure(error)) return false;
   if (isContextOverflow(error)) return true;
   const text = error instanceof Error ? error.message : String(error ?? "");
   return /context[_\s-]*length[\s\S]{0,80}\d[\s\S]{0,20}>\s*\d+/i.test(text);
@@ -413,6 +415,9 @@ export async function runBoundedReproductionJudge(
         completed = true;
         break;
       } catch (error) {
+        // A provider refusing payment did not grade the experiment. Do not turn
+        // a service failure into an inconclusive scientific verdict.
+        if (isProviderPaymentFailure(error)) throw error;
         if (judgeContextOverflow(error)) {
           contextRetries++;
           if (contextRetries > MAX_CONTEXT_RETRIES || !reduceJudgeBudget(budget, error, request)) {

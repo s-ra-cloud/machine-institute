@@ -33,6 +33,23 @@ export function verdictStyle(verdict: string | null | undefined): string {
   return VERDICT_STYLES[verdict || ""] || "text-muted-foreground border-border/30 bg-muted/5";
 }
 
+export function providerPaymentGuidance(diagnostics: unknown): string | null {
+  if (!diagnostics || typeof diagnostics !== "object") return null;
+  const snapshot = diagnostics as { stopReason?: unknown; events?: unknown };
+  if (snapshot.stopReason !== "provider-payment" && snapshot.stopReason !== "provider-credit") return null;
+  const events = Array.isArray(snapshot.events) ? snapshot.events : [];
+  const isTransient = events.some(event => event && typeof event === "object"
+    && (event as { providerLimitSource?: unknown }).providerLimitSource === "openrouter_in_flight_budget");
+  if (isTransient) {
+    return "OpenRouter temporarily reached its in-flight spending limit. Wait for that temporary hold to clear before retrying.";
+  }
+  const isKeyCap = events.some(event => event && typeof event === "object"
+    && (event as { providerLimitSource?: unknown }).providerLimitSource === "openrouter_key_limit");
+  return isKeyCap
+    ? "The OpenRouter API key reached its spending cap. Raise or reset that key limit before retrying; this is managed in OpenRouter, not through a Replit subscription or Replit platform support."
+    : "OpenRouter could not fund the model request. Add OpenRouter credits or check the API key's spending limit before retrying; this is managed in OpenRouter, not through a Replit subscription or Replit platform support.";
+}
+
 function FailureDiagnostics({ id, adminId }: { id: string; adminId: string }) {
   const [expanded, setExpanded] = useState(false);
   const { data, isFetching, error } = useQuery<{ diagnostics: unknown | null }>({
@@ -64,7 +81,14 @@ function FailureDiagnostics({ id, adminId }: { id: string; adminId: string }) {
           {isFetching ? <p>Loading diagnostics...</p>
             : error ? <p role="alert">Could not load private diagnostics. Close and reopen to retry.</p>
             : data?.diagnostics == null ? <p>No diagnostics were saved for this run.</p>
-            : <pre className="whitespace-pre-wrap break-words max-h-[32rem] overflow-auto font-mono" data-testid="text-failure-diagnostics">{JSON.stringify(data.diagnostics, null, 2)}</pre>}
+            : <>
+                {providerPaymentGuidance(data.diagnostics) && (
+                  <p className="mb-3 border border-amber-500/30 bg-amber-500/5 p-3 text-amber-200" data-testid="text-provider-payment-guidance">
+                    {providerPaymentGuidance(data.diagnostics)}
+                  </p>
+                )}
+                <pre className="whitespace-pre-wrap break-words max-h-[32rem] overflow-auto font-mono" data-testid="text-failure-diagnostics">{JSON.stringify(data.diagnostics, null, 2)}</pre>
+              </>}
         </div>
       )}
     </section>
