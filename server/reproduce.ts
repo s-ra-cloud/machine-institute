@@ -240,6 +240,12 @@ export function getReproductionCompletionIssues(input: Parameters<typeof getRepr
     issues.push("no command execution or recorded reproduction evidence exists");
   }
   const logbookLines = input.logbook.split(/\r?\n/);
+  if (
+    /(?:Archived unchanged|Retrieval only; this is not scientifically valid evidence)/i.test(input.logbook)
+    && !REQUIRED_LOGBOOK_SECTIONS.some(section => logbookLines.some(line => line.trim() === section))
+  ) {
+    issues.push("the final response is only an archive/retrieval notice, not a reproduction logbook");
+  }
   const missingSections = REQUIRED_LOGBOOK_SECTIONS.filter(section => {
     const start = logbookLines.findIndex(line => line.trim() === section);
     if (start < 0) return true;
@@ -592,6 +598,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       allowResourceStopFallback: true,
       contextProtection: {
         getState: maxBytes => session.contextState(maxBytes),
+        getActiveInstruction: () => session.activeInstruction(),
         archiveContext: (key, text) => session.archiveContext(key, text),
         resizeRetrieval: (name, args, result, maxBytes) => session.resizeRetrieval(name, args, result, maxBytes),
         compactUserMessage: [
@@ -623,7 +630,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           logbook: assistantText,
           budgetExhausted: false,
         });
-        return continuation ? `${continuation}\n${session.repairContext()}` : null;
+        return continuation ? `${session.activeInstruction()}\n${continuation}\n${session.repairContext()}` : null;
       },
       maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
     });

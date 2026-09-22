@@ -254,7 +254,15 @@ describe("runReproduction bounded context orchestration", () => {
         expect(page.offset).toBe(firstDraftPage.next_offset);
         recoveredDraft += page.text;
         expect(recoveredDraft).toBe(draft.slice(0, page.end));
-        const state = JSON.parse(request.messages.at(-1).content);
+        const state = [...request.messages].reverse().flatMap((message: any) => {
+          if (message.role !== "user") return [];
+          try {
+            const parsed = JSON.parse(String(message.content));
+            return parsed?.totals?.claims === 8 ? [parsed] : [];
+          } catch {
+            return [];
+          }
+        })[0];
         expect(state.totals.claims).toBe(8);
         expect(state.totals.pending).toBe(8);
         const repair = state.claims.find((claim: any) => claim.repair);

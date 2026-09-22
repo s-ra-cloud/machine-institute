@@ -132,6 +132,21 @@ describe("Reproduction — usable execution evidence", () => {
 });
 
 describe("Reproduction — premature-stop recovery", () => {
+  it("rejects an archive notice as a final response and asks for recovery", () => {
+    const input = {
+      recordedResults: [],
+      toolCalls: [],
+      logbook: JSON.stringify({
+        notice: "Archived unchanged; not scientific evidence.",
+        read: "read_reproduction_context({ref:\"12\"})",
+      }),
+    };
+    expect(getReproductionCompletionIssues(input)).toContain(
+      "the final response is only an archive/retrieval notice, not a reproduction logbook",
+    );
+    expect(buildReproductionContinuation(input)).toContain("Continue using the available tools now");
+  });
+
   it("continues the observed two-pending-results and blank-response sequence", () => {
     const continuation = buildReproductionContinuation({
       recordedResults: [

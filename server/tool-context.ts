@@ -5,6 +5,12 @@ export { describeToolContext } from "./context-diagnostics";
 
 export interface ToolContextProtection {
   getState: (maxBytes?: number) => string;
+  /**
+   * Return the bounded, self-contained action the model must take next.
+   * The verbose repair/control turn remains in the canonical transcript and
+   * archive; this projection is the instruction that survives compaction.
+   */
+  getActiveInstruction?: (maxBytes?: number) => string;
   archiveContext?: (key: string, text: string) => string;
   resizeRetrieval?: (
     name: string,
@@ -27,6 +33,8 @@ const OLD_OUTPUT_NOTE =
   "[Earlier output elided. Use read_tool_result with the original tool call ID; do not rerun the experiment to retrieve it.]";
 const OLD_ARGUMENTS_NOTE =
   "[old command arguments omitted; use read_file on the existing file and read_tool_result for evidence]";
+export const ACTIVE_INSTRUCTION_MAX_BYTES = 1_000;
+// Total preflight reservation: state, retrieval, active action, and wrappers.
 export const RUNTIME_CONTEXT_HEADROOM = 10_000;
 const DEFAULT_STATE_BYTES = 2_500;
 const MINIMUM_STATE_BYTES = 600;
@@ -173,10 +181,44 @@ function boundedState(protection: ToolContextProtection, maxBytes: number): stri
   return state;
 }
 
+function boundedSerializedString(value: unknown, maxBytes: number): string {
+  const text = typeof value === "string" ? value : String(value ?? "");
+  if (serializedBytes(text) <= maxBytes) return text;
+
+  // Slice only at Unicode code-point boundaries and account for JSON escaping:
+  // provider input limits apply to the complete serialized request, not
+  // JavaScript's UTF-16 string length.
+  const suffix = "\n[Instruction projection truncated to its fixed byte bound.]";
+  const points = Array.from(text);
+  let low = 0;
+  let high = points.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (serializedBytes(points.slice(0, middle).join("") + suffix) <= maxBytes) low = middle;
+    else high = middle - 1;
+  }
+  const bounded = points.slice(0, low).join("") + suffix;
+  if (serializedBytes(bounded) <= maxBytes) return bounded;
+  // This is only reachable for an implausibly tiny caller-supplied bound.
+  return "";
+}
+
+function activeInstruction(protection: ToolContextProtection): string | undefined {
+  if (!protection.getActiveInstruction) return undefined;
+  // Snapshot exactly once. Session-backed implementations can therefore bind
+  // archive references and action state atomically for this fitted request.
+  const instruction = boundedSerializedString(
+    protection.getActiveInstruction(ACTIVE_INSTRUCTION_MAX_BYTES),
+    ACTIVE_INSTRUCTION_MAX_BYTES,
+  );
+  return instruction.length > 0 ? instruction : undefined;
+}
+
 function archiveGeneratedContext(
   messages: Message[],
   archive: (key: string, text: string) => string,
   state: string,
+  active: string | undefined,
 ): boolean {
   const firstUser = messages.findIndex(message => message.role === "user");
   const latestUser = messages.reduce((found, message, index) =>
@@ -197,6 +239,7 @@ function archiveGeneratedContext(
     const repair = message.role === "user"
       && index !== firstUser
       && content !== state
+      && content !== active
       && !(latestIsStop && index === latestUser);
     if (!generatedAssistant && !repair) return;
     const notice = archive(`${message.role}-${index}`, content);
@@ -259,7 +302,11 @@ function compactCompletedArguments(messages: Message[], fits: () => boolean, arc
   return changed;
 }
 
-function removeObsoleteProse(messages: Message[], state: string, fits: () => boolean): boolean {
+function removeObsoleteProse(
+  messages: Message[],
+  state: string,
+  active: string | undefined,
+): boolean {
   const firstUser = messages.findIndex(message => message.role === "user");
   const latestUser = [...messages].map((message, index) => message.role === "user" ? index : -1)
     .filter(index => index >= 0).at(-1) ?? -1;
@@ -269,19 +316,24 @@ function removeObsoleteProse(messages: Message[], state: string, fits: () => boo
       ? index : -1).filter(index => index >= 0).at(-1) ?? -1;
   const latestAssistant = [...messages].map((message, index) => message.role === "assistant" ? index : -1)
     .filter(index => index >= 0).at(-1) ?? -1;
+  const latestIsStop = latestUser >= 0
+    && /^STOP:/i.test(String(messages[latestUser]?.content ?? "").trim());
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     const repairUser = message.role === "user"
       && i !== firstUser
-      && i !== latestUser
-      && i !== latestRepair
       && message.content !== state
-      && /continue|repair|unfinished|recover|logbook|stop:/i.test(String(message.content ?? ""));
+      && message.content !== active
+      && !(latestIsStop && i === latestUser)
+      && (active !== undefined
+        || /continue|repair|unfinished|recover|logbook|stop:/i.test(String(message.content ?? "")))
+      && (active !== undefined || (i !== latestUser && i !== latestRepair));
     const oldAssistantProse = message.role === "assistant"
-      && i !== latestAssistant
+      && (active !== undefined || i !== latestAssistant)
       && callIds(message).length === 0
       && typeof message.content === "string"
-      && message.content.length > 0;
+      && message.content.length > 0
+      && !/"notice"\s*:\s*"Archived unchanged; not scientific evidence\."/i.test(message.content);
     if (repairUser || oldAssistantProse) {
       messages.splice(i, 1);
       return true;
@@ -396,10 +448,32 @@ function restoreRetrievalDetail(
   });
 }
 
+function forcedFinalIndex(messages: Message[]): number {
+  const latestUser = messages.reduce((found, message, index) =>
+    message.role === "user" ? index : found, -1);
+  return latestUser >= 0
+    && /^STOP:/i.test(String(messages[latestUser]?.content ?? "").trim())
+    ? latestUser
+    : -1;
+}
+
+function insertBeforeForcedFinal(messages: Message[], message: Message): void {
+  const stopIndex = forcedFinalIndex(messages);
+  if (stopIndex >= 0) messages.splice(stopIndex, 0, message);
+  else messages.push(message);
+}
+
 function ensureStateMessage(messages: Message[], state: string): void {
-  const lastUser = [...messages].reverse().find(message => message.role === "user");
-  if (lastUser?.content === state) return;
-  messages.push({ role: "user", content: state });
+  if (messages.some(message => message.role === "user" && message.content === state)) return;
+  insertBeforeForcedFinal(messages, { role: "user", content: state });
+}
+
+function ensureActiveInstruction(messages: Message[], active: string | undefined): void {
+  // STOP is deliberately final and dominant. A normal active projection must
+  // never be appended after (or compete with) forced-final control.
+  if (!active || forcedFinalIndex(messages) >= 0) return;
+  if (messages.some(message => message.role === "user" && message.content === active)) return;
+  messages.push({ role: "user", content: active });
 }
 
 /**
@@ -414,7 +488,13 @@ export function fitToolContext<T extends Record<string, any>>(
   const fitted = clone(request);
   const messages = Array.isArray(fitted.messages) ? fitted.messages as Message[] : [];
   let state = boundedState(options.protection, DEFAULT_STATE_BYTES);
+  // A forced-final turn is already the active instruction. Do not even
+  // snapshot a session repair projection that cannot be used by this request.
+  const active = forcedFinalIndex(messages) >= 0
+    ? undefined
+    : activeInstruction(options.protection);
   ensureStateMessage(messages, state);
+  ensureActiveInstruction(messages, active);
   const retrievalOriginals = new Map<string, string>();
   const retrievalCalls = new Map<string, { name: string; args: Record<string, unknown> }>();
   messages.forEach((message, index) => {
@@ -441,7 +521,15 @@ export function fitToolContext<T extends Record<string, any>>(
   if (fits()) return fitted;
 
   if (options.protection.archiveContext) {
-    archiveGeneratedContext(messages, options.protection.archiveContext, state);
+    archiveGeneratedContext(messages, options.protection.archiveContext, state, active);
+    // Once a bounded active projection exists, archived prose is source
+    // material, not an instruction. Remove every archive notice before any
+    // early return so a model cannot mistake the newest pointer for its task.
+    if (active !== undefined) {
+      while (removeObsoleteProse(messages, state, active)) {
+        // Preserve only initial input, bounded state, and bounded active action.
+      }
+    }
     if (fits()) return fitted;
   }
 
@@ -461,7 +549,7 @@ export function fitToolContext<T extends Record<string, any>>(
   // output and retrieval messages until these cheaper reductions are spent.
   compactCompletedArguments(messages, fits, options.protection.archiveContext);
   if (fits()) return fitted;
-  while (!fits() && removeObsoleteProse(messages, state, fits)) {
+  while (!fits() && removeObsoleteProse(messages, state, active)) {
     // Remove old repair scaffolding before sacrificing current evidence.
   }
   if (fits()) return fitted;
@@ -469,7 +557,7 @@ export function fitToolContext<T extends Record<string, any>>(
   if (fits()) return fitted;
 
   while (!fits()) {
-    if (removeObsoleteProse(messages, state, fits)) continue;
+    if (removeObsoleteProse(messages, state, active)) continue;
     if (!removeOldestCompleteGroup(messages, latestRetrievalIds(messages))) break;
   }
   if (fits()) return fitted;

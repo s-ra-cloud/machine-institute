@@ -44,6 +44,7 @@ describe("strict tool argument recovery", () => {
     const events: ToolLoopOutcome[] = [];
     const session = new ReproductionSession(() => []);
     session.recordResult({ id: "R1", claim: "Accuracy", status: "pending" });
+    const progressBeforeAttempts = session.progress;
     const result = await runToolLoop(config, "sys", "user", tools, execute, {
       maxToolCalls: 10, deadlineMs: Date.now() + 60_000,
       getArgumentRepair: () => session.contextState(),
@@ -55,7 +56,7 @@ describe("strict tool argument recovery", () => {
     expect(result.toolCalls[0].result).toContain('"id":"R1"');
     expect(result.toolCalls[0].result).toContain("do not register it again");
     expect(result.toolCalls[0].error).toBe(true);
-    expect(session.progress).toBe(1);
+    expect(session.progress).toBe(progressBeforeAttempts + 1);
     expect(events).toContainEqual(expect.objectContaining({ kind: "arguments", argumentParse: reason }));
     expect(events.at(-1)).toMatchObject({ kind: "stop", finishReason: "stop", stopReason: "model" });
   });
@@ -133,8 +134,9 @@ describe("claim repair and tool-aware argument compaction", () => {
     expect(session.recordResult({ id: "R1", status: "verified", evidence_tool_call_ids: ["1"] })).toContain("array of integers");
     expect(session.recorded.get("R1")?.status).toBe("pending");
     expect(session.recordResult({ id: "R1", status: "pending" })).toContain("Do not register this claim again");
+    const progressAfterRegistration = session.progress;
     session.observeToolCall({ index: 1, name: "run_command", args: {}, result: "Tool error: failed", durationMs: 0, error: true });
-    expect(session.progress).toBe(0);
+    expect(session.progress).toBe(progressAfterRegistration);
   });
 
   it("preserves exact claim identity and evidence IDs while archiving oversized Unicode fields immutably", () => {

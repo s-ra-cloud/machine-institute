@@ -77,6 +77,7 @@ export class ReproductionSession {
   private capturedOutput: string | undefined;
   private progressKeys = new Set<string>();
   private completedIds = new Set<string>();
+  private acceptedStateChanges = 0;
   private contexts = new ReproductionContextStore();
   private activeIndexRef: string | undefined;
 
@@ -100,7 +101,7 @@ export class ReproductionSession {
   }
 
   get progress(): number {
-    return this.progressKeys.size + this.completedIds.size;
+    return this.acceptedStateChanges + this.progressKeys.size + this.completedIds.size;
   }
 
   captureOutput(name: string, result: string): void {
@@ -111,10 +112,12 @@ export class ReproductionSession {
     const full = { ...record, result: this.capturedOutput ?? record.result };
     this.capturedOutput = undefined;
     this.toolCalls.push(full);
-    if (!full.error && evidenceTools.has(full.name) && !/^(?:Refused:|Tool budget exhausted|Deadline exhausted)/.test(full.result)) {
-      // Timing changes and repeated reads/polls are not new scientific progress.
+    if (!full.error && full.name === "run_command" && !/^(?:Refused:|Tool budget exhausted|Deadline exhausted)/.test(full.result)) {
+      // Only execution advances recovery. Unique reads, listings, and archive
+      // retrievals are orientation, not scientific progress.
       const output = full.result.replace(/^(exit code \S+|TIMED OUT) \([\d.]+s\)/, "$1");
-      const key = createHash("sha256").update(`${full.name}\n${output}`).digest("hex");
+      const command = String(full.args.command ?? "").replace(/\s+/g, " ").trim();
+      const key = createHash("sha256").update(`${command}\n${output}`).digest("hex");
       this.progressKeys.add(key);
     }
   }
@@ -166,6 +169,7 @@ export class ReproductionSession {
         }`;
       }
       this.recorded.set(id, { id, claim, status, originalValue: args.original_value == null ? undefined : String(args.original_value) });
+      this.acceptedStateChanges++;
       this.snapshotClaim(id, "accepted");
       return `Registered ${id} as pending. ${this.summary()}`;
     }
@@ -213,6 +217,31 @@ export class ReproductionSession {
 
   summary(): string {
     return `Registered results: ${Array.from(this.recorded.values()).map(r => `${r.id}=${r.status}`).join(", ")}.`;
+  }
+
+  /**
+   * Small, authoritative next action that survives transcript compaction.
+   * It intentionally describes only accepted state and never invents claim
+   * identities, values, evidence, or missing record_result fields.
+   */
+  activeInstruction(): string {
+    const results = Array.from(this.recorded.values());
+    const pending = results.filter(result => result.status === "pending");
+    const commands = this.toolCalls.filter(call =>
+      call.name === "run_command"
+      && !call.error
+      && !/^(?:Refused:|Tool budget exhausted|Deadline exhausted)/.test(call.result),
+    );
+    if (results.length === 0) {
+      return "LATEST ACTION — EXTRACT: no claims are accepted. Search targeted sections of /work/paper.md for actual core quantitative claims, then register them pending. Do not repeat the first page, invent claims, return a plan, or return an archive notice.";
+    }
+    if (pending.length > 0 && commands.length === 0) {
+      return `LATEST ACTION — PREPARE/EXECUTE: ${pending.length} accepted claim(s) remain pending and no command has run. Inspect the relevant script/data, then run the claim-specific experiment; if genuinely impossible, inspect the real blocker. Do not re-register claims, return a plan, or return an archive notice.`;
+    }
+    if (pending.length > 0) {
+      return `LATEST ACTION — ASSESS/RECORD: command output exists and ${pending.length} accepted claim(s) remain pending. First assess whether output supports the relevant claim or a real blocker. Record only supported outcomes with exact original evidence; otherwise prepare/run the missing claim experiment. Reuse completed outputs; do not fabricate fields, return a plan, or return an archive notice.`;
+    }
+    return "LATEST ACTION — REPORT: every accepted claim is finalized. Retrieve archived claim details or evidence if needed, then return the required final logbook from accepted state and cited evidence. Do not rerun experiments, invent values, return a plan, or return an archive/retrieval notice.";
   }
 
   contextState(maxBytes = 2500): string {

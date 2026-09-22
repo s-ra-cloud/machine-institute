@@ -56,6 +56,36 @@ describe("Reproduction session — immediate validation", () => {
     expect(s.progress).toBe(progress + 1);
   });
 
+  it("keeps recovery stage-aware and does not treat unique browsing as progress", () => {
+    const s = session();
+    expect(s.activeInstruction()).toMatch(/LATEST ACTION — EXTRACT.*targeted/s);
+    const baseline = s.progress;
+    s.observeToolCall({ ...command(1, "paper page one"), name: "read_file", args: { path: "/work/paper.md" } });
+    s.observeToolCall({ ...command(2, "paper page two"), name: "read_file", args: { path: "/work/paper.md", offset: 12000 } });
+    s.observeToolCall({ ...command(3, "f experiment.py"), name: "list_files", args: { path: "/work" } });
+    expect(s.progress).toBe(baseline);
+    s.recordResult({ id: "R1", claim: "Accuracy is 0.91", status: "pending", original_value: "0.91" });
+    expect(s.activeInstruction()).toMatch(/LATEST ACTION — PREPARE\/EXECUTE.*no command has run/s);
+    s.observeToolCall(command(4));
+    expect(s.activeInstruction()).toMatch(/LATEST ACTION — ASSESS\/RECORD.*remain pending/s);
+    s.recordResult({ ...verified, evidence_tool_call_ids: [4] });
+    expect(s.activeInstruction()).toMatch(/LATEST ACTION — REPORT.*every accepted claim is finalized/s);
+  });
+
+  it("does not describe a paper-search command as scientific evidence", () => {
+    const s = session();
+    s.observeToolCall({
+      ...command(1, "exit code 0\n42: reported accuracy was 0.91"),
+      args: { command: "grep -n accuracy /work/paper.md" },
+    });
+    s.recordResult({ id: "R1", claim: "Accuracy is 0.91", status: "pending", original_value: "0.91" });
+    const action = s.activeInstruction();
+    expect(action).toContain("command output exists");
+    expect(action).toContain("First assess whether output supports");
+    expect(action).toContain("otherwise prepare/run the missing claim experiment");
+    expect(action).not.toContain("execution evidence exists");
+  });
+
   it.each([[9], [1, 9], [0], [-1], [1.2]].map(ids => ({ ids })))("rejects invalid or future evidence IDs $ids", ({ ids }) => {
     const s = session();
     s.observeToolCall(command(1));

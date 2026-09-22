@@ -32,3 +32,9 @@ Malformed-call recovery must not guess the model's intended claim or scientific 
 **Why:** A stalled production attempt had working materials and GPU access but repeatedly registered the same pending claim and submitted incomplete arguments. The available trace did not establish the root cause; inferring missing arguments would conceal the failure and could execute the wrong experiment.
 
 **How to apply:** Return exact field corrections alongside accepted claim state, reject ambiguous or truncated calls before execution, and preserve completion/validation distinctions in bounded private diagnostics. Keep these diagnostics separate from publishable reports and general HTTP response logs.
+
+Archive verbose recovery history, but always retain a small, self-contained next-action projection alongside accepted state.
+
+**Why:** Real runs repeatedly browsed material and retrieved archived recovery instructions, then echoed archive notices instead of executing experiments. Keeping the entire latest repair immutable previously overflowed context; replacing it entirely with a pointer removed the immediate instruction. Neither extreme is reliable.
+
+**How to apply:** Budget the active projection within existing runtime headroom, preserve it through compaction and provider-limit reductions, and let forced-final STOP override it. Test actual outgoing requests and full orchestration recovery, not only validators. Browsing and retrieval must not reset no-progress recovery. A shell command may only inspect material; its existence alone does not prove a scientific experiment or justify a verdict. Report preparation may still retrieve archived evidence without rerunning experiments.

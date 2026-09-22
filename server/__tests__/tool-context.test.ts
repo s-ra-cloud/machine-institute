@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ContextBudgetError, RequestContextBudget } from "../llm-context";
-import { fitToolContext } from "../tool-context";
+import { ACTIVE_INSTRUCTION_MAX_BYTES, fitToolContext } from "../tool-context";
 
 const config = {
   providerMode: "byoc" as const,
@@ -150,6 +150,96 @@ describe("fitToolContext", () => {
         .map((call: any) => call.id);
       expect(ids.every((id: string) => declared.includes(id))).toBe(true);
     }
+  });
+
+  it("preserves one bounded active action while archiving verbose latest repair and all assistant prose", () => {
+    const oldDraft = "OLD ASSISTANT DRAFT " + "a".repeat(8_000);
+    const latestDraft = "LATEST ASSISTANT DRAFT " + "b".repeat(8_000);
+    const repair = "Continue the ordinary repair using exact claim C-7. " + "r".repeat(18_000);
+    const action = "ACT NOW: run the existing verification for claim C-7, then submit its measured evidence.";
+    const archive = new Map<string, string>();
+    const activeBounds: number[] = [];
+    const request = {
+      messages: [
+        { role: "system", content: "fixed ".repeat(500) },
+        { role: "user", content: "initial scientific prompt" },
+        { role: "assistant", content: oldDraft },
+        { role: "user", content: "repair an earlier claim " + "x".repeat(5_000) },
+        { role: "assistant", content: latestDraft },
+        { role: "user", content: repair },
+      ],
+    };
+    const protection = {
+      getState: () => "bounded ledger",
+      getActiveInstruction: (maxBytes?: number) => {
+        activeBounds.push(maxBytes ?? -1);
+        return action;
+      },
+      archiveContext: (key: string, text: string) => {
+        archive.set(key, text);
+        return `[Archived ${key}; retrieve with read_reproduction_context.]`;
+      },
+    };
+
+    const fitted = fitToolContext(request, { budget: budget(4_000), protection });
+    expect(activeBounds).toEqual([ACTIVE_INSTRUCTION_MAX_BYTES]);
+    expect(fitted.messages.at(-1)).toEqual({ role: "user", content: action });
+    expect(fitted.messages.filter((message: any) => message.content === action)).toHaveLength(1);
+    expect(JSON.stringify(fitted)).not.toContain("Archived assistant");
+    expect(JSON.stringify(fitted)).not.toContain("Archived user");
+    expect(archive.get("assistant-2")).toBe(oldDraft);
+    expect(archive.get("assistant-4")).toBe(latestDraft);
+    expect(archive.get("user-5")).toBe(repair);
+    expect(request.messages[4].content).toBe(latestDraft);
+    expect(request.messages[5].content).toBe(repair);
+  });
+
+  it("caps active instructions by full serialized UTF-8 bytes under a tight provider budget", () => {
+    const verbose = "Execute claim λ safely 😀\n" + "😀\\\n".repeat(2_000);
+    const fitted = fitToolContext({
+      tools: [{ type: "function", function: { name: "run_command", parameters: {} } }],
+      messages: [
+        { role: "system", content: "fixed" },
+        { role: "user", content: "initial" },
+      ],
+    }, {
+      budget: budget(3_000),
+      protection: {
+        getState: () => "state",
+        getActiveInstruction: () => verbose,
+      },
+    });
+    const active = fitted.messages.at(-1).content;
+    expect(active).toContain("Execute claim λ safely 😀");
+    expect(active).toContain("projection truncated");
+    expect(Buffer.byteLength(JSON.stringify(active), "utf8")).toBeLessThanOrEqual(ACTIVE_INSTRUCTION_MAX_BYTES);
+    expect(active.includes("\uFFFD")).toBe(false);
+  });
+
+  it("keeps forced-final STOP last and does not add a competing active instruction", () => {
+    const stop = "STOP: do not call tools; write the final bounded logbook.";
+    let snapshots = 0;
+    const fitted = fitToolContext({
+      messages: [
+        { role: "system", content: "fixed" },
+        { role: "user", content: "initial" },
+        { role: "assistant", content: "verbose draft ".repeat(500) },
+        { role: "user", content: stop },
+      ],
+    }, {
+      budget: budget(1_500),
+      protection: {
+        getState: () => "state",
+        getActiveInstruction: () => {
+          snapshots++;
+          return "CONTINUE REPAIR (must not override STOP)";
+        },
+        archiveContext: key => `[Archived ${key}]`,
+      },
+    });
+    expect(snapshots).toBe(0);
+    expect(fitted.messages.at(-1)).toEqual({ role: "user", content: stop });
+    expect(JSON.stringify(fitted)).not.toContain("CONTINUE REPAIR");
   });
 
   it("does not archive the latest forced-final STOP control", () => {
