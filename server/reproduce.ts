@@ -23,6 +23,7 @@ import { ReproductionSession } from "./reproduction-session";
 import { ContextBudgetError, isContextOverflow, RequestContextBudget } from "./llm-context";
 import { runBoundedReproductionJudge } from "./reproduction-judge";
 import { describeToolContext, RUNTIME_CONTEXT_HEADROOM } from "./tool-context";
+import { ReproductionDiagnostics, attachReproductionFailureDiagnostics, type ReproductionFailureDiagnostics } from "./reproduction-diagnostics";
 
 // "Generous" budget: close to what the ICML hackathon agents were given.
 export const REPRODUCTION_BUDGET = {
@@ -77,6 +78,8 @@ export interface RunReproductionOptions {
   judgeModelConfig: ModelProviderConfig;
   gpu: GpuType;
   emitEvent: (phase: string, message: string) => Promise<void>;
+  /** Run-local handoff for subsequent background-handler failures; never public. */
+  onDiagnostics?: (snapshot: ReproductionFailureDiagnostics) => void;
 }
 
 export const NO_USABLE_REPRODUCTION_EVIDENCE =
@@ -392,6 +395,21 @@ function fmtExec(r: { exitCode: number | null; stdout: string; stderr: string; t
 }
 
 export async function runReproduction(opts: RunReproductionOptions): Promise<ReproductionOutput> {
+  const diagnostics = new ReproductionDiagnostics();
+  try {
+    const result = await runReproductionWithDiagnostics(opts, diagnostics);
+    try { opts.onDiagnostics?.(diagnostics.snapshot()); } catch { /* best effort */ }
+    return result;
+  } catch (error) {
+    try {
+      if (error instanceof ContextBudgetError) diagnostics.stop("context-budget");
+    } catch { /* Capture failure must not replace the original error. */ }
+    attachReproductionFailureDiagnostics(error, diagnostics);
+    throw error;
+  }
+}
+
+async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diagnostics: ReproductionDiagnostics): Promise<ReproductionOutput> {
   const startTime = Date.now();
   const { projectId, journalId, initiativeDocId, initiativeSlug, journalDisplayName, documentId, paperTitle, modelConfig, judgeModelConfig, gpu, emitEvent } = opts;
   const effectivePrompt = buildEffectiveReproducerPrompt(opts.reproducerPrompt);
@@ -423,6 +441,7 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
 
   await emitEvent("reproduction-init", `Starting reproduction of "${paperTitle || documentId}" in ${journalDisplayName} on a ${gpu} sandbox.`);
 
+  diagnostics.stage("materials");
   const ctx = await loadPaperContext({ projectId, documentId, initiativeDocId, initiativeSlug, paperTitle: paperTitle || undefined, emitEvent, eventPrefix: "reproduction" });
   const { title, authors, date, abstract, url, fullText, fsAbstracts } = ctx;
 
@@ -439,17 +458,23 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
   } else {
     await emitEvent("reproduction-sandbox", "Warning: HF_TOKEN is not configured — gated Hugging Face models (e.g. Llama 3) will not be downloadable.");
   }
+  diagnostics.stage("sandbox");
   const sandbox = await ReproductionSandbox.create({ gpu, timeoutMs: REPRODUCTION_BUDGET.sandboxTimeoutMs, env });
-  await emitEvent("reproduction-sandbox", `Sandbox ${sandbox.sandboxId} ready.`);
 
-  const session = new ReproductionSession((recordedResults, toolCalls) =>
-    getReproductionClaimIssues({ recordedResults, toolCalls, budgetExhausted: false }));
+  const session = new ReproductionSession(
+    (recordedResults, toolCalls) => getReproductionClaimIssues({ recordedResults, toolCalls, budgetExhausted: false }),
+    issues => {
+      try { diagnostics.observe({ kind: "claim-validation", toolName: "record_result", validationErrors: issues }); } catch { /* best effort */ }
+    },
+  );
   const recorded = session.recorded;
   let toolLoopResult: Awaited<ReturnType<typeof runToolLoop>> | null = null;
   let logbook = "";
   let gpuInfo = "(not probed)";
+  let executionFailed = false;
 
   try {
+    await emitEvent("reproduction-sandbox", `Sandbox ${sandbox.sandboxId} ready.`);
     const paperText = materials.paperMarkdown || fullText || `# ${title}\n\n${abstract}`;
     await sandbox.writeText("/work/paper.md", paperText);
     let uploaded = 0;
@@ -551,7 +576,14 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
     ].join("\n");
 
     await emitEvent("reproduction-agent", `Reproduction agent (${modelConfig.modelName || modelConfig.provider}) started; budget ${REPRODUCTION_BUDGET.maxToolCalls} tool calls / ${Math.round(REPRODUCTION_BUDGET.wallClockMs / 60000)} min.`);
+    diagnostics.stage("tool-loop");
     toolLoopResult = await runToolLoop(modelConfig, effectivePrompt, userMessage, TOOLS, execute, {
+      onOutcome: event => { try { diagnostics.observe(event); } catch { /* best effort */ } },
+      getArgumentRepair: () => [
+        "Current accepted claim state (not an inferred correction):",
+        session.contextState(2500),
+        "Supply the exact intended id and required fields explicitly. Do not register an already-pending claim again. For a pending claim, perform the claim-specific experiment or demonstrate a real blocker, retrieve existing evidence without rerunning it, then update record_result with a final status and validated evidence. Use read_reproduction_context for omitted full claim identities.",
+      ].join("\n"),
       maxToolCalls: REPRODUCTION_BUDGET.maxToolCalls,
       deadlineMs: startTime + REPRODUCTION_BUDGET.wallClockMs,
       maxTokens: 8000,
@@ -595,6 +627,8 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
       },
       maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
     });
+    diagnostics.stop(toolLoopResult.stoppedBy);
+    diagnostics.stage("completion");
     await emitEvent("reproduction-agent", `Agent finished after ${toolLoopResult.toolCalls.length} tool call(s) (${toolLoopResult.stoppedBy}); logbook ${toolLoopResult.content.length} chars.`);
     const recordedResults = Array.from(recorded.values());
     const budgetExhausted = toolLoopResult.stoppedBy === "deadline" || toolLoopResult.stoppedBy === "tool-budget";
@@ -615,17 +649,31 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
       recordedResults, toolCalls: session.toolCalls, logbook, budgetExhausted,
     });
     if (completionIssues.length) {
+      try { diagnostics.observe({ kind: "completion-validation", validationErrors: completionIssues }); } catch { /* best effort */ }
       throw new Error(`The reproduction agent stopped before completing required work (${toolLoopResult.stoppedBy}): ${completionIssues.join("; ")}.`);
     }
+  } catch (error) {
+    executionFailed = true;
+    throw error;
   } finally {
-    await sandbox.terminate();
-    await emitEvent("reproduction-sandbox", `Sandbox ${sandbox.sandboxId} terminated.`);
+    try { diagnostics.claims(recorded.values()); } catch { /* best effort */ }
+    try {
+      await sandbox.terminate();
+      await emitEvent("reproduction-sandbox", `Sandbox ${sandbox.sandboxId} terminated.`);
+    } catch (cleanupError) {
+      try { diagnostics.observe({ kind: "cleanup-failed" }); } catch { /* best effort */ }
+      if (!executionFailed) {
+        diagnostics.stop("cleanup-failed");
+        throw cleanupError;
+      }
+    }
   }
 
   const toolCalls = session.toolCalls;
   const recordedList = Array.from(recorded.values());
 
   // Judge pass: a separate model grades the logbook against the raw tool outputs.
+  diagnostics.stage("judge");
   await emitEvent("reproduction-judge", `Judge (${judgeModelConfig.modelName || judgeModelConfig.provider}) grading ${recordedList.length} recorded result(s)...`);
   let judgeSummary = "";
   let results: ClaimVerdict[] = [];
@@ -653,6 +701,7 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
     }
   }
 
+  diagnostics.stage("report");
   const overall = deriveOverallVerdict(results);
   const counts = countVerdicts(results);
   await emitEvent("reproduction-judge", `Verdicts: ${counts.verified} verified, ${counts.falsified} falsified, ${counts.toy} toy, ${counts.inconclusive} inconclusive → overall ${overall}.`);

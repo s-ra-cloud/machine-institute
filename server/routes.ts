@@ -27,6 +27,7 @@ import { INITIATIVE_DOC_IDS, JOURNAL_DISPLAY_NAMES, INITIATIVE_SLUGS, getJournal
 import { fetchJournalPaperCatalogue } from "./paper-catalogue";
 import { runReproduction } from "./reproduce";
 import { canRetryReproduction } from "./reproduction-retry";
+import { createFallbackReproductionDiagnostics, getReproductionFailureDiagnostics, type ReproductionFailureDiagnostics } from "./reproduction-diagnostics";
 import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt, verdictsToRevisions, type ClaimVerdict } from "./prompts/reproduce";
 import { GPU_OPTIONS, DEFAULT_GPU, resolveGpu, isModalConfigured } from "./modal-sandbox";
 import { insertReproductionSchema, type Reproduction } from "@shared/schema";
@@ -63,6 +64,29 @@ function generateSlug(title: string): string {
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function publicReproduction(run: Reproduction) {
+  // Use the same projection for anonymous, member, and admin consumers. Private
+  // snapshots have their own authenticated, non-cacheable endpoint.
+  const { prompt1, prompt2, promptTrace, sourceTrace, sandboxId, ...publicRun } = run;
+  if (run.status !== "failed") return publicRun;
+  // Old failures may contain raw provider errors or stale successful content.
+  return {
+    ...publicRun,
+    contentHtml: null,
+    contentMarkdown: null,
+    logbookMarkdown: null,
+    reportTitle: null,
+    reportAbstract: null,
+    overallVerdict: null,
+    verdictsJson: null,
+    claimsCount: null,
+    verifiedCount: null,
+    falsifiedCount: null,
+    toyCount: null,
+    inconclusiveCount: null,
+  };
 }
 
 interface LinkifyPaper {
@@ -2766,7 +2790,8 @@ I will now provide the papers.`;
     try {
       const projectId = req.query.projectId as string | undefined;
       const runs = projectId ? await storage.getReproductionsByProject(projectId) : await storage.getAllReproductions();
-      return res.json(runs);
+      res.setHeader("Cache-Control", "no-store");
+      return res.json(runs.map(publicReproduction));
     } catch (err: any) {
       console.error("Error fetching reproductions:", err);
       return res.status(500).json({ error: "Internal server error" });
@@ -2777,10 +2802,26 @@ I will now provide the papers.`;
     try {
       const run = await storage.getReproductionById(String(req.params.id));
       if (!run) return res.status(404).json({ error: "Reproduction not found" });
-      return res.json(run);
+      res.setHeader("Cache-Control", "no-store");
+      return res.json(publicReproduction(run));
     } catch (err: any) {
       console.error("Error fetching reproduction:", err);
       return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/reproductions/:id/diagnostics", adminAuth, async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Vary", "Cookie");
+    try {
+      const id = String(req.params.id);
+      const run = await storage.getReproductionById(id);
+      if (!run) return res.status(404).json({ error: "Reproduction not found" });
+      const record = await storage.getReproductionFailureDiagnostics(id);
+      return res.json({ diagnostics: record ? JSON.parse(record.diagnosticsJson) : null });
+    } catch {
+      console.error("Failed to retrieve private reproduction diagnostics.");
+      return res.status(500).json({ error: "Could not load reproduction diagnostics." });
     }
   });
 
@@ -2875,10 +2916,10 @@ I will now provide the papers.`;
 
       const run = await storage.createReproduction(parsed.data);
       if (!run) return res.status(409).json({ error: "This paper already has a reproduction run with this model." });
-      res.status(201).json(run);
+      res.status(201).json(publicReproduction(run));
 
       generateReproductionBackground(run.id, parsed.data, modelConfig, judgeConfig).catch(err => {
-        console.error("Background reproduction failed:", err);
+        console.error("Background reproduction failed to persist its terminal status.");
       });
     } catch (err: any) {
       console.error("Error creating reproduction:", err);
@@ -2954,9 +2995,9 @@ I will now provide the papers.`;
       if (!retry) {
         return res.status(409).json({ error: "A retry for this paper and model is already running." });
       }
-      res.status(201).json(retry);
+      res.status(201).json(publicReproduction(retry));
       generateReproductionBackground(retry.id, parsed.data, modelConfig, judgeConfig).catch(err => {
-        console.error("Background reproduction retry failed:", err);
+        console.error("Background reproduction retry failed to persist its terminal status.");
       });
     } catch (err: any) {
       console.error("Error retrying reproduction:", err);
@@ -2981,6 +3022,7 @@ I will now provide the papers.`;
     const resolvedModel = resolveModelName(modelConfig);
     const robotAgentName = buildConventionName(resolvedModel, "P");
     const gpu = resolveGpu(data.gpu);
+    const diagnosticCapture: { latest?: ReproductionFailureDiagnostics } = {};
 
     async function emit(phase: string, message: string) {
       try {
@@ -3007,6 +3049,7 @@ I will now provide the papers.`;
         judgeModelConfig: judgeConfig,
         gpu,
         emitEvent: emit,
+        onDiagnostics: snapshot => { diagnosticCapture.latest = snapshot; },
       });
 
       const safeHtml = sanitizeHtml(markdownToHtml(result.markdown));
@@ -3087,13 +3130,26 @@ I will now provide the papers.`;
       await storage.updateReproduction(reproductionId, updates);
       await emit("reproduction-completed", `Reproduction completed — overall verdict: ${result.overall} (${result.counts.verified}/${result.counts.total} verified).`);
     } catch (err: any) {
-      console.error(`[Reproduction ${reproductionId}] Generation failed:`, err);
-      const safeError = (err?.message || "Unknown error").replace(/[<>&"']/g, "");
-      await emit("failure", `Reproduction failed: ${safeError}`);
+      console.error(`[Reproduction ${reproductionId}] Generation failed.`);
+      // Release the active-run lock before any best-effort diagnostic/event I/O.
+      // A snapshot storage outage must not strand a run in "generating".
       await storage.updateReproduction(reproductionId, {
         status: "failed",
-        contentHtml: `<p>Reproduction failed: ${safeError}</p>`,
+        completedAt: new Date(),
+        contentHtml: null,
+        contentMarkdown: null,
+        logbookMarkdown: null,
       });
+      try {
+        const diagnostics = getReproductionFailureDiagnostics(err)
+          ?? (diagnosticCapture.latest
+            ? { ...diagnosticCapture.latest, stage: "background" }
+            : createFallbackReproductionDiagnostics());
+        await storage.saveReproductionFailureDiagnostics(reproductionId, JSON.stringify(diagnostics));
+      } catch {
+        console.error(`[Reproduction ${reproductionId}] Private diagnostic snapshot could not be saved.`);
+      }
+      await emit("failure", "Reproduction failed. No report was completed; institute members can retry the run.");
     }
   }
 

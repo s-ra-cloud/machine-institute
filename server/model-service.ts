@@ -347,6 +347,19 @@ export interface ToolCallRecord {
   error: boolean;
 }
 
+export interface ToolLoopOutcome {
+  kind: "completion" | "arguments" | "tool" | "stop" | "provider-error";
+  round: number;
+  callCount: number;
+  finishReason?: "stop" | "length" | "tool_calls" | "content_filter" | "function_call" | "unknown";
+  argumentParse?: "valid" | "invalid-json" | "invalid-schema" | "truncated";
+  toolName?: string;
+  validationErrors?: string[];
+  responseExcerpt?: string;
+  toolExcerpt?: string;
+  stopReason?: string;
+}
+
 export interface ToolLoopOptions {
   maxToolCalls: number;
   /** Absolute epoch-ms deadline after which the agent is told to wrap up. */
@@ -380,6 +393,11 @@ export interface ToolLoopOptions {
   allowResourceStopFallback?: boolean;
   /** Opt-in protection for routed context caps and context-length retries. */
   contextProtection?: ToolContextProtection;
+  /** Observability only: failures in this callback never affect execution. */
+  onOutcome?: (event: ToolLoopOutcome) => Promise<void> | void;
+  /** Actual accepted workflow state to include after parse/schema refusals.
+   * Invalid argument text is intentionally not passed to this callback. */
+  getArgumentRepair?: (toolName: string, validationErrors: readonly string[]) => string;
 }
 
 export interface ToolLoopResult {
@@ -387,6 +405,75 @@ export interface ToolLoopResult {
   toolCalls: ToolCallRecord[];
   rounds: number;
   stoppedBy: "model" | "tool-budget" | "deadline" | "round-cap" | "no-progress";
+  finishReason?: ToolLoopOutcome["finishReason"];
+}
+
+const safeFinishReason = (value: unknown): NonNullable<ToolLoopOutcome["finishReason"]> =>
+  ["stop", "length", "tool_calls", "content_filter", "function_call"].includes(String(value))
+    ? value as NonNullable<ToolLoopOutcome["finishReason"]> : "unknown";
+
+function parseToolArguments(raw: string): unknown {
+  const parsed: unknown = JSON.parse(raw);
+  // JSON.parse silently keeps the last duplicate key. Reject that ambiguity,
+  // including escaped aliases such as "id" and "\u0069d".
+  const tokens = raw.match(/"(?:\\.|[^"\\])*"|[{}\[\],:]|[^{}\[\],:\s]+/g) ?? [];
+  let index = 0;
+  const visit = (): void => {
+    const token = tokens[index++];
+    if (token === "{") {
+      const keys = new Set<string>();
+      while (tokens[index] !== "}") {
+        const key = JSON.parse(tokens[index++]);
+        if (keys.has(key)) throw new Error("duplicate object key");
+        keys.add(key);
+        index++; // colon (syntax already checked by JSON.parse)
+        visit();
+        if (tokens[index] !== ",") break;
+        index++;
+      }
+      index++;
+    } else if (token === "[") {
+      while (tokens[index] !== "]") {
+        visit();
+        if (tokens[index] !== ",") break;
+        index++;
+      }
+      index++;
+    }
+  };
+  visit();
+  return parsed;
+}
+
+/** Strict JSON-schema subset used by our tool definitions; never coerces inputs. */
+export function validateToolArguments(value: unknown, schema: Record<string, any>, path = "arguments"): string[] {
+  const errors: string[] = [];
+  const type = schema.type;
+  const valid = type === "object" ? value !== null && typeof value === "object" && !Array.isArray(value)
+    : type === "array" ? Array.isArray(value)
+    : type === "integer" ? typeof value === "number" && Number.isSafeInteger(value)
+    : type === "number" ? typeof value === "number" && Number.isFinite(value)
+    : type === "string" ? typeof value === "string"
+    : type === "boolean" ? typeof value === "boolean"
+    : type === "null" ? value === null : true;
+  if (!valid) return [`${path} must be ${type}`];
+  if (schema.enum && !schema.enum.includes(value)) errors.push(`${path} must be one of ${schema.enum.join(", ")}`);
+  if (type === "object") {
+    const object = value as Record<string, unknown>;
+    for (const key of schema.required ?? []) {
+      if (!Object.hasOwn(object, key)) errors.push(`${path}.${key} is required`);
+    }
+    for (const [key, child] of Object.entries(object)) {
+      if (Object.hasOwn(schema.properties ?? {}, key)) {
+        errors.push(...validateToolArguments(child, schema.properties[key], `${path}.${key}`));
+      } else if (schema.additionalProperties === false) errors.push(`${path}.${key} is not allowed`);
+    }
+  }
+  if (type === "array" && schema.items) {
+    (value as unknown[]).forEach((child, index) =>
+      errors.push(...validateToolArguments(child, schema.items, `${path}[${index}]`)));
+  }
+  return errors;
 }
 
 const ELIDED_TOOL_OUTPUT = "[earlier tool output elided to fit the context window — re-run the tool if you need it again]";
@@ -495,6 +582,9 @@ export async function runToolLoop(
   let forceFinal = false;
   let prematureStopRecoveries = 0;
   let recoveryProgressHighWater: number | undefined;
+  const observe = async (event: ToolLoopOutcome): Promise<void> => {
+    try { await options.onOutcome?.(event); } catch { /* Diagnostics cannot break a run. */ }
+  };
 
   for (let round = 1; round <= maxRounds; round++) {
     const budgetExhausted = toolCalls.length >= options.maxToolCalls;
@@ -581,13 +671,10 @@ export async function runToolLoop(
           }
           continue;
         }
-        const status = err?.status ?? err?.statusCode ?? "unknown";
-        const body = err?.error ?? err?.message ?? String(err);
         if (requestBudget && isContextOverflow(err)) {
           await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
-        } else {
-          console.error(`[ToolLoop] API request failed — model=${model} round=${round} status=${status}:`, JSON.stringify(body));
         }
+        await observe({ kind: "provider-error", round, callCount: toolCalls.length, stopReason: "provider-request-failed" });
         if (options.allowResourceStopFallback) {
           const fallback = fallbackAfterResourceStop();
           if (fallback) return fallback;
@@ -595,7 +682,7 @@ export async function runToolLoop(
         if (requestBudget && isContextOverflow(err)) {
           throw terminalContextError(requestBudget, request, model);
         }
-        throw new Error(`LLM request failed (${status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
+        throw sanitizeContextRequestError(err, model);
       }
       if (completion?.error) {
         const completionError = completion.error;
@@ -616,9 +703,8 @@ export async function runToolLoop(
         }
         if (requestBudget && isContextOverflow(completionError)) {
           await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
-        } else {
-          console.error(`[ToolLoop] API returned error body — model=${model} round=${round}:`, JSON.stringify(completionError));
         }
+        await observe({ kind: "provider-error", round, callCount: toolCalls.length, stopReason: "provider-error-response" });
         if (options.allowResourceStopFallback) {
           const fallback = fallbackAfterResourceStop();
           if (fallback) return fallback;
@@ -626,11 +712,16 @@ export async function runToolLoop(
         if (requestBudget && isContextOverflow(completionError)) {
           throw terminalContextError(requestBudget, request, model);
         }
-        throw new Error(`LLM API error: ${completionError.message || JSON.stringify(completionError)}`);
+        throw sanitizeContextRequestError(completionError, model);
       }
       break;
     }
     const msg = completion?.choices?.[0]?.message;
+    const finishReason = safeFinishReason(completion?.choices?.[0]?.finish_reason);
+    await observe({
+      kind: "completion", round, callCount: toolCalls.length, finishReason,
+      responseExcerpt: typeof msg?.content === "string" ? msg.content.slice(0, 2000) : undefined,
+    });
     if (!msg) {
       if (options.allowResourceStopFallback) {
         const fallback = fallbackAfterResourceStop();
@@ -656,8 +747,11 @@ export async function runToolLoop(
         forceFinal = true;
         stoppedBy = "deadline";
       }
+      const incomplete = finishReason === "length" || finishReason === "content_filter" || finishReason === "tool_calls";
       const continuation = !forceFinal
-        ? options.onPrematureStop?.(assistantText ?? "", toolCalls) ?? null
+        ? (incomplete
+          ? `Your response was incomplete (finish_reason=${finishReason}); it is not an accepted final logbook. Continue from accepted claim state and prior evidence. Do not re-register existing claims or repeat completed experiments.`
+          : options.onPrematureStop?.(assistantText ?? "", toolCalls) ?? null)
         : null;
       const maxRecoveries = options.maxPrematureStopRecoveries ?? 0;
       if (continuation) {
@@ -677,21 +771,36 @@ export async function runToolLoop(
           messages.push({ role: "user", content: continuation });
           continue;
         }
-        if (options.getRecoveryProgress) stoppedBy = "no-progress";
+        if (options.getRecoveryProgress || incomplete) stoppedBy = "no-progress";
       }
-      return { content: assistantText ?? "", toolCalls, rounds: round, stoppedBy };
+      await observe({ kind: "stop", round, callCount: toolCalls.length, finishReason, stopReason: stoppedBy });
+      return { content: incomplete ? "" : assistantText ?? "", toolCalls, rounds: round, stoppedBy, finishReason };
     }
 
     for (const call of calls) {
       let args: Record<string, unknown> = {};
+      let argumentParse: ToolLoopOutcome["argumentParse"] = "valid";
+      let validationErrors: string[] = [];
       try {
-        const parsedArgs = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-        args = parsedArgs && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)
-          ? parsedArgs as Record<string, unknown>
-          : {};
+        if (typeof call.function.arguments !== "string") throw new Error("not JSON text");
+        const parsedArgs = parseToolArguments(call.function.arguments);
+        const spec = tools.find(tool => tool.name === call.function.name);
+        validationErrors = spec
+          ? validateToolArguments(parsedArgs, { ...spec.parameters, type: "object" })
+          : ["tool name is not available"];
+        if (validationErrors.length) argumentParse = "invalid-schema";
+        else args = parsedArgs as Record<string, unknown>;
       } catch {
-        args = { _raw: call.function.arguments };
+        argumentParse = "invalid-json";
+        validationErrors = ["arguments must be complete, valid JSON with unique keys and an object at the root"];
       }
+      if (finishReason === "length" || finishReason === "content_filter") {
+        argumentParse = "truncated";
+        args = {}; // A parsed prefix must never look like executed command evidence.
+        validationErrors = [`response finish_reason=${finishReason}; no calls from this incomplete response were executed`];
+      }
+      await observe({ kind: "arguments", round, callCount: toolCalls.length, finishReason,
+        toolName: call.function.name, argumentParse, validationErrors });
       const started = Date.now();
       let result: string;
       let error = false;
@@ -711,6 +820,12 @@ export async function runToolLoop(
         stoppedBy = "deadline";
         result = "Deadline exhausted — this call was not executed. Write your final logbook.";
         error = true;
+      } else if (argumentParse !== "valid") {
+        dispatched = true; // Invalid attempts consume the existing budget, but never execute.
+        error = true;
+        result = `Refused: ${validationErrors.join("; ")}. Resubmit this tool with complete fields of the declared types; do not infer missing values. Existing accepted claim state is unchanged. For an existing pending claim, retrieve its state/evidence and update the same id with tested outcome; do not register it again.`;
+        const repair = options.getArgumentRepair?.(call.function.name, validationErrors);
+        if (repair) result += `\n${repair}`;
       } else {
         dispatched = true;
         try {
@@ -721,6 +836,8 @@ export async function runToolLoop(
         }
       }
       result = truncateToolResult(result ?? "", maxToolResultChars);
+      await observe({ kind: "tool", round, callCount: toolCalls.length + (dispatched ? 1 : 0),
+        toolName: call.function.name, argumentParse, validationErrors, toolExcerpt: result.slice(0, 2000) });
       let resultContent = result;
       if (dispatched) {
         const record: ToolCallRecord = {
@@ -748,7 +865,8 @@ export async function runToolLoop(
     // model nevertheless returns tool calls, preserve the refusal records and
     // stop rather than allowing it to consume the remaining round budget.
     if (requestWasForcedFinal) {
-      return { content: assistantText ?? "", toolCalls, rounds: round, stoppedBy };
+      await observe({ kind: "stop", round, callCount: toolCalls.length, finishReason, stopReason: stoppedBy });
+      return { content: "", toolCalls, rounds: round, stoppedBy, finishReason };
     }
   }
 
@@ -813,7 +931,8 @@ export async function runToolLoop(
         await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
         throw terminalContextError(requestBudget, request, model);
       }
-      throw err;
+      await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length, stopReason: "provider-request-failed" });
+      throw sanitizeContextRequestError(err, model);
     }
     if (finalCompletion?.error) {
       const completionError = finalCompletion.error;
@@ -836,9 +955,15 @@ export async function runToolLoop(
         await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
         throw terminalContextError(requestBudget, request, model);
       }
+      await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length, stopReason: "provider-error-response" });
+      throw sanitizeContextRequestError(completionError, model);
     }
     break;
   }
   const finalText = finalCompletion?.choices?.[0]?.message?.content;
-  return { content: typeof finalText === "string" ? finalText : "", toolCalls, rounds: maxRounds + 1, stoppedBy };
+  const finishReason = safeFinishReason(finalCompletion?.choices?.[0]?.finish_reason);
+  await observe({ kind: "completion", round: maxRounds + 1, callCount: toolCalls.length, finishReason,
+    responseExcerpt: typeof finalText === "string" ? finalText.slice(0, 2000) : undefined });
+  await observe({ kind: "stop", round: maxRounds + 1, callCount: toolCalls.length, finishReason, stopReason: stoppedBy });
+  return { content: finishReason !== "length" && finishReason !== "content_filter" && typeof finalText === "string" ? finalText : "", toolCalls, rounds: maxRounds + 1, stoppedBy, finishReason };
 }

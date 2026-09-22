@@ -500,7 +500,7 @@ describe("Tool loop — premature-stop recovery", () => {
         deadlineMs: Date.now() + 60_000,
         allowResourceStopFallback: true,
       },
-    )).rejects.toThrow("LLM request failed");
+    )).rejects.toThrow("LLM context request failed");
   });
 
   it("falls back when a request crosses the deadline before failing", async () => {
@@ -556,7 +556,7 @@ describe("Tool loop — premature-stop recovery", () => {
     now.mockRestore();
   });
 
-  it("normalizes null and primitive tool arguments to objects", async () => {
+  it("refuses null and primitive tool arguments without executing", async () => {
     createCompletion
       .mockResolvedValueOnce(completion(null, [
         {
@@ -573,7 +573,7 @@ describe("Tool loop — premature-stop recovery", () => {
       .mockResolvedValueOnce(completion("Done."));
 
     const execute = vi.fn(async () => "exit code 0");
-    const records: Array<{ args: Record<string, unknown> }> = [];
+    const records: Array<{ args: Record<string, unknown>; error: boolean; result: string }> = [];
     await runToolLoop(
       config,
       "system",
@@ -583,12 +583,12 @@ describe("Tool loop — premature-stop recovery", () => {
       {
         maxToolCalls: 10,
         deadlineMs: Date.now() + 60_000,
-        onToolCall: record => records.push({ args: record.args }),
+        onToolCall: record => { records.push(record); },
       },
     );
 
-    expect(execute.mock.calls[0][1]).toEqual({});
-    expect(execute.mock.calls[1][1]).toEqual({});
+    expect(execute).not.toHaveBeenCalled();
+    expect(records.every(record => record.error && record.result.startsWith("Refused:"))).toBe(true);
     expect(records.map(record => record.args)).toEqual([{}, {}]);
   });
 

@@ -80,7 +80,24 @@ export class ReproductionSession {
   private contexts = new ReproductionContextStore();
   private activeIndexRef: string | undefined;
 
-  constructor(private validate: ClaimValidator) {}
+  constructor(
+    private validate: ClaimValidator,
+    private onValidation?: (issues: string[]) => void,
+  ) {}
+
+  private reportValidation(issues: string[]): void {
+    try { this.onValidation?.([...issues]); } catch { /* Observability must not alter accepted state. */ }
+  }
+
+  private acceptedStateForRepair(args: Record<string, unknown>): string {
+    const id = typeof args.id === "string" ? args.id.trim() : "";
+    const accepted = this.recorded.get(id);
+    if (!accepted) {
+      return "No accepted claim was changed. Recover existing identities with read_reproduction_context before updating a pending claim; do not guess an id or register it again.";
+    }
+    const ref = this.snapshotClaim(id, "accepted").ref;
+    return `Accepted id=${JSON.stringify(id)} remains ${accepted.status}; recover its exact claim with read_reproduction_context(ref="${ref}"). Correct the named fields and update this same id; do not register it again.`;
+  }
 
   get progress(): number {
     return this.progressKeys.size + this.completedIds.size;
@@ -94,7 +111,7 @@ export class ReproductionSession {
     const full = { ...record, result: this.capturedOutput ?? record.result };
     this.capturedOutput = undefined;
     this.toolCalls.push(full);
-    if (evidenceTools.has(full.name) && !/^(?:Refused:|Tool budget exhausted|Deadline exhausted)/.test(full.result)) {
+    if (!full.error && evidenceTools.has(full.name) && !/^(?:Refused:|Tool budget exhausted|Deadline exhausted)/.test(full.result)) {
       // Timing changes and repeated reads/polls are not new scientific progress.
       const output = full.result.replace(/^(exit code \S+|TIMED OUT) \([\d.]+s\)/, "$1");
       const key = createHash("sha256").update(`${full.name}\n${output}`).digest("hex");
@@ -103,16 +120,51 @@ export class ReproductionSession {
   }
 
   recordResult(args: Record<string, unknown>): string {
+    const stringFields = ["id", "claim", "status", "original_value", "reproduced_value", "evidence", "notes", "method", "blocker_kind", "evidence_excerpt", "raw_input_path"];
+    const typeErrors = stringFields.filter(key => args[key] !== undefined && typeof args[key] !== "string")
+      .map(key => `${key} must be a string`);
+    if (args.evidence_tool_call_ids !== undefined && (!Array.isArray(args.evidence_tool_call_ids)
+      || !args.evidence_tool_call_ids.every(id => typeof id === "number" && Number.isSafeInteger(id)))) {
+      typeErrors.push("evidence_tool_call_ids must be an array of integers");
+    }
+    if (args.raw_input_tool_call_id !== undefined
+      && (typeof args.raw_input_tool_call_id !== "number" || !Number.isSafeInteger(args.raw_input_tool_call_id))) {
+      typeErrors.push("raw_input_tool_call_id must be an integer");
+    }
+    if (typeErrors.length) {
+      this.reportValidation(typeErrors);
+      return `Refused: ${typeErrors.join("; ")}. ${this.acceptedStateForRepair(args)}`;
+    }
     const id = String(args.id || "").trim();
     const previous = this.recorded.get(id);
     const claim = String(args.claim ?? previous?.claim ?? "").trim();
-    const status = String(args.status ?? "").trim().toLowerCase();
-    if (!id || !claim) return "Refused: id and claim are required for a new result.";
-    if (status !== "pending" && !(VERDICTS as readonly string[]).includes(status)) {
-      return "Refused: status must be pending, verified, falsified, toy, or inconclusive.";
+    const status = args.status;
+    const missing = [
+      ...(!id ? ["id is required and must be a nonempty string"] : []),
+      ...(!claim ? [
+        previous
+          ? "claim must be nonempty when supplied on an update; omit claim to preserve the accepted claim"
+          : "claim is required and must be nonempty for a new result",
+      ] : []),
+    ];
+    if (missing.length) {
+      this.reportValidation(missing);
+      return `Refused: ${missing.join("; ")}. ${this.acceptedStateForRepair(args)}`;
+    }
+    if (typeof status !== "string" || (status !== "pending" && !(VERDICTS as readonly string[]).includes(status))) {
+      const issues = ["status must be pending, verified, falsified, toy, or inconclusive"];
+      this.reportValidation(issues);
+      return `Refused: ${issues[0]}. ${this.acceptedStateForRepair(args)}`;
     }
     if (status === "pending") {
-      if (previous) return `Unchanged: ${id} remains ${previous.status}; an existing result cannot be reset by registering it again.`;
+      if (previous) {
+        const ref = this.snapshotClaim(id, "accepted").ref;
+        return `Unchanged: ${id} remains ${previous.status}; an existing result cannot be reset by registering it again. Read accepted state with read_reproduction_context(ref="${ref}"). ${
+          previous.status === "pending"
+            ? "Next: perform the claim-specific experiment or inspect its real blocker, recover original evidence with read_tool_result, then update this same id with a non-pending status, method, evidence_tool_call_ids and exact evidence_excerpt. Do not register this claim again."
+            : "This claim is already finalized; work on other pending claims or return the final logbook."
+        }`;
+      }
       this.recorded.set(id, { id, claim, status, originalValue: args.original_value == null ? undefined : String(args.original_value) });
       this.snapshotClaim(id, "accepted");
       return `Registered ${id} as pending. ${this.summary()}`;
@@ -131,9 +183,9 @@ export class ReproductionSession {
       evidenceExcerpt: stringField("evidence_excerpt", base?.evidenceExcerpt),
       evidenceToolCallIds: args.evidence_tool_call_ids === undefined
         ? base?.evidenceToolCallIds
-        : Array.isArray(args.evidence_tool_call_ids) ? args.evidence_tool_call_ids.map(Number) : [],
+        : args.evidence_tool_call_ids as number[],
       rawInputPath: stringField("raw_input_path", base?.rawInputPath),
-      rawInputToolCallId: args.raw_input_tool_call_id === undefined ? base?.rawInputToolCallId : Number(args.raw_input_tool_call_id),
+      rawInputToolCallId: args.raw_input_tool_call_id === undefined ? base?.rawInputToolCallId : args.raw_input_tool_call_id as number,
     };
     const issues: string[] = [];
     if (!(REPRODUCTION_METHODS as readonly unknown[]).includes(candidate.method)) issues.push(`${id} has an invalid reproduction method`);
@@ -143,12 +195,13 @@ export class ReproductionSession {
     }
     issues.push(...this.validate([candidate], this.toolCalls));
     if (issues.length) {
+      this.reportValidation(issues);
       this.drafts.set(id, candidate);
       this.rejected.set(id, issues);
       // A rejected first submission must not make the claim disappear.
       if (!previous) this.recorded.set(id, { id, claim, status: "pending", originalValue: candidate.originalValue });
       this.snapshotClaim(id, "rejected", candidate, issues);
-      return `Refused finalization of ${id}: ${issues.join("; ")}. Accepted state remains ${previous?.status ?? "pending"}. Use read_tool_result with the original tool_call_id to recover exact evidence; do not rerun an expensive experiment just to retrieve output. Resubmit record_result with corrected fields. ${this.summary()}`;
+      return `Refused finalization of ${id}: ${issues.join("; ")}. Accepted state remains ${previous?.status ?? "pending"}. Use read_tool_result with the original tool_call_id to recover exact evidence; do not rerun an expensive experiment just to retrieve output. Resubmit record_result with corrected fields. ${this.acceptedStateForRepair(args)} ${this.summary()}`;
     }
     this.recorded.set(id, candidate);
     this.drafts.delete(id);

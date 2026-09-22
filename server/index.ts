@@ -57,7 +57,9 @@ app.use((req, res, next) => {
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
+    // Private reproduction snapshots belong only in their dedicated store and
+    // authorized response, not in the general HTTP response log.
+    if (!/^\/api\/reproductions\/[^/]+\/diagnostics\/?$/.test(path)) capturedJsonResponse = bodyJson;
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
 

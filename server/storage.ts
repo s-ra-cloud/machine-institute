@@ -1,5 +1,6 @@
 import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, type EthicsReport, type InsertEthicsReport, type PeerReview, type InsertPeerReview, type Reproduction, type InsertReproduction, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys, ethicsReports, peerReviews, reproductions } from "@shared/schema";
 import { db } from "./db";
+import { reproductionFailureDiagnostics, type ReproductionFailureDiagnosticRecord } from "@shared/schema";
 import { eq, desc, gte, lt, lte, inArray, and, notInArray, ne } from "drizzle-orm";
 
 export interface IStorage {
@@ -89,6 +90,8 @@ export interface IStorage {
   getReproductionsByProject(projectId: string): Promise<Reproduction[]>;
   getAllReproductions(): Promise<Reproduction[]>;
   updateReproduction(id: string, updates: Partial<Reproduction>): Promise<Reproduction>;
+  saveReproductionFailureDiagnostics(id: string, diagnosticsJson: string): Promise<void>;
+  getReproductionFailureDiagnostics(id: string): Promise<ReproductionFailureDiagnosticRecord | undefined>;
   deleteReproduction(id: string): Promise<void>;
   deleteAllReproductions(): Promise<void>;
   getReproducedPapersForJournal(journalId: string): Promise<Array<{ documentId: string; modelName: string | null; status: string }>>;
@@ -554,6 +557,21 @@ export class DatabaseStorage implements IStorage {
 
   async deleteReproduction(id: string): Promise<void> {
     await db.delete(reproductions).where(eq(reproductions.id, id));
+  }
+
+  async saveReproductionFailureDiagnostics(id: string, diagnosticsJson: string): Promise<void> {
+    await db.insert(reproductionFailureDiagnostics)
+      .values({ reproductionId: id, diagnosticsJson })
+      .onConflictDoUpdate({
+        target: reproductionFailureDiagnostics.reproductionId,
+        set: { diagnosticsJson, createdAt: new Date() },
+      });
+  }
+
+  async getReproductionFailureDiagnostics(id: string): Promise<ReproductionFailureDiagnosticRecord | undefined> {
+    const [row] = await db.select().from(reproductionFailureDiagnostics)
+      .where(eq(reproductionFailureDiagnostics.reproductionId, id));
+    return row;
   }
 
   async deleteAllReproductions(): Promise<void> {

@@ -26,3 +26,9 @@ Generated “protected” context is still disposable presentation, not immutabl
 **Why:** A later run failed locally even after provider budgeting was added: the most recent draft, repair continuation, and full claim-state projection could remain larger than the entire input allowance. Command-output retrieval alone could not recover omitted rejected submissions or logbook details.
 
 **How to apply:** Cover long latest drafts and verbose multi-claim repair state with the real prompts and orchestration, not only small fitting fixtures. Preserve full scientific values separately, reserve runtime retrieval headroom before paid startup, and resize page payloads with truthful source offsets rather than slicing their serialized wrappers. Retrieval must not count as new scientific progress.
+
+Malformed-call recovery must not guess the model's intended claim or scientific values, even when only one pending claim exists.
+
+**Why:** A stalled production attempt had working materials and GPU access but repeatedly registered the same pending claim and submitted incomplete arguments. The available trace did not establish the root cause; inferring missing arguments would conceal the failure and could execute the wrong experiment.
+
+**How to apply:** Return exact field corrections alongside accepted claim state, reject ambiguous or truncated calls before execution, and preserve completion/validation distinctions in bounded private diagnostics. Keep these diagnostics separate from publishable reports and general HTTP response logs.

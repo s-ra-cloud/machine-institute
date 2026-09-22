@@ -208,32 +208,47 @@ function archiveGeneratedContext(
   return changed;
 }
 
-function compactedArguments(raw: string): string {
+function compactedArguments(raw: string, name: string, archive?: ToolContextProtection["archiveContext"], key = ""): string {
+  // Archive rejected/non-object JSON too: a malformed canonical submission is
+  // diagnostic context, never something compaction may silently infer or fix.
+  const archiveNotice = archive?.(`tool-arguments:${key}:${name}`, raw);
+  const omitted = () => JSON.stringify({
+    ...(archiveNotice ? { _context_archive: archiveNotice } : {}),
+    _context_note: OLD_ARGUMENTS_NOTE,
+  });
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return JSON.stringify({ _context_note: OLD_ARGUMENTS_NOTE });
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return omitted();
     const retained: Record<string, unknown> = {};
-    const preferred = new Set(["path", "command", "file", "filename", "cwd", "offset", "max_chars", "timeout_seconds"]);
+    const preferred = new Set(["id", "claim", "status", "ref", "tool_call_id", "evidence_tool_call_ids", "raw_input_tool_call_id", "raw_input_path", "method", "blocker_kind", "path", "command", "file", "filename", "cwd", "offset", "max_chars", "timeout_seconds"]);
+    if (archiveNotice) retained._context_archive = archiveNotice;
     for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!preferred.has(key) && typeof value !== "number" && typeof value !== "boolean") continue;
-      if (typeof value === "string") retained[key] = value.slice(0, key === "command" ? 600 : 240);
-      else retained[key] = value;
+      if (!preferred.has(key)) continue;
+      // Identity/evidence fields must remain exact, or recoverable from the
+      // immutable archive. Never turn a sliced id or claim into apparent truth.
+      if (serializedBytes(value) <= (key === "command" ? 650 : 400)) retained[key] = value;
+      else if (!archiveNotice && typeof value === "string" && ["command", "path"].includes(key)) {
+        retained[key] = Array.from(value).slice(0, 100).join("") + " [omitted]";
+      }
     }
     retained._context_note = OLD_ARGUMENTS_NOTE;
+    if (serializedBytes(retained) > 1800 && archiveNotice) {
+      return JSON.stringify({ _context_archive: archiveNotice, _context_note: OLD_ARGUMENTS_NOTE });
+    }
     return JSON.stringify(retained);
   } catch {
-    return JSON.stringify({ _context_note: OLD_ARGUMENTS_NOTE });
+    return omitted();
   }
 }
 
-function compactCompletedArguments(messages: Message[], fits: () => boolean): boolean {
+function compactCompletedArguments(messages: Message[], fits: () => boolean, archive?: ToolContextProtection["archiveContext"]): boolean {
   let changed = false;
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     if (message.role !== "assistant" || !hasCompletedCall(messages, i)) continue;
     for (const call of message.tool_calls as any[]) {
       if (!call?.function || typeof call.function.arguments !== "string") continue;
-      const replacement = compactedArguments(call.function.arguments);
+      const replacement = compactedArguments(call.function.arguments, String(call.function.name ?? ""), archive, String(call.id ?? i));
       if (replacement.length < call.function.arguments.length) {
         call.function.arguments = replacement;
         changed = true;
@@ -444,7 +459,7 @@ export function fitToolContext<T extends Record<string, any>>(
   const note = options.elidedToolOutputMessage ?? OLD_OUTPUT_NOTE;
   // Arguments/prose are historical scaffolding; preserve current evidence
   // output and retrieval messages until these cheaper reductions are spent.
-  compactCompletedArguments(messages, fits);
+  compactCompletedArguments(messages, fits, options.protection.archiveContext);
   if (fits()) return fitted;
   while (!fits() && removeObsoleteProse(messages, state, fits)) {
     // Remove old repair scaffolding before sacrificing current evidence.

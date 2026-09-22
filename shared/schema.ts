@@ -487,6 +487,17 @@ export const reproductions = pgTable("reproductions", {
     .where(sql`status IN ('pending', 'generating')`),
 }));
 
+// Private operational snapshots must never be joined into public reproduction
+// responses. A failed run may have no snapshot (older runs or storage outages).
+export const reproductionFailureDiagnostics = pgTable("reproduction_failure_diagnostics", {
+  reproductionId: varchar("reproduction_id").primaryKey()
+    .references(() => reproductions.id, { onDelete: "cascade" }),
+  diagnosticsJson: text("diagnostics_json").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type ReproductionFailureDiagnosticRecord = typeof reproductionFailureDiagnostics.$inferSelect;
+
 export const insertReproductionSchema = createInsertSchema(reproductions).omit({
   id: true,
   createdAt: true,

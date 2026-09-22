@@ -33,6 +33,44 @@ export function verdictStyle(verdict: string | null | undefined): string {
   return VERDICT_STYLES[verdict || ""] || "text-muted-foreground border-border/30 bg-muted/5";
 }
 
+function FailureDiagnostics({ id, adminId }: { id: string; adminId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data, isFetching, error } = useQuery<{ diagnostics: unknown | null }>({
+    queryKey: ["/api/reproductions", id, "diagnostics", adminId],
+    enabled: expanded,
+    gcTime: 0,
+    retry: false,
+    queryFn: async () => {
+      const response = await fetch(`/api/reproductions/${id}/diagnostics`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load private diagnostics.");
+      return response.json();
+    },
+  });
+  return (
+    <section className="mt-6 border border-border/30 p-5" data-testid="section-failure-diagnostics">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls="failure-diagnostics-content"
+        onClick={() => setExpanded(value => !value)}
+        className="text-xs font-mono text-muted-foreground hover:text-foreground"
+        data-testid="button-toggle-failure-diagnostics"
+      >
+        {expanded ? "Hide" : "Show"} failure diagnostics (admin only)
+      </button>
+      {expanded && (
+        <div id="failure-diagnostics-content" className="mt-4 text-xs text-muted-foreground">
+          <p className="mb-3">Private operational snapshot, not a completed scientific report.</p>
+          {isFetching ? <p>Loading diagnostics...</p>
+            : error ? <p role="alert">Could not load private diagnostics. Close and reopen to retry.</p>
+            : data?.diagnostics == null ? <p>No diagnostics were saved for this run.</p>
+            : <pre className="whitespace-pre-wrap break-words max-h-[32rem] overflow-auto font-mono" data-testid="text-failure-diagnostics">{JSON.stringify(data.diagnostics, null, 2)}</pre>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function ReproductionDetail() {
   const { id } = useParams<{ id: string }>();
   const [showMeta, setShowMeta] = useState(false);
@@ -181,10 +219,10 @@ export default function ReproductionDetail() {
               </div>
 
               <h1 className="text-2xl md:text-3xl font-heading font-bold tracking-tight mb-4" data-testid="text-reproduction-title">
-                {run.reportTitle || `Reproduction of ${run.paperTitle || run.documentId}`}
+                {(run.status === "completed" && run.reportTitle) || `Reproduction of ${run.paperTitle || run.documentId}`}
               </h1>
 
-              {run.reportAbstract && (
+              {run.status === "completed" && run.reportAbstract && (
                 <p className="text-sm text-muted-foreground mb-6 leading-relaxed" data-testid="text-reproduction-abstract">{run.reportAbstract}</p>
               )}
 
@@ -273,7 +311,7 @@ export default function ReproductionDetail() {
             ) : run.status === "failed" ? (
               <div className="border border-red-500/20 bg-red-500/5 p-8">
                 <p className="text-red-400 font-mono text-sm">Reproduction failed.</p>
-                {run.contentHtml && <div className="mt-4 text-sm text-red-300/70" dangerouslySetInnerHTML={{ __html: run.contentHtml }} />}
+                <p className="mt-4 text-sm text-red-300/70">No report was completed. Eligible institute members can retry this run.</p>
                 {authenticated && user?.id === run.userId && REPRODUCTION_ACCESS_EMAILS.includes(user.email || "") && (
                   <>
                     <Button
@@ -296,6 +334,10 @@ export default function ReproductionDetail() {
               </section>
             ) : null}
           </FadeIn>
+
+          {isAdmin && user && run.status === "failed" && (
+            <FailureDiagnostics key={`${run.id}:${user.id}`} id={run.id} adminId={user.id} />
+          )}
 
           {run.status === "completed" && run.overallVerdict === "inconclusive"
             && authenticated && user?.id === run.userId
@@ -359,7 +401,6 @@ export default function ReproductionDetail() {
                       {run.modelProvider && <div><span className="text-muted-foreground/40 block">Provider</span><span className="text-foreground/70">{run.modelProvider}</span></div>}
                       {run.providerMode && <div><span className="text-muted-foreground/40 block">Mode</span><span className="text-foreground/70">{run.providerMode}</span></div>}
                       <div><span className="text-muted-foreground/40 block">GPU</span><span className="text-foreground/70">{run.gpu}</span></div>
-                      {run.sandboxId && <div><span className="text-muted-foreground/40 block">Sandbox</span><span className="text-foreground/70">{run.sandboxId}</span></div>}
                       {run.orchestratorName && <div><span className="text-muted-foreground/40 block">Orchestrator</span><span className="text-foreground/70">{run.orchestratorName}</span></div>}
                     </div>
 
@@ -369,18 +410,6 @@ export default function ReproductionDetail() {
                       </a>
                     )}
 
-                    {[["Prompt trace", run.promptTrace], ["Source trace", run.sourceTrace]].map(([label, raw]) => {
-                      if (!raw) return null;
-                      try {
-                        const data = JSON.parse(raw as string);
-                        return (
-                          <details key={label as string} className="text-[10px] font-mono text-foreground/50">
-                            <summary className="cursor-pointer hover:text-foreground/70">{label}</summary>
-                            <pre className="mt-2 p-3 bg-background border border-border/20 overflow-x-auto max-h-72 text-[9px] whitespace-pre-wrap">{JSON.stringify(data, null, 2)}</pre>
-                          </details>
-                        );
-                      } catch { return null; }
-                    })}
                   </div>
                 )}
 
