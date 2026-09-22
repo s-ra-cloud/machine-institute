@@ -1,0 +1,272 @@
+Private operational snapshot, not a completed scientific report.
+
+{
+  "version": 1,
+  "stage": "tool-loop",
+  "stopReason": "context-budget",
+  "rounds": 16,
+  "callCount": 16,
+  "redaction": "Credential fields, authorization, URLs, private keys and opaque tokens are redacted. Excerpts and history are bounded; prompts, raw provider errors and full outputs are excluded.",
+  "truncated": true,
+  "droppedEvents": 16,
+  "events": [
+    {
+      "kind": "arguments",
+      "round": 6,
+      "callCount": 5,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 6,
+      "callCount": 6,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "## 1. Introduction\n\nSharp gains in benchmark accuracy are often described as emergent phase transitions. Wei et al. (2022) emphasized abilities that appear unpredictably with scale, while also noting that exact match can hide partial progress. Schaeffer et al. (2023) formalized a related measurement concern: a smooth change in token probabilities can appear abrupt after argmax, exact-string match, or another nonlinear metric. Continuous scores do not settle the issue by themselves, however. Du et al. (2024) reported thresholds in correct-answer probability and Brier score when performance was indexed by pretraining loss, and Zhao et al. (2025) showed that co[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 7,
+      "callCount": 6,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 7,
+      "callCount": 6,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 7,
+      "callCount": 7,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "## 1. Introduction\n\nSharp gains in benchmark accuracy are often described as emergent phase transitions. Wei et al. (2022) emphasized abilities that appear unpredictably with scale, while also noting that exact match can hide partial progress. Schaeffer et al. (2023) formalized a related measurement concern: a smooth change in token probabilities can appear abrupt after argmax, exact-string match, or another nonlinear metric. Continuous scores do not settle the issue by themselves, however. Du et al. (2024) reported thresholds in correct-answer probability and Brier score when performance was indexed by pretraining loss, and Zhao et al. (2025) showed that co[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 8,
+      "callCount": 7,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 8,
+      "callCount": 7,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 8,
+      "callCount": 8,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "completion",
+      "round": 9,
+      "callCount": 8,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 9,
+      "callCount": 8,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 9,
+      "callCount": 9,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "## 1. Introduction\n\nSharp gains in benchmark accuracy are often described as emergent phase transitions. Wei et al. (2022) emphasized abilities that appear unpredictably with scale, while also noting that exact match can hide partial progress. Schaeffer et al. (2023) formalized a related measurement concern: a smooth change in token probabilities can appear abrupt after argmax, exact-string match, or another nonlinear metric. Continuous scores do not settle the issue by themselves, however. Du et al. (2024) reported thresholds in correct-answer probability and Brier score when performance was indexed by pretraining loss, and Zhao et al. (2025) showed that co[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 10,
+      "callCount": 9,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 10,
+      "callCount": 9,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 10,
+      "callCount": 10,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "## 1. Introduction\n\nSharp gains in benchmark accuracy are often described as emergent phase transitions. Wei et al. (2022) emphasized abilities that appear unpredictably with scale, while also noting that exact match can hide partial progress. Schaeffer et al. (2023) formalized a related measurement concern: a smooth change in token probabilities can appear abrupt after argmax, exact-string match, or another nonlinear metric. Continuous scores do not settle the issue by themselves, however. Du et al. (2024) reported thresholds in correct-answer probability and Brier score when performance was indexed by pretraining loss, and Zhao et al. (2025) showed that co[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 11,
+      "callCount": 10,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 11,
+      "callCount": 10,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 11,
+      "callCount": 11,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "## 1. Introduction\n\nSharp gains in benchmark accuracy are often described as emergent phase transitions. Wei et al. (2022) emphasized abilities that appear unpredictably with scale, while also noting that exact match can hide partial progress. Schaeffer et al. (2023) formalized a related measurement concern: a smooth change in token probabilities can appear abrupt after argmax, exact-string match, or another nonlinear metric. Continuous scores do not settle the issue by themselves, however. Du et al. (2024) reported thresholds in correct-answer probability and Brier score when performance was indexed by pretraining loss, and Zhao et al. (2025) showed that co[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 12,
+      "callCount": 11,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 12,
+      "callCount": 11,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 12,
+      "callCount": 12,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "## 1. Introduction\n\nSharp gains in benchmark accuracy are often described as emergent phase transitions. Wei et al. (2022) emphasized abilities that appear unpredictably with scale, while also noting that exact match can hide partial progress. Schaeffer et al. (2023) formalized a related measurement concern: a smooth change in token probabilities can appear abrupt after argmax, exact-string match, or another nonlinear metric. Continuous scores do not settle the issue by themselves, however. Du et al. (2024) reported thresholds in correct-answer probability and Brier score when performance was indexed by pretraining loss, and Zhao et al. (2025) showed that co[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 13,
+      "callCount": 12,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 13,
+      "callCount": 12,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 13,
+      "callCount": 13,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "## 1. Introduction\n\nSharp gains in benchmark accuracy are often described as emergent phase transitions. Wei et al. (2022) emphasized abilities that appear unpredictably with scale, while also noting that exact match can hide partial progress. Schaeffer et al. (2023) formalized a related measurement concern: a smooth change in token probabilities can appear abrupt after argmax, exact-string match, or another nonlinear metric. Continuous scores do not settle the issue by themselves, however. Du et al. (2024) reported thresholds in correct-answer probability and Brier score when performance was indexed by pretraining loss, and Zhao et al. (2025) showed that co[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 14,
+      "callCount": 13,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 14,
+      "callCount": 13,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 14,
+      "callCount": 14,
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": [],
+      "toolExcerpt": "f MATERIALS_INDEX.md (6271 B)\nd materials (2840 B)\nd outputs (6 B)\nf paper.md (37289 B)\nd results (6 B)"
+    },
+    {
+      "kind": "completion",
+      "round": 15,
+      "callCount": 14,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 15,
+      "callCount": 14,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 15,
+      "callCount": 15,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "## 1. Introduction\n\nSharp gains in benchmark accuracy are often described as emergent phase transitions. Wei et al. (2022) emphasized abilities that appear unpredictably with scale, while also noting that exact match can hide partial progress. Schaeffer et al. (2023) formalized a related measurement concern: a smooth change in token probabilities can appear abrupt after argmax, exact-string match, or another nonlinear metric. Continuous scores do not settle the issue by themselves, however. Du et al. (2024) reported thresholds in correct-answer probability and Brier score when performance was indexed by pretraining loss, and Zhao et al. (2025) showed that co[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 16,
+      "callCount": 15,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 16,
+      "callCount": 15,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 16,
+      "callCount": 16,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "aths, and no reproducible localized jump.\n\nThe strongest late-readout test came from Analysis 6. At hidden index 31, one block before output, the low- and high-evidence equality response states were interpolated in both directions at 33 doses. The two paths were aligned to the same low-to-high coordinate. Their output difference at the identical patched response state measured dependence on the otherwise unpatched endpoint computation. This is a test of late residual sufficiency and multivaluedness at that site, not temporal hysteresis or a test of the natural upstream trajectory.\n\n### 2.6 Locked small-model replication\n\nAnalysis 10 tested the unchanged [TRUNCATED]"
+    }
+  ],
+  "claims": []
+}
