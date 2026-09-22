@@ -63,6 +63,22 @@ describe("private reproduction diagnostics", () => {
     expect(createFallbackReproductionDiagnostics().stage).toBe("background");
   });
 
+  it("retains only allowlisted numeric provider diagnostics", () => {
+    const diagnostics = new ReproductionDiagnostics();
+    diagnostics.observe({
+      kind: "provider-error", providerStatus: 400,
+      providerCode: "context_length_exceeded", contextLimit: 32768,
+      requestedInputTokens: 35175, requestedOutputTokens: 8000,
+      rawBody: "PRIVATE_PROVIDER_BODY", apiKey: "PRIVATE_KEY",
+    } as any);
+    const saved = diagnostics.snapshot().events[0];
+    expect(saved).toMatchObject({
+      providerStatus: 400, providerCode: "context_length_exceeded",
+      contextLimit: 32768, requestedInputTokens: 35175, requestedOutputTokens: 8000,
+    });
+    expect(JSON.stringify(saved)).not.toMatch(/PRIVATE_PROVIDER_BODY|PRIVATE_KEY/);
+  });
+
   it("capture failure never throws or replaces the original failure", () => {
     const diagnostics = new ReproductionDiagnostics();
     const original = new Error("original");

@@ -81,7 +81,45 @@ describe("tool-loop context protection", () => {
       thrown = error;
     }
     expect(String((thrown as Error).message)).not.toContain("prompt is too long");
-    expect(createMock.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(createMock.mock.calls.length).toBe(2);
+  });
+
+  it("does not retry below a protected floor", async () => {
+    createMock.mockRejectedValue(new Error(
+      "The sum of prompt length (35175.0), query length (0) should not exceed max_num_tokens (32768)",
+    ));
+    await expect(runToolLoop(
+      config, "system", "paper ".repeat(1000), [], async () => "must not execute",
+      {
+        maxToolCalls: 1,
+        deadlineMs: Date.now() + 60_000,
+        protectedInputFloor: 20_000,
+        contextProtection: { getState: () => "state", compactUserMessage: "Continue." },
+      },
+    )).rejects.toThrow(/remained too large/);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sanitizes an unrelated provider exception without exposing its body", async () => {
+    const original = Object.assign(new Error("service unavailable"), { status: 503 });
+    createMock.mockRejectedValueOnce(original);
+    let thrown: unknown;
+    try {
+      await runToolLoop(
+        config, "system", "paper", [], async () => "must not execute",
+        {
+          maxToolCalls: 1,
+          deadlineMs: Date.now() + 60_000,
+          contextProtection: { getState: () => "state" },
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).not.toBe(original);
+    expect((thrown as Error).message).toBe("LLM context request failed (503)");
+    expect((thrown as Error).message).not.toContain("service unavailable");
+    expect(createMock).toHaveBeenCalledTimes(1);
   });
 
   it("preserves forced-final STOP after archiving long drafts and repair instructions", async () => {

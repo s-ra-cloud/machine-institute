@@ -22,7 +22,7 @@ import { deriveContributionKeywords } from "./prompts/peer-review";
 import { ReproductionSession } from "./reproduction-session";
 import { ContextBudgetError, isContextOverflow, RequestContextBudget } from "./llm-context";
 import { runBoundedReproductionJudge } from "./reproduction-judge";
-import { describeToolContext, RUNTIME_CONTEXT_HEADROOM } from "./tool-context";
+import { ACTIVE_INSTRUCTION_MAX_BYTES, describeToolContext, RUNTIME_CONTEXT_HEADROOM } from "./tool-context";
 import { ReproductionDiagnostics, attachReproductionFailureDiagnostics, type ReproductionFailureDiagnostics } from "./reproduction-diagnostics";
 
 // "Generous" budget: close to what the ICML hackathon agents were given.
@@ -338,7 +338,7 @@ const TOOLS: ToolSpec[] = [
   },
   {
     name: "read_file",
-    description: "Read a text file from the sandbox. Large files are truncated; use offset to page through them.",
+    description: "Read a text file from the sandbox. Returns verified path and canonical character-range metadata. Large files are truncated; use offset to page through them.",
     parameters: {
       type: "object",
       properties: {
@@ -374,6 +374,10 @@ const TOOLS: ToolSpec[] = [
       properties: {
         id: { type: "string", description: "Short id such as R1, R2." },
         claim: { type: "string", description: "The result as stated in the paper, including the reported number(s)." },
+        source_quote: { type: "string", description: "Required for a new claim: substantial exact quotation from canonical /work/paper.md." },
+        source_location: { type: "string", description: 'Required for a new claim: cited page range "characters START-END" copied from read_file metadata.' },
+        source_tool_call_id: { type: "integer", description: "Required for a new claim: prior read_file call on /work/paper.md containing source_quote." },
+        required_material: { type: "string", description: "For missing-material: paper wording, present in source_quote, naming the scientifically required material." },
         status: { type: "string", enum: ["pending", "verified", "falsified", "toy", "inconclusive"] },
         original_value: { type: "string" },
         reproduced_value: { type: "string" },
@@ -430,7 +434,8 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     temperature: 0.2,
     tool_choice: "auto",
   };
-  if (instructionBudget.estimate(fixedRequest) + RUNTIME_CONTEXT_HEADROOM > instructionBudget.inputLimit) {
+  const requiredStartupBudget = instructionBudget.estimate(fixedRequest) + RUNTIME_CONTEXT_HEADROOM;
+  if (requiredStartupBudget > instructionBudget.inputLimit) {
     throw new ContextBudgetError(
       `Reproduction fixed instructions and tool schemas leave insufficient runtime state/retrieval headroom before sandbox startup (${instructionBudget.diagnostic(fixedRequest)}, runtime_headroom=${RUNTIME_CONTEXT_HEADROOM}; ${describeToolContext(fixedRequest)}). Shorten custom scientific instructions; mandatory tool contracts and output allowances cannot be removed.`,
     );
@@ -491,6 +496,16 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     }
     const inventory = formatMaterialsInventory(materials);
     await sandbox.writeText("/work/MATERIALS_INDEX.md", `# Shipped materials for "${title}"\n\n${inventory}\n`);
+    const shippedPaths = materials.files
+      .filter(file => file.kind === "text" && file.source !== "paper" && Boolean(file.text))
+      .map(file => materialSandboxPath(file));
+    const readmePaths = shippedPaths.filter(path => /(?:^|\/)readme(?:\.[^/]*)?$/i.test(path));
+    session.configureSourceGrounding({ paperPath: "/work/paper.md", paperText });
+    session.configureMaterialGrounding({
+      inventoryPath: "/work/MATERIALS_INDEX.md",
+      shippedPaths,
+      readmePaths,
+    });
     await emitEvent("reproduction-upload", `Uploaded the paper and ${uploaded} material file(s) into the sandbox.`);
 
     const probe = await sandbox.exec(["bash", "-lc", "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>&1 | head -n 3; python -c 'import torch, transformers; print(\"torch\", torch.__version__, \"cuda\", torch.cuda.is_available(), \"transformers\", transformers.__version__)' 2>&1"], { timeoutMs: 120_000 });
@@ -506,8 +521,8 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         case "list_files": {
           const path = String(args.path || "/work");
           const entries = await sandbox.listFiles(path);
-          if (entries.length === 0) return `(empty directory or not found: ${path})`;
-          return entries.map(e => `${e.isDir ? "d " : "f "}${e.name}${e.size !== undefined ? ` (${e.size} B)` : ""}`).join("\n");
+          if (entries.length === 0) return `Verified directory: ${path}\n(empty directory or not found)`;
+          return `Verified directory: ${path}\n${entries.map(e => `${e.isDir ? "d " : "f "}${e.name}${e.size !== undefined ? ` (${e.size} B)` : ""}`).join("\n")}`;
         }
         case "read_file": {
           const path = String(args.path || "");
@@ -516,17 +531,20 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           const text = await sandbox.readText(path);
           const slice = text.slice(offset, offset + max);
           const more = offset + max < text.length ? `\n\n[... ${text.length - offset - max} more chars; total ${text.length}. Use offset=${offset + max} to continue ...]` : "";
-          return `${slice}${more}`;
+          return `Verified file: ${path}\nReturned characters: ${offset}-${offset + slice.length} of ${text.length}\n---\n${slice}${more}`;
         }
         case "write_file": {
           const path = String(args.path || "");
           if (!path.startsWith("/work")) return "Refused: files may only be written under /work.";
           await sandbox.writeText(path, String(args.content ?? ""));
+          session.noteGeneratedPath(path);
           return `Wrote ${String(args.content ?? "").length} chars to ${path}.`;
         }
         case "run_command": {
           const command = String(args.command || "");
           if (!command.trim()) return "Refused: empty command.";
+          const refusal = session.validateCommand(command);
+          if (refusal) return refusal;
           const requested = (Number(args.timeout_seconds) || 600) * 1000;
           const remainingMs = startTime + REPRODUCTION_BUDGET.wallClockMs - Date.now();
           if (remainingMs <= 0) return "Deadline exhausted — command was not executed.";
@@ -583,6 +601,21 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
 
     await emitEvent("reproduction-agent", `Reproduction agent (${modelConfig.modelName || modelConfig.provider}) started; budget ${REPRODUCTION_BUDGET.maxToolCalls} tool calls / ${Math.round(REPRODUCTION_BUDGET.wallClockMs / 60000)} min.`);
     diagnostics.stage("tool-loop");
+    const compactUserMessage = [
+      "Target paper and scientific goals are unchanged.",
+      "Inline paper, abstract and README omitted to fit the request. Read the full paper at /work/paper.md and the complete material inventory at /work/MATERIALS_INDEX.md; shipped files are already uploaded.",
+      `Budget unchanged: ${REPRODUCTION_BUDGET.maxToolCalls} tool calls, ${REPRODUCTION_BUDGET.wallClockMs / 60000} minutes wall-clock.`,
+      "Extract all core claims, reproduce using shipped materials, and finalize every claim with validated evidence. Retrieve prior output by original ID with read_tool_result instead of repeating experiments.",
+    ].join("\n");
+    const protectedInputFloor = instructionBudget.estimate({
+      ...fixedRequest,
+      messages: [
+        { role: "system", content: effectivePrompt },
+        { role: "user", content: compactUserMessage },
+        { role: "user", content: "x".repeat(600) },
+        { role: "user", content: "x".repeat(ACTIVE_INSTRUCTION_MAX_BYTES) },
+      ],
+    });
     toolLoopResult = await runToolLoop(modelConfig, effectivePrompt, userMessage, TOOLS, execute, {
       onOutcome: event => { try { diagnostics.observe(event); } catch { /* best effort */ } },
       getArgumentRepair: () => [
@@ -593,6 +626,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       maxToolCalls: REPRODUCTION_BUDGET.maxToolCalls,
       deadlineMs: startTime + REPRODUCTION_BUDGET.wallClockMs,
       maxTokens: 8000,
+      protectedInputFloor,
       temperature: 0.2,
       numberToolResults: true,
       allowResourceStopFallback: true,
@@ -601,12 +635,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         getActiveInstruction: () => session.activeInstruction(),
         archiveContext: (key, text) => session.archiveContext(key, text),
         resizeRetrieval: (name, args, result, maxBytes) => session.resizeRetrieval(name, args, result, maxBytes),
-        compactUserMessage: [
-          "Target paper and scientific goals are unchanged.",
-          "Inline paper, abstract and README omitted to fit the request. Read the full paper at /work/paper.md and the complete material inventory at /work/MATERIALS_INDEX.md; shipped files are already uploaded.",
-          `Budget unchanged: ${REPRODUCTION_BUDGET.maxToolCalls} tool calls, ${REPRODUCTION_BUDGET.wallClockMs / 60000} minutes wall-clock.`,
-          "Extract all core claims, reproduce using shipped materials, and finalize every claim with validated evidence. Retrieve prior output by original ID with read_tool_result instead of repeating experiments.",
-        ].join("\n"),
+        compactUserMessage,
         onDiagnostic: message => emitEvent("reproduction-context", message),
       },
       elidedToolOutputMessage: "[Earlier output elided. Use read_tool_result with the original tool call ID; do not rerun the experiment to retrieve it.]",

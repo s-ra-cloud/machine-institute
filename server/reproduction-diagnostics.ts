@@ -58,6 +58,8 @@ export class ReproductionDiagnostics {
     kind: string; round?: number; callCount?: number; finishReason?: string | null;
     argumentParse?: string; toolName?: string; validationErrors?: readonly string[];
     responseExcerpt?: string; toolExcerpt?: string; stopReason?: string;
+    providerStatus?: number; providerCode?: string; contextLimit?: number;
+    requestedInputTokens?: number; requestedOutputTokens?: number; requestedTotalTokens?: number;
   }): void {
     this.data.rounds = Math.max(this.data.rounds, safeNumber(event.round));
     this.data.callCount = Math.max(this.data.callCount, safeNumber(event.callCount));
@@ -74,6 +76,14 @@ export class ReproductionDiagnostics {
     if (event.validationErrors) safe.validationErrors = event.validationErrors.slice(0, 8).map(s => diagnosticExcerpt(s, 300));
     if (event.responseExcerpt) safe.responseExcerpt = diagnosticExcerpt(event.responseExcerpt);
     if (event.toolExcerpt) safe.toolExcerpt = diagnosticExcerpt(event.toolExcerpt);
+    if (event.providerStatus !== undefined) safe.providerStatus = safeNumber(event.providerStatus);
+    if (event.providerCode !== undefined) safe.providerCode = enumValue(event.providerCode,
+      ["context_length_exceeded", "prompt_too_long", "invalid_request_error",
+        "max_tokens", "max_num_tokens", "request_too_large", "unknown"]);
+    if (event.contextLimit !== undefined) safe.contextLimit = safeNumber(event.contextLimit);
+    if (event.requestedInputTokens !== undefined) safe.requestedInputTokens = safeNumber(event.requestedInputTokens);
+    if (event.requestedOutputTokens !== undefined) safe.requestedOutputTokens = safeNumber(event.requestedOutputTokens);
+    if (event.requestedTotalTokens !== undefined) safe.requestedTotalTokens = safeNumber(event.requestedTotalTokens);
     if (JSON.stringify(safe).includes("[TRUNCATED]") || (event.validationErrors?.length ?? 0) > 8) this.data.truncated = true;
     this.data.events.push(safe);
     while (this.data.events.length > MAX_EVENTS) this.dropEvent();

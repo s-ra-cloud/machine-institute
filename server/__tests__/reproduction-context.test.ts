@@ -60,6 +60,17 @@ const call = (id: string, name: string, args: Record<string, unknown>) => ({
   function: { name, arguments: JSON.stringify(args) },
 });
 
+const sourceQuote = (claim: string, originalValue?: string) =>
+  `The paper states that ${claim} is a core quantitative result${originalValue ? ` with reported value ${originalValue}` : ""}.`;
+let currentPaper = "";
+const sourceRead = () => call("paper-source", "read_file", { path: "/work/paper.md", max_chars: 40000 });
+const groundedPending = (id: string, claim: string, sourceToolCallId = 1, originalValue?: string) =>
+  call(`pending-${id}`, "record_result", {
+    id, claim, status: "pending", ...(originalValue ? { original_value: originalValue } : {}),
+    source_quote: sourceQuote(claim, originalValue), source_location: `characters 0-${Math.min(40000, currentPaper.length)}`,
+    source_tool_call_id: sourceToolCallId,
+  });
+
 const judgeCompletion = (ids = ["R1"], values: Record<string, string> = {}) => completion(JSON.stringify({
   summary: "The bounded judge checked the accepted claims.",
   results: ids.map(id => ({
@@ -75,11 +86,13 @@ const judgeCompletion = (ids = ["R1"], values: Record<string, string> = {}) => c
 
 function makeSandbox() {
   let terminated = false;
+  const files = new Map<string, string>();
   const lifecycle = {
     sandboxId: "sandbox-context-test",
     image: "test-image",
-    writeText: vi.fn(async (_path: string, _content: string) => {
+    writeText: vi.fn(async (path: string, content: string) => {
       if (terminated) throw new Error("sandbox used after termination");
+      files.set(path, content);
     }),
     exec: vi.fn(async (command: string[]) => {
       if (terminated) throw new Error("sandbox used after termination");
@@ -93,7 +106,7 @@ function makeSandbox() {
       return { stdout: "exit-success", stderr: "", exitCode: 0, timedOut: false, durationMs: 1 };
     }),
     listFiles: vi.fn(async () => []),
-    readText: vi.fn(async () => ""),
+    readText: vi.fn(async (path: string) => files.get(path) ?? ""),
     terminate: vi.fn(async () => {
       terminated = true;
     }),
@@ -102,6 +115,9 @@ function makeSandbox() {
 }
 
 function setupContext(paperNoise = "") {
+  currentPaper = `# Shipped paper\n\n${[
+    "R1 claim", "R-pending claim", "R-accepted claim",
+  ].map(claim => sourceQuote(claim)).join("\n")}${paperNoise}`;
   loadPaperContext.mockResolvedValue({
     title: "A Context-Safe Reproduction Paper",
     authors: "Test Authors",
@@ -122,10 +138,14 @@ function setupContext(paperNoise = "") {
       source: "additional",
       text: "print('test')",
       bytes: 13,
+    }, {
+      name: "expensive.py", url: "https://example.test/expensive.py", ext: "py",
+      mime: "text/plain", kind: "text", source: "additional",
+      text: "print('EXPENSIVE_METRIC=0.91')", bytes: 31,
     }],
     readme: "Run the supplied reproduction.",
-    paperMarkdown: `# Shipped paper\n\nOne quantitative claim.${paperNoise}`,
-    textFileCount: 1,
+    paperMarkdown: currentPaper,
+    textFileCount: 2,
     binaryFileCount: 0,
     totalTextBytes: 13,
   });
@@ -196,6 +216,7 @@ describe("runReproduction bounded context orchestration", () => {
     const ids = Array.from({ length: 8 }, (_, i) => `R${i + 1}`);
     const claims = Object.fromEntries(ids.map(id => [id, `${id} scientific claim ${"detailed claim ".repeat(70)}`.trim()]));
     const originals = Object.fromEntries(ids.map(id => [id, `${id} original observations ${"reported value ".repeat(65)}`]));
+    setupContext(`\n${ids.map(id => sourceQuote(claims[id], originals[id])).join("\n")}`);
     const notes = `Full scientific notes: ${"important detail ".repeat(130)} END_NOTES`;
     const draft = `${logbook}\n${'Long proposed logbook "測定🧪"\n'.repeat(1800)}END_DRAFT`;
     const evidence = `${"noise".repeat(1400)}\nEXPENSIVE_METRIC=0.91`;
@@ -217,16 +238,14 @@ describe("runReproduction bounded context orchestration", () => {
         const input = request.messages[1].content as string;
         const batch = JSON.parse(input.split("# AGENT'S RECORDED RESULTS (proposals, not verdicts)\n")[1].split("\n\n# AGENT'S LOGBOOK")[0]);
         judgeClaims.push(...batch);
-        expect(input).toContain("Original tool #9");
+        expect(input).toContain("Original tool #10");
         expect(input).toContain("EXPENSIVE_METRIC=0.91");
         return judgeCompletion(batch.map((claim: any) => claim.id));
       }
       expect(request.messages[0].content).toBe(buildEffectiveReproducerPrompt(REPRODUCER_PROMPT));
       turn++;
-      if (turn === 1) return completion(null, ids.map(id => call(`pending-${id}`, "record_result", {
-        id, claim: claims[id], original_value: originals[id], status: "pending",
-      })));
-      if (turn === 2) return completion(null, [call("expensive", "run_command", { command: "python expensive.py" })]);
+      if (turn === 1) return completion(null, [sourceRead(), ...ids.map(id => groundedPending(id, claims[id], 1, originals[id]))]);
+      if (turn === 2) return completion(null, [call("expensive", "run_command", { command: "python /work/materials/expensive.py" })]);
       if (turn === 3) return completion(null, ids.map(id => call(`rejected-${id}`, "record_result", {
         id, status: "verified", reproduced_value: "0.91", method: "rerun",
         evidence_tool_call_ids: [999], evidence_excerpt: "EXPENSIVE_METRIC=0.91", notes,
@@ -273,20 +292,20 @@ describe("runReproduction bounded context orchestration", () => {
         const page = JSON.parse(toolMessage(request).content.replace(/^\[Tool call #\d+\]\n/, ""));
         expect(page.notice).toMatch(/not scientifically valid evidence/);
         expect(page.text).toContain('"accepted"');
-        return completion(null, [call("evidence-page-1", "read_tool_result", { tool_call_id: 9, max_chars: 4000 })]);
+        return completion(null, [call("evidence-page-1", "read_tool_result", { tool_call_id: 10, max_chars: 4000 })]);
       }
       if (turn === 9) {
         evidenceText = toolMessage(request).content;
-        expect(evidenceText).toContain("Original evidence tool call #9");
+        expect(evidenceText).toContain("Original evidence tool call #10");
         evidenceOffset = Number(evidenceText.match(/\[Use offset=(\d+) to continue/)[1]);
-        return completion(null, [call("evidence-page-2", "read_tool_result", { tool_call_id: 9, offset: evidenceOffset })]);
+        return completion(null, [call("evidence-page-2", "read_tool_result", { tool_call_id: 10, offset: evidenceOffset })]);
       }
       if (turn === 10) {
         const page = toolMessage(request).content;
         expect(page).toContain(`characters ${evidenceOffset}-`);
         expect(page).toContain("EXPENSIVE_METRIC=0.91");
         return completion(null, ids.map(id => call(`accepted-${id}`, "record_result", {
-          id, status: "verified", method: "rerun", evidence_tool_call_ids: [9],
+          id, status: "verified", method: "rerun", evidence_tool_call_ids: [10],
           evidence_excerpt: "EXPENSIVE_METRIC=0.91", reproduced_value: "0.91",
         })));
       }
@@ -301,7 +320,7 @@ describe("runReproduction bounded context orchestration", () => {
       expect(claim.claim).toBe(claims[claim.id]);
       expect(claim.originalValue).toBe(originals[claim.id]);
       expect(claim.notes).toBe(notes);
-      expect(claim.evidenceToolCallIds).toEqual([9]);
+      expect(claim.evidenceToolCallIds).toEqual([10]);
     }
     expect(sandbox.exec.mock.calls.filter(args => String(args[0]).includes("expensive.py"))).toHaveLength(1);
     expect(sandbox.terminate).toHaveBeenCalledTimes(1);
@@ -330,12 +349,12 @@ describe("runReproduction bounded context orchestration", () => {
       agentResponses++;
       if (agentResponses === 1) {
         return completion(null, [
-          call("pending", "record_result", { id: "R1", claim: "R1 claim", status: "pending" }),
+          sourceRead(), groundedPending("R1", "R1 claim"),
         ]);
       }
       if (agentResponses === 2) {
         return completion(null, [
-          call("expensive", "run_command", { command: "python expensive.py" }),
+          call("expensive", "run_command", { command: "python /work/materials/expensive.py" }),
         ]);
       }
       if (agentResponses === 3) {
@@ -361,7 +380,7 @@ describe("runReproduction bounded context orchestration", () => {
       }
       if (agentResponses === 5) {
         return completion(null, [
-          call("recover", "read_tool_result", { tool_call_id: 2, offset: 0, max_chars: 8_000 }),
+          call("recover", "read_tool_result", { tool_call_id: 3, offset: 0, max_chars: 8_000 }),
         ]);
       }
       if (agentResponses === 6) {
@@ -371,7 +390,7 @@ describe("runReproduction bounded context orchestration", () => {
             status: "verified",
             reproduced_value: "0.91",
             method: "rerun",
-            evidence_tool_call_ids: [2],
+            evidence_tool_call_ids: [3],
             evidence_excerpt: "EXPENSIVE_METRIC=0.91",
           }),
         ]);
@@ -403,7 +422,7 @@ describe("runReproduction bounded context orchestration", () => {
       && requestText(request).includes("Accepted state remains pending"),
     )).toBe(true);
     expect(requests.some(request =>
-      requestText(request).includes("Original evidence tool call #2")
+      requestText(request).includes("Original evidence tool call #3")
       && requestText(request).includes("EXPENSIVE_METRIC=0.91"),
     )).toBe(true);
 
@@ -438,12 +457,12 @@ describe("runReproduction bounded context orchestration", () => {
       agentResponses++;
       if (agentResponses === 1) {
         return completion(null, [
-          call("pending", "record_result", { id: "R1", claim: "R1 claim", status: "pending" }),
+          sourceRead(), groundedPending("R1", "R1 claim"),
         ]);
       }
       if (agentResponses === 2) {
         return completion(null, [
-          call("expensive", "run_command", { command: "python expensive.py" }),
+          call("expensive", "run_command", { command: "python /work/materials/expensive.py" }),
         ]);
       }
       const error = new Error("provider rejected request");
@@ -488,8 +507,9 @@ describe("runReproduction bounded context orchestration", () => {
       agentResponses++;
       if (agentResponses === 1) {
         return completion(null, [
-          call("pending-one", "record_result", { id: "R-pending", claim: "R-pending claim", status: "pending" }),
-          call("pending-two", "record_result", { id: "R-accepted", claim: "R-accepted claim", status: "pending" }),
+          sourceRead(),
+          groundedPending("R-pending", "R-pending claim"),
+          groundedPending("R-accepted", "R-accepted claim"),
         ]);
       }
       if (agentResponses === 2) {
@@ -509,7 +529,7 @@ describe("runReproduction bounded context orchestration", () => {
             status: "verified",
             reproduced_value: "7.77",
             method: "rerun",
-            evidence_tool_call_ids: [4],
+            evidence_tool_call_ids: [5],
             evidence_excerpt: "LATEST_OUTPUT_METRIC=7.77",
           }),
         ]);
@@ -521,7 +541,7 @@ describe("runReproduction bounded context orchestration", () => {
             status: "verified",
             reproduced_value: "7.77",
             method: "rerun",
-            evidence_tool_call_ids: [4],
+            evidence_tool_call_ids: [5],
             evidence_excerpt: "LATEST_OUTPUT_METRIC=7.77",
           }),
         ]);
@@ -597,7 +617,7 @@ describe("runReproduction bounded context orchestration", () => {
   it("rejects fixed instructions that fit alone but leave no retrieval headroom, before paid work", async () => {
     let failure: Error | undefined;
     try {
-      await runReproduction(options({ reproducerPrompt: "PRIVATE_CUSTOM_INSTRUCTION ".repeat(320) }));
+      await runReproduction(options({ reproducerPrompt: "PRIVATE_CUSTOM_INSTRUCTION ".repeat(400) }));
     } catch (error) {
       failure = error as Error;
     }
@@ -632,12 +652,12 @@ describe("runReproduction bounded context orchestration", () => {
       agentResponses++;
       if (agentResponses === 1) {
         return completion(null, [
-          call("pending", "record_result", { id: "R1", claim: "R1 claim", status: "pending" }),
+          sourceRead(), groundedPending("R1", "R1 claim"),
         ]);
       }
       if (agentResponses === 2) {
         return completion(null, [
-          call("expensive", "run_command", { command: "python expensive.py" }),
+          call("expensive", "run_command", { command: "python /work/materials/expensive.py" }),
         ]);
       }
       // This request was accepted by the provider only far enough to return

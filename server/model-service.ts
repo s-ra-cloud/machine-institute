@@ -1,8 +1,10 @@
 import OpenAI from "openai";
 import {
   ContextBudgetError,
+  MAX_CONTEXT_RETRIES,
   RequestContextBudget,
   isContextOverflow,
+  providerContextConstraint,
   reportedContextLimit,
 } from "./llm-context";
 import { describeToolContext, fitToolContext, type ToolContextProtection } from "./tool-context";
@@ -168,7 +170,7 @@ export async function generateWithConfig(
           model,
         );
       }
-      throw new Error(`Anthropic API error (${response.status}): ${errorText}`);
+      throw new Error(`Anthropic API request failed (${response.status})`);
     }
 
     const result: AnthropicMessagesResponse = await response.json() as AnthropicMessagesResponse;
@@ -206,16 +208,18 @@ export async function generateWithConfig(
     if (contextRequest) {
       throw sanitizeContextRequestError({ ...err, status, message: body }, model);
     }
-    console.error(`[LLM] API request failed — model=${model} provider=${config.provider} status=${status}:`, JSON.stringify(body));
-    throw new Error(`LLM request failed (${status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
+    const diagnostic = safeProviderErrorDiagnostic(err);
+    console.error(`[LLM] API request failed — model=${model} provider=${config.provider} status=${diagnostic.providerStatus ?? "unknown"} code=${diagnostic.providerCode ?? "unknown"}`);
+    throw new Error(`LLM request failed (${diagnostic.providerStatus ?? "unknown"}; code=${diagnostic.providerCode ?? "unknown"})`);
   }
 
   if (completion?.error) {
     if (contextRequest) {
       throw sanitizeContextRequestError(completion.error, model);
     }
-    console.error(`[LLM] API returned error body — model=${model} provider=${config.provider}:`, JSON.stringify(completion.error));
-    throw new Error(`LLM API error: ${completion.error.message || JSON.stringify(completion.error)}`);
+    const diagnostic = safeProviderErrorDiagnostic(completion.error);
+    console.error(`[LLM] API returned an error — model=${model} provider=${config.provider} status=${diagnostic.providerStatus ?? "unknown"} code=${diagnostic.providerCode ?? "unknown"}`);
+    throw new Error(`LLM API error (${diagnostic.providerStatus ?? "unknown"}; code=${diagnostic.providerCode ?? "unknown"})`);
   }
 
   const content = completion.choices?.[0]?.message?.content || "";
@@ -238,10 +242,8 @@ function sanitizeContextRequestError(error: any, model: string): Error {
     ? `Context length exceeded (${status ?? "unknown"})`
     : `LLM context request failed (${status ?? "unknown"})`;
   const result = new Error(message);
-  const reportedLimit = error?.limit
-    ?? error?.max_tokens
-    ?? error?.maximum_tokens
-    ?? reportedContextLimit(error);
+  const constraint = providerContextConstraint(error);
+  const reportedLimit = constraint?.limit ?? reportedContextLimit(error);
   Object.assign(result, {
     code: contextLike ? "context_length_exceeded" : code,
     status,
@@ -251,6 +253,10 @@ function sanitizeContextRequestError(error: any, model: string): Error {
     // lets RequestContextBudget.reduce choose a smaller input cap without
     // retaining or logging the provider's raw response.
     limit: reportedLimit === undefined ? undefined : Number(reportedLimit),
+    contextLimitKind: constraint?.kind,
+    requestedInputTokens: constraint?.requestedInputTokens,
+    requestedOutputTokens: constraint?.requestedOutputTokens,
+    requestedTotalTokens: constraint?.requestedTotalTokens,
   });
   return result;
 }
@@ -358,6 +364,12 @@ export interface ToolLoopOutcome {
   responseExcerpt?: string;
   toolExcerpt?: string;
   stopReason?: string;
+  providerStatus?: number;
+  providerCode?: string;
+  contextLimit?: number;
+  requestedInputTokens?: number;
+  requestedOutputTokens?: number;
+  requestedTotalTokens?: number;
 }
 
 export interface ToolLoopOptions {
@@ -393,6 +405,8 @@ export interface ToolLoopOptions {
   allowResourceStopFallback?: boolean;
   /** Opt-in protection for routed context caps and context-length retries. */
   contextProtection?: ToolContextProtection;
+  /** Estimated size of fixed instructions/schemas/state that compaction cannot remove. */
+  protectedInputFloor?: number;
   /** Observability only: failures in this callback never affect execution. */
   onOutcome?: (event: ToolLoopOutcome) => Promise<void> | void;
   /** Actual accepted workflow state to include after parse/schema refusals.
@@ -411,6 +425,30 @@ export interface ToolLoopResult {
 const safeFinishReason = (value: unknown): NonNullable<ToolLoopOutcome["finishReason"]> =>
   ["stop", "length", "tool_calls", "content_filter", "function_call"].includes(String(value))
     ? value as NonNullable<ToolLoopOutcome["finishReason"]> : "unknown";
+
+const PROVIDER_CODES = new Set([
+  "context_length_exceeded", "prompt_too_long", "invalid_request_error",
+  "max_tokens", "max_num_tokens", "request_too_large",
+]);
+
+/** Numeric/allowlisted provider facts safe for private diagnostics. */
+export function safeProviderErrorDiagnostic(error: unknown): Pick<ToolLoopOutcome,
+  "providerStatus" | "providerCode" | "contextLimit" | "requestedInputTokens"
+  | "requestedOutputTokens" | "requestedTotalTokens"> {
+  const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const statusValue = Number(value.status ?? value.statusCode);
+  const rawCode = String(value.code ?? value.type ?? "");
+  const constraint = providerContextConstraint(error);
+  return {
+    providerStatus: Number.isSafeInteger(statusValue) && statusValue >= 100 && statusValue <= 599
+      ? statusValue : undefined,
+    providerCode: PROVIDER_CODES.has(rawCode) ? rawCode : "unknown",
+    contextLimit: constraint?.limit,
+    requestedInputTokens: constraint?.requestedInputTokens,
+    requestedOutputTokens: constraint?.requestedOutputTokens,
+    requestedTotalTokens: constraint?.requestedTotalTokens,
+  };
+}
 
 function parseToolArguments(raw: string): unknown {
   const parsed: unknown = JSON.parse(raw);
@@ -564,7 +602,9 @@ export async function runToolLoop(
   const contextBudget = options.contextCharBudget ?? Math.floor(getContextWindow(config) * 3.0);
   const elidedToolOutputMessage = options.elidedToolOutputMessage ?? ELIDED_TOOL_OUTPUT;
   const requestBudget = options.contextProtection
-    ? new RequestContextBudget(config, maxTokens, "tool-loop", getContextWindow(config))
+    ? new RequestContextBudget(
+      config, maxTokens, "tool-loop", getContextWindow(config), options.protectedInputFloor,
+    )
     : null;
 
   const messages: Array<Record<string, unknown>> = [
@@ -659,7 +699,7 @@ export async function runToolLoop(
         if (
           requestBudget
           && isContextOverflow(err)
-          && contextReductions < 2
+           && contextReductions < MAX_CONTEXT_RETRIES
           && Date.now() < options.deadlineMs
           && requestBudget.reduce(err, request)
         ) {
@@ -674,7 +714,8 @@ export async function runToolLoop(
         if (requestBudget && isContextOverflow(err)) {
           await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
         }
-        await observe({ kind: "provider-error", round, callCount: toolCalls.length, stopReason: "provider-request-failed" });
+         await observe({ kind: "provider-error", round, callCount: toolCalls.length,
+           stopReason: "provider-request-failed", ...safeProviderErrorDiagnostic(err) });
         if (options.allowResourceStopFallback) {
           const fallback = fallbackAfterResourceStop();
           if (fallback) return fallback;
@@ -682,14 +723,14 @@ export async function runToolLoop(
         if (requestBudget && isContextOverflow(err)) {
           throw terminalContextError(requestBudget, request, model);
         }
-        throw sanitizeContextRequestError(err, model);
+         throw sanitizeContextRequestError(err, model);
       }
       if (completion?.error) {
         const completionError = completion.error;
         if (
           requestBudget
           && isContextOverflow(completionError)
-          && contextReductions < 2
+           && contextReductions < MAX_CONTEXT_RETRIES
           && Date.now() < options.deadlineMs
           && requestBudget.reduce(completionError, request)
         ) {
@@ -704,7 +745,8 @@ export async function runToolLoop(
         if (requestBudget && isContextOverflow(completionError)) {
           await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
         }
-        await observe({ kind: "provider-error", round, callCount: toolCalls.length, stopReason: "provider-error-response" });
+         await observe({ kind: "provider-error", round, callCount: toolCalls.length,
+           stopReason: "provider-error-response", ...safeProviderErrorDiagnostic(completionError) });
         if (options.allowResourceStopFallback) {
           const fallback = fallbackAfterResourceStop();
           if (fallback) return fallback;
@@ -915,7 +957,7 @@ export async function runToolLoop(
       if (
         requestBudget
         && isContextOverflow(err)
-        && finalReductions < 2
+         && finalReductions < MAX_CONTEXT_RETRIES
         && Date.now() < options.deadlineMs
         && requestBudget.reduce(err, request)
       ) {
@@ -931,15 +973,16 @@ export async function runToolLoop(
         await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
         throw terminalContextError(requestBudget, request, model);
       }
-      await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length, stopReason: "provider-request-failed" });
-      throw sanitizeContextRequestError(err, model);
+       await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
+         stopReason: "provider-request-failed", ...safeProviderErrorDiagnostic(err) });
+       throw sanitizeContextRequestError(err, model);
     }
     if (finalCompletion?.error) {
       const completionError = finalCompletion.error;
       if (
         requestBudget
         && isContextOverflow(completionError)
-        && finalReductions < 2
+         && finalReductions < MAX_CONTEXT_RETRIES
         && Date.now() < options.deadlineMs
         && requestBudget.reduce(completionError, request)
       ) {
@@ -955,7 +998,8 @@ export async function runToolLoop(
         await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
         throw terminalContextError(requestBudget, request, model);
       }
-      await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length, stopReason: "provider-error-response" });
+       await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
+         stopReason: "provider-error-response", ...safeProviderErrorDiagnostic(completionError) });
       throw sanitizeContextRequestError(completionError, model);
     }
     break;

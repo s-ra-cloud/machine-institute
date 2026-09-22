@@ -25,6 +25,14 @@ export interface RecordedResult {
   id: string;
   claim: string;
   status: Verdict | "pending";
+  /** Exact, system-verified quotation from the canonical /work/paper.md. */
+  sourceQuote?: string;
+  /** Verified page range, formatted as "characters START-END". */
+  sourceLocation?: string;
+  /** read_file call that exposed sourceQuote from /work/paper.md. */
+  sourceToolCallId?: number;
+  /** For missing-material blockers, the paper's own name for the required input. */
+  requiredMaterial?: string;
   originalValue?: string;
   reproducedValue?: string;
   evidence?: string;
@@ -59,7 +67,7 @@ export const REPRODUCER_PROMPT = `You are the Machine Institute Reproduction Age
 
 Follow the methodology of the ICML 2026 reproduction hackathon (Hugging Face × alphaXiv):
 
-1. EXTRACT. Read /work/paper.md and the README, then list the paper's core quantitative results (typically 3–8). For each, register it with record_result(status="pending") giving an id (R1, R2, ...), the exact claim as stated, the reported number(s), and where it appears (section, table, figure, results file).
+1. EXTRACT. Read /work/paper.md and the README, then register each core result pending. Give its verbatim paper claim and reported value, plus a substantial exact source_quote from a prior paper read, its source_tool_call_id, and source_location copied from that page's returned "characters START-END" range. The claim and reported value must occur in that quote. Never infer a claim from an abstract, title, model knowledge, or absent file.
 
 2. REPRODUCE. For each result, regenerate it from the shipped code and data. Run the actual scripts in their dependency order (the README usually documents this). Install missing packages with pip, fix paths so scripts find /work/materials and write to /work/results, and rely on HF_TOKEN already being in the environment for gated models. Prefer real, full-scale runs on the GPU. Only if the exact experiment is infeasible here (data not shipped, model too large for the GPU, prohibitive runtime) perform a TOY reproduction — scale down (fewer prompts, fewer seeds, a smaller model from the same family) — and say so explicitly. In addition, re-derive the paper's summary statistics from the shipped raw result files to check that the raw outputs and the paper's text agree with each other.
 
@@ -78,16 +86,15 @@ Rules:
 // Appended at execution time too: saved retry prompts predate this tool contract.
 export const REPRODUCTION_TOOL_CONTRACT = `# Mandatory runtime evidence and completion contract
 These requirements govern tool use and completion even when older saved instructions above differ. Preserve the supplied scientific goals and custom instructions.
-- Register every core claim as pending with id and claim. Update it with record_result; claim can be omitted on updates. Read the tool acknowledgment: "Refused finalization" means the submission was NOT accepted. Correct the fields and resubmit; do not assume the claim is complete.
-- Tool arguments must be complete JSON objects matching their schemas: strings stay strings, evidence IDs are integer arrays, and missing values must never be guessed. A malformed or truncated call is not executed. After a refusal correct the named fields; recover accepted state by its archive ref if necessary. If a claim already exists as pending, do not register it again: perform its missing work and update the same id with the evidence-backed outcome.
+- Register every core claim pending. A NEW claim requires a verbatim claim and original value contained in substantial source_quote from a prior canonical /work/paper.md read, its source_tool_call_id, and source_location copied from that page's verified "characters START-END" range. Unsupported or guessed claims are refused. Update the same id; never replace its grounded claim.
+- Calls must match schemas. "Refused" means not accepted: repair named fields, using archived accepted state when needed. Never guess missing values or re-register a pending claim.
 - Each finalized claim requires method and evidence_tool_call_ids naming PRIOR numbered command/file checks. evidence_excerpt must be an exact distinctive quote from the original output, not an exit status or a paraphrase.
 - rerun, raw-data-rederived, and toy require a cited successful run_command output. For ALL executed methods (even inconclusive), reproduced_value must occur verbatim INSIDE evidence_excerpt. Keep the value in its original output format; explain conversions in notes. toy method and toy status must be used together.
 - raw-data-rederived also requires raw_input_tool_call_id and raw_input_path naming the actual raw data read; the computation command or output must identify the same path. Authors' summaries, charts, and precomputed statistics alone are not independent recomputation.
 - blocked requires status inconclusive, blocker_kind (oom, missing-material, command-error, timeout), and exact output supporting that specific blocker plus an explanation. The system alone records budget blockers at an enforced resource limit; never use a time excuse while useful budget remains.
-- Use read_tool_result(tool_call_id=N, offset=0, max_chars=6000) to recover actual earlier output after compaction or truncation. Omit tool_call_id to list evidence IDs. Cite ORIGINAL call N, not the retrieval call. Do NOT rerun expensive experiments just to retrieve evidence. If output was never captured, inspect saved artifacts or perform genuinely missing work; never invent numbers or print a claimed number merely to satisfy validation.
-- Long drafts, repair instructions and claim state may be replaced with short references. Use read_reproduction_context(ref=..., offset=0) for their exact contents; omit ref for a paged index. Follow returned continuation offsets until needed details are recovered. These snapshots are NOT scientific evidence: distinguish accepted states from rejected proposals, and cite original command/file IDs, never context retrievals. All registered claims still require completion even when omitted from the short state view.
-- Save verbose experiment output to a file under /work/results as well as displaying the key metrics. The sandbox capture itself has a size limit: read_tool_result preserves captured output, not portions that were never captured. Use read_file on saved logs for those portions and do not pretend an elision marker is evidence.
-- Repair missing evidence and finish pending claims using the existing sandbox and remaining budget. Successful setup is not an experiment. Never relabel skipped work as tested.
+- missing-material also requires required_material in source_quote and cited reads of /work/MATERIALS_INDEX.md and shipped READMEs. A guessed absent path alone proves nothing. Direct simple Python calls to unverified scripts are refused; write_file-created scripts are then eligible.
+- Recover old output with read_tool_result and state with read_reproduction_context; cite original evidence calls, not retrievals. Follow continuation offsets. Never rerun merely for retrieval or treat snapshots/elisions as evidence.
+- Save verbose output under /work/results and display key metrics. Finish pending claims with the existing sandbox; setup is not an experiment.
 - Finish only after accepted results cover every claim; return the four nonempty sections: ## Claims, ## Reproduction Log, ## Discrepancies, ## Limitations. When the system enforces a resource stop, report unfinished work honestly as inconclusive.`;
 
 export function buildEffectiveReproducerPrompt(savedPrompt: string): string {

@@ -38,3 +38,15 @@ Archive verbose recovery history, but always retain a small, self-contained next
 **Why:** Real runs repeatedly browsed material and retrieved archived recovery instructions, then echoed archive notices instead of executing experiments. Keeping the entire latest repair immutable previously overflowed context; replacing it entirely with a pointer removed the immediate instruction. Neither extreme is reliable.
 
 **How to apply:** Budget the active projection within existing runtime headroom, preserve it through compaction and provider-limit reductions, and let forced-final STOP override it. Test actual outgoing requests and full orchestration recovery, not only validators. Browsing and retrieval must not reset no-progress recovery. A shell command may only inspect material; its existence alone does not prove a scientific experiment or justify a verdict. Report preparation may still retrieve archived evidence without rerunning experiments.
+
+Ground claims before accepting pending state, not only when validating final execution evidence.
+
+**Why:** A live agent registered generic metrics without demonstrating their origin in the paper, then tried a guessed training-script path and repeatedly asserted missing materials. Validating final output alone left unsupported claims treated as authoritative during recovery.
+
+**How to apply:** Require canonical-paper quotations backed by an actual source read and preserve the claim, original value, and provenance across repairs. Use the returned page range instead of requiring model-calculated quote offsets. Missing-material conclusions also need a source-backed requirement and inspection of supplied inventory/instructions; an absent guessed filename is not enough.
+
+Distinguish provider-reported context constraints from local retry targets and output-generation caps.
+
+**Why:** Repeated fractional reductions created a local target below the immutable instructions even though diagnostics still displayed a larger context window. Treating an ambiguous output-cap field as an input limit can produce the same failure.
+
+**How to apply:** Use explicit total/input limits and provider token counts when available, keep unknown-limit retries bounded, and account for the protected request floor without overriding genuine provider limits. Preserve only numeric/allowlisted error metadata, never raw provider bodies. Keep source-grounding/schema additions within default-prompt preflight headroom.

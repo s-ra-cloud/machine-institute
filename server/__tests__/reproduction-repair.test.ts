@@ -61,6 +61,16 @@ const call = (id: string, name: string, args: Record<string, unknown>) => ({
   function: { name, arguments: JSON.stringify(args) },
 });
 
+const claims = ["R1 claim", "R2 claim", "R3 claim", "R4 claim", "R5 claim", "Data-dependent result requires data.csv", "Full model result"];
+const sourceQuote = (claim: string) => `The paper states that ${claim} is a core quantitative result.`;
+const PAPER = `# Shipped paper\n\n${claims.map(sourceQuote).join("\n")}`;
+const sourceRead = () => call("paper-source", "read_file", { path: "/work/paper.md", max_chars: 40000 });
+const pendingCall = (id: string, claim = `${id} claim`, sourceToolCallId = 1) =>
+  call(`pending-${id}`, "record_result", {
+    id, claim, status: "pending", source_quote: sourceQuote(claim),
+    source_location: `characters 0-${PAPER.length}`, source_tool_call_id: sourceToolCallId,
+  });
+
 const judgeCompletion = (
   ids: string[] = ["R1"],
   verdict: "verified" | "inconclusive" = "verified",
@@ -80,11 +90,13 @@ const judgeCompletion = (
 
 function makeSandbox() {
   let terminated = false;
+  const files = new Map<string, string>();
   const lifecycle = {
     sandboxId: "sandbox-repair-test",
     image: "test-image",
-    writeText: vi.fn(async () => {
+    writeText: vi.fn(async (path: string, content: string) => {
       if (terminated) throw new Error("sandbox used after termination");
+      files.set(path, content);
     }),
     exec: vi.fn(async (command: string[]) => {
       if (terminated) throw new Error("sandbox used after termination");
@@ -116,7 +128,7 @@ function makeSandbox() {
       return { stdout: "exit-success", stderr: "", exitCode: 0, timedOut: false, durationMs: 1 };
     }),
     listFiles: vi.fn(async () => []),
-    readText: vi.fn(async () => ""),
+    readText: vi.fn(async (path: string) => files.get(path) ?? ""),
     terminate: vi.fn(async () => {
       terminated = true;
     }),
@@ -145,10 +157,21 @@ function setupContext() {
       source: "additional",
       text: "print('test')",
       bytes: 13,
-    }],
+    }, {
+      name: "README.md", url: "https://example.test/README.md", ext: "md", mime: "text/markdown",
+      kind: "text", source: "additional", text: "Run the supplied reproduction.", bytes: 31,
+    }, ...[
+      "expensive.py", "r2.py", "r3.py", "bad-r4.py", "r5.py", "r4-correct.py",
+      "timeout-command.py", "deadline-command.py", "oom.py",
+      ...Array.from({ length: REPRODUCTION_BUDGET.maxToolCalls }, (_, index) => `budget-${index}.py`),
+      ...Array.from({ length: REPRODUCTION_BUDGET.maxToolCalls }, (_, index) => `fallback-${index}.py`),
+    ].map(name => ({
+      name, url: `https://example.test/${name}`, ext: "py", mime: "text/plain",
+      kind: "text" as const, source: "additional" as const, text: "print('test')", bytes: 13,
+    }))],
     readme: "Run the supplied reproduction.",
-    paperMarkdown: "# Shipped paper\n\nFive quantitative claims.",
-    textFileCount: 1,
+    paperMarkdown: PAPER,
+    textFileCount: 2,
     binaryFileCount: 0,
     totalTextBytes: 13,
   });
@@ -193,50 +216,48 @@ describe("runReproduction orchestration repair", () => {
     const sandbox = makeSandbox();
     createSandbox.mockResolvedValue(sandbox);
 
-    const pending = ["R1", "R2", "R3", "R4", "R5"].map(id =>
-      call(`pending-${id}`, "record_result", { id, claim: `${id} claim`, status: "pending" }),
-    );
+    const pending = [sourceRead(), ...["R1", "R2", "R3", "R4", "R5"].map(id => pendingCall(id))];
     const commands = [
-      call("expensive", "run_command", { command: "python expensive.py" }),
-      call("r2", "run_command", { command: "python r2.py" }),
-      call("r3", "run_command", { command: "python r3.py" }),
-      call("bad-r4", "run_command", { command: "python bad-r4.py" }),
-      call("r5", "run_command", { command: "python r5.py" }),
+      call("expensive", "run_command", { command: "python /work/materials/expensive.py" }),
+      call("r2", "run_command", { command: "python /work/materials/r2.py" }),
+      call("r3", "run_command", { command: "python /work/materials/r3.py" }),
+      call("bad-r4", "run_command", { command: "python /work/materials/bad-r4.py" }),
+      call("r5", "run_command", { command: "python /work/materials/r5.py" }),
     ];
     const rejectedAndAccepted = [
       call("bad-r1-final", "record_result", {
         id: "R1", status: "verified", reproduced_value: "0.91", method: "rerun",
-        evidence_tool_call_ids: [6], evidence_excerpt: "expensive output",
+        evidence_tool_call_ids: [7], evidence_excerpt: "expensive output",
       }),
       call("bad-r4-final", "record_result", {
         id: "R4", status: "falsified", reproduced_value: "4.2", method: "rerun",
-        evidence_tool_call_ids: [9], evidence_excerpt: "wrong command failed",
+        evidence_tool_call_ids: [10], evidence_excerpt: "wrong command failed",
       }),
       call("r2-final", "record_result", {
         id: "R2", status: "verified", reproduced_value: "0.82", method: "rerun",
-        evidence_tool_call_ids: [7], evidence_excerpt: "R2 accuracy=0.82",
+        evidence_tool_call_ids: [8], evidence_excerpt: "R2 accuracy=0.82",
       }),
       call("r3-final", "record_result", {
         id: "R3", status: "verified", reproduced_value: "0.10", method: "rerun",
-        evidence_tool_call_ids: [8], evidence_excerpt: "R3 loss=0.10",
+        evidence_tool_call_ids: [9], evidence_excerpt: "R3 loss=0.10",
       }),
       call("r5-final", "record_result", {
         id: "R5", status: "verified", reproduced_value: "0.77", method: "rerun",
-        evidence_tool_call_ids: [10], evidence_excerpt: "R5 score=0.77",
+        evidence_tool_call_ids: [11], evidence_excerpt: "R5 score=0.77",
       }),
     ];
     const corrections = [
-      call("read-expensive", "read_tool_result", { tool_call_id: 6, offset: 0, max_chars: 8000 }),
+      call("read-expensive", "read_tool_result", { tool_call_id: 7, offset: 0, max_chars: 8000 }),
     ];
-    const r4Run = call("r4-correct", "run_command", { command: "python r4-correct.py" });
+    const r4Run = call("r4-correct", "run_command", { command: "python /work/materials/r4-correct.py" });
     const finalCorrections = [
       call("r1-final", "record_result", {
         id: "R1", status: "verified", reproduced_value: "0.91", method: "rerun",
-        evidence_tool_call_ids: [6], evidence_excerpt: "metric=0.91",
+        evidence_tool_call_ids: [7], evidence_excerpt: "metric=0.91",
       }),
       call("r4-final", "record_result", {
         id: "R4", status: "verified", reproduced_value: "4.2", method: "rerun",
-        evidence_tool_call_ids: [17], evidence_excerpt: "R4 output=4.2",
+        evidence_tool_call_ids: [18], evidence_excerpt: "R4 output=4.2",
       }),
     ];
 
@@ -290,9 +311,7 @@ describe("runReproduction orchestration repair", () => {
     const sandbox = makeSandbox();
     createSandbox.mockResolvedValue(sandbox);
     createCompletion
-      .mockResolvedValueOnce(completion(null, [call("pending", "record_result", {
-        id: "R1", claim: "R1 claim", status: "pending",
-      })]))
+      .mockResolvedValueOnce(completion(null, [sourceRead(), pendingCall("R1")]))
       .mockResolvedValueOnce(completion(""))
       .mockResolvedValueOnce(completion(""))
       .mockResolvedValueOnce(completion(""));
@@ -306,7 +325,8 @@ describe("runReproduction orchestration repair", () => {
   it("compacts old tool output, then recovers the original command with read_tool_result", async () => {
     const sandbox = makeSandbox();
     createSandbox.mockResolvedValue(sandbox);
-    sandbox.readText.mockResolvedValue("bulk-read-output-".repeat(900));
+    sandbox.readText.mockImplementation(async (path: string) =>
+      path === "/work/paper.md" ? PAPER : "bulk-read-output-".repeat(900));
 
     const requestSnapshots: any[][] = [];
     let agentCalls = 0;
@@ -321,12 +341,12 @@ describe("runReproduction orchestration repair", () => {
       agentCalls++;
       if (agentCalls === 1) {
         return completion(null, [
-          call("pending", "record_result", { id: "R1", claim: "R1 claim", status: "pending" }),
+          sourceRead(), pendingCall("R1"),
         ]);
       }
       if (agentCalls === 2) {
         return completion(null, [
-          call("expensive", "run_command", { command: "python expensive.py" }),
+          call("expensive", "run_command", { command: "python /work/materials/expensive.py" }),
         ]);
       }
       // Seventeen default read_file results are over 192k characters, which
@@ -338,14 +358,14 @@ describe("runReproduction orchestration repair", () => {
       }
       if (agentCalls === 20) {
         return completion(null, [
-          call("recover", "read_tool_result", { tool_call_id: 2, offset: 0, max_chars: 8000 }),
+          call("recover", "read_tool_result", { tool_call_id: 3, offset: 0, max_chars: 8000 }),
         ]);
       }
       if (agentCalls === 21) {
         return completion(null, [
           call("final", "record_result", {
             id: "R1", status: "verified", reproduced_value: "0.91", method: "rerun",
-            evidence_tool_call_ids: [2], evidence_excerpt: "EXPENSIVE_METRIC=0.91",
+            evidence_tool_call_ids: [3], evidence_excerpt: "EXPENSIVE_METRIC=0.91",
           }),
         ]);
       }
@@ -364,12 +384,12 @@ describe("runReproduction orchestration repair", () => {
     expect(sandbox.exec.mock.calls.filter(args => String(args[0]).includes("expensive.py"))).toHaveLength(1);
     expect(requestSnapshots.some(messages => messages.some((message: any) =>
       message.role === "tool"
-      && String(message.content).includes("[Tool call #2]\n[Earlier output elided. Use read_tool_result with the original tool call ID"),
+       && String(message.content).includes("[Tool call #3]\n[Earlier output elided. Use read_tool_result with the original tool call ID"),
     ))).toBe(true);
     const recoveryRequest = requestSnapshots[20];
     expect(recoveryRequest.some((message: any) =>
       message.role === "tool"
-      && String(message.content).includes("Original evidence tool call #2")
+       && String(message.content).includes("Original evidence tool call #3")
       && String(message.content).includes("EXPENSIVE_METRIC=0.91"),
     )).toBe(true);
     expect(sandbox.terminate).toHaveBeenCalledTimes(1);
@@ -400,26 +420,26 @@ describe("runReproduction orchestration repair", () => {
       agentCalls++;
       if (agentCalls === 1) {
         return completion(null, [
-          call("pending", "record_result", { id: "R1", claim: "R1 claim", status: "pending" }),
+          sourceRead(), pendingCall("R1"),
         ]);
       }
       if (agentCalls === 2) {
         return completion(null, [
-          call("expensive", "run_command", { command: "python expensive.py" }),
+          call("expensive", "run_command", { command: "python /work/materials/expensive.py" }),
         ]);
       }
       if (agentCalls === 3) {
         // The metric is deliberately in the middle of the source output,
         // requiring a page rather than relying on the elided model result.
         return completion(null, [
-          call("recover-page", "read_tool_result", { tool_call_id: 2, offset: 16_000, max_chars: 8_000 }),
+          call("recover-page", "read_tool_result", { tool_call_id: 3, offset: 16_000, max_chars: 8_000 }),
         ]);
       }
       if (agentCalls === 4) {
         return completion(null, [
           call("final", "record_result", {
             id: "R1", status: "verified", reproduced_value: "0.9137", method: "rerun",
-            evidence_tool_call_ids: [2], evidence_excerpt: metric,
+            evidence_tool_call_ids: [3], evidence_excerpt: metric,
           }),
         ]);
       }
@@ -432,14 +452,14 @@ describe("runReproduction orchestration repair", () => {
     expect(sandbox.exec.mock.calls.filter(args => String(args[0]).includes("expensive.py"))).toHaveLength(1);
     const initialCommandRequest = requestSnapshots[2];
     const initialCommandTool = initialCommandRequest.find((message: any) =>
-      message.role === "tool" && String(message.content).includes("[Tool call #2]"),
+      message.role === "tool" && String(message.content).includes("[Tool call #3]"),
     );
     expect(initialCommandTool).toBeDefined();
     expect(String(initialCommandTool.content)).not.toContain(metric);
     const recoveryRequest = requestSnapshots[3];
     expect(recoveryRequest.some((message: any) =>
       message.role === "tool"
-      && String(message.content).includes("Original evidence tool call #2")
+      && String(message.content).includes("Original evidence tool call #3")
       && String(message.content).includes(metric),
     )).toBe(true);
 
@@ -447,10 +467,10 @@ describe("runReproduction orchestration repair", () => {
     const originalEvidence = judgeInput.split("# ORIGINAL CITED TOOL OUTPUTS (server-extracted, before chronological transcript truncation)")[1]
       .split("# TOOL TRANSCRIPT")[0];
     const transcript = judgeInput.split("# TOOL TRANSCRIPT")[1];
-    expect(originalEvidence).toContain("Original tool #2");
+    expect(originalEvidence).toContain("Original tool #3");
     expect(originalEvidence).toContain(metric);
     expect(originalEvidence).toContain("Output status: exit code 0");
-    expect(originalEvidence).toContain('"command":"python expensive.py"');
+    expect(originalEvidence).toContain('"command":"python /work/materials/expensive.py"');
     expect(transcript.slice(0, 3_000)).not.toContain(metric);
     expect(sandbox.terminate).toHaveBeenCalledTimes(1);
   });
@@ -472,10 +492,10 @@ describe("runReproduction enforced resource stops", () => {
     });
     createCompletion
       .mockResolvedValueOnce(completion(null, [
-        call("pending", "record_result", { id: "R1", claim: "R1 claim", status: "pending" }),
+        sourceRead(), pendingCall("R1"),
       ]))
       .mockResolvedValueOnce(completion(null, [
-        call("timeout", "run_command", { command: "python timeout-command.py" }),
+        call("timeout", "run_command", { command: "python /work/materials/timeout-command.py" }),
       ]))
       .mockResolvedValueOnce(completion(logbook))
       .mockResolvedValueOnce(judgeCompletion(["R1"], "inconclusive"));
@@ -513,12 +533,12 @@ describe("runReproduction enforced resource stops", () => {
       agentCalls++;
       if (agentCalls === 1) {
         return completion(null, [
-          call("pending", "record_result", { id: "R1", claim: "R1 claim", status: "pending" }),
+          sourceRead(), pendingCall("R1"),
         ]);
       }
       if (agentCalls === 2) {
         return completion(null, [
-          call("command", "run_command", { command: "python deadline-command.py" }),
+          call("command", "run_command", { command: "python /work/materials/deadline-command.py" }),
         ]);
       }
       forcedFinalAttempted = true;
@@ -551,9 +571,9 @@ describe("runReproduction enforced resource stops", () => {
     const sandbox = makeSandbox();
     createSandbox.mockResolvedValue(sandbox);
     const calls = [
-      call("pending", "record_result", { id: "R1", claim: "R1 claim", status: "pending" }),
+      sourceRead(), pendingCall("R1"),
       ...Array.from({ length: REPRODUCTION_BUDGET.maxToolCalls }, (_, index) =>
-        call(`command-${index}`, "run_command", { command: `python budget-${index}.py` }),
+        call(`command-${index}`, "run_command", { command: `python /work/materials/budget-${index}.py` }),
       ),
     ];
     createCompletion
@@ -565,7 +585,7 @@ describe("runReproduction enforced resource stops", () => {
 
     expect(result.stoppedBy).toBe("tool-budget");
     expect(result.results[0]).toMatchObject({ id: "R1", verdict: "inconclusive" });
-    expect(sandbox.exec.mock.calls.filter(args => !String(args[0]).includes("nvidia-smi"))).toHaveLength(REPRODUCTION_BUDGET.maxToolCalls - 1);
+    expect(sandbox.exec.mock.calls.filter(args => !String(args[0]).includes("nvidia-smi"))).toHaveLength(REPRODUCTION_BUDGET.maxToolCalls - 2);
     expect(sandbox.terminate).toHaveBeenCalledTimes(1);
   });
 
@@ -573,9 +593,9 @@ describe("runReproduction enforced resource stops", () => {
     const sandbox = makeSandbox();
     createSandbox.mockResolvedValue(sandbox);
     const calls = [
-      call("pending", "record_result", { id: "R1", claim: "R1 claim", status: "pending" }),
+      sourceRead(), pendingCall("R1"),
       ...Array.from({ length: REPRODUCTION_BUDGET.maxToolCalls }, (_, index) =>
-        call(`command-${index}`, "run_command", { command: `python fallback-${index}.py` }),
+        call(`command-${index}`, "run_command", { command: `python /work/materials/fallback-${index}.py` }),
       ),
     ];
     let judgeRequest: any;
@@ -616,22 +636,25 @@ describe("runReproduction concrete blockers", () => {
     createSandbox.mockResolvedValue(sandbox);
     createCompletion
       .mockResolvedValueOnce(completion(null, [
-        call("pending-r1", "record_result", { id: "R1", claim: "Data-dependent result", status: "pending" }),
-        call("pending-r2", "record_result", { id: "R2", claim: "Full model result", status: "pending" }),
+        sourceRead(),
+        pendingCall("R1", "Data-dependent result requires data.csv"),
+        pendingCall("R2", "Full model result"),
       ]))
       .mockResolvedValueOnce(completion(null, [
-        call("missing", "run_command", { command: "python missing-material.py" }),
-        call("oom", "run_command", { command: "python oom.py" }),
+        call("inventory", "read_file", { path: "/work/MATERIALS_INDEX.md" }),
+        call("readme", "read_file", { path: "/work/materials/README.md" }),
+        call("missing", "list_files", { path: "/work/materials/data.csv" }),
+        call("oom", "run_command", { command: "python /work/materials/oom.py" }),
       ]))
       .mockResolvedValueOnce(completion(null, [
         call("final-r1", "record_result", {
           id: "R1", status: "inconclusive", method: "blocked", blocker_kind: "missing-material",
-          evidence: "The required dataset was not shipped.", evidence_tool_call_ids: [3],
-          evidence_excerpt: "No such file: data.csv",
+          required_material: "data.csv", evidence: "The required data.csv was not shipped.",
+          evidence_tool_call_ids: [4, 5, 6], evidence_excerpt: "(empty directory or not found)",
         }),
         call("final-r2", "record_result", {
           id: "R2", status: "inconclusive", method: "blocked", blocker_kind: "oom",
-          evidence: "The full run failed with CUDA out of memory.", evidence_tool_call_ids: [4],
+          evidence: "The full run failed with CUDA out of memory.", evidence_tool_call_ids: [7],
           evidence_excerpt: "CUDA out of memory",
         }),
       ]))
@@ -651,7 +674,7 @@ describe("reproducer prompt contract", () => {
     const prompt = buildEffectiveReproducerPrompt("SAVED PROMPT");
     expect(prompt).toContain("SAVED PROMPT");
     expect(prompt).toContain("# Mandatory runtime evidence and completion contract");
-    expect(prompt).toContain("Read the tool acknowledgment");
-    expect(prompt).toContain("read_tool_result(tool_call_id=N");
+    expect(prompt).toContain('"Refused" means not accepted');
+    expect(prompt).toContain("read_tool_result");
   });
 });

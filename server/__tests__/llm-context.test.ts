@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ContextBudgetError, RequestContextBudget, estimateRequestTokens, isContextOverflow, reportedContextLimit } from "../llm-context";
+import {
+  ContextBudgetError, RequestContextBudget, estimateRequestTokens, isContextOverflow,
+  providerContextConstraint, reportedContextLimit,
+} from "../llm-context";
 
 const config = { providerMode: "platform" as const, provider: "openrouter", modelName: "deepseek/deepseek-chat" };
 const error = { error: { message: "Upstream error from DeepInfra: The sum of prompt length (35175.0), query length (0) should not exceed max_num_tokens (32768)" } };
@@ -25,15 +28,64 @@ describe("Complete request budgets", () => {
     expect(new RequestContextBudget({ ...unknown, modelName: "gpt-4o" }, 6000, "judge", 128000).limit).toBe(128000);
   });
 
-  it("recognizes the observed error and always reduces the actual request target", () => {
+  it("recognizes DeepInfra's input-only cap and does not blindly shrink twice", () => {
     const budget = new RequestContextBudget(config, 8000, "reproduction", 64000);
     const request = { messages: [{ role: "user", content: "x".repeat(18000) }] };
     expect(reportedContextLimit(error)).toBe(32768);
     expect(budget.reduce(error, request)).toBe(true);
     expect(budget.inputLimit).toBeLessThan(budget.estimate(request));
     const previous = budget.inputLimit;
-    budget.reduce(error, request);
-    expect(budget.inputLimit).toBeLessThan(previous);
+    expect(budget.reduce(error, request)).toBe(false);
+    expect(budget.inputLimit).toBe(previous);
+    expect(providerContextConstraint(error)).toMatchObject({
+      kind: "input", limit: 32768, requestedInputTokens: 35175,
+    });
+    expect(providerContextConstraint({
+      message: "prompt length (32000), query length (1200) should not exceed max_num_tokens (32768)",
+    })).toMatchObject({
+      kind: "input", limit: 32768, requestedInputTokens: 33200,
+    });
+  });
+
+  it("distinguishes a total OpenAI context window from input and output counts", () => {
+    const rejection = new Error(
+      "This model's maximum context length is 32768 tokens. However, you requested 35175 tokens (27175 in the messages, 8000 in the completion).",
+    );
+    expect(providerContextConstraint(rejection)).toEqual({
+      kind: "total", limit: 32768, requestedTotalTokens: 35175,
+      requestedInputTokens: 27175, requestedOutputTokens: 8000,
+    });
+    const budget = new RequestContextBudget(config, 8000, "reproduction");
+    const request = { messages: [{ role: "user", content: "x".repeat(18_000) }] };
+    const before = budget.estimate(request);
+    expect(budget.reduce(rejection, request)).toBe(true);
+    expect(budget.inputLimit).toBe(Math.floor(before * (32768 - 8000 - 1024) / 27175));
+  });
+
+  it("does not mistake a standalone max_num_tokens output cap for an input limit", () => {
+    const outputCap = {
+      status: 400,
+      error: {
+        type: "invalid_request_error",
+        message: "max_num_tokens (8192) exceeds the maximum output allowance",
+      },
+    };
+    expect(providerContextConstraint(outputCap)).toBeUndefined();
+    expect(reportedContextLimit(outputCap)).toBeUndefined();
+    expect(isContextOverflow(outputCap)).toBe(true);
+  });
+
+  it("permits one bounded unknown-limit retry and refuses an impossible protected floor", () => {
+    const request = { messages: [{ role: "user", content: "x".repeat(18_000) }] };
+    const unknown = new Error("prompt too long");
+    const budget = new RequestContextBudget(config, 8000, "reproduction");
+    expect(budget.reduce(unknown, request)).toBe(true);
+    expect(budget.reduce(unknown, request)).toBe(false);
+
+    const floor = new RequestContextBudget(config, 8000, "reproduction", 32768, 20_000);
+    const protectedRequest = { messages: [{ role: "user", content: "x".repeat(18_000) }] };
+    expect(floor.reduce(error, protectedRequest)).toBe(false);
+    expect(floor.inputLimit).toBe(32768 - 8000 - 1024);
   });
 
   it("does not retry unrelated errors or leak input into diagnostics", () => {

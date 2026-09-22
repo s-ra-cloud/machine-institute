@@ -19,6 +19,133 @@ const verified = {
 };
 
 describe("Reproduction session — immediate validation", () => {
+  it("registers only verbatim claims from a verified canonical paper page", () => {
+    const s = session();
+    const paper = "Introduction.\nThe evaluation requires the Atlas test set and reports generic accuracy 92.3%, loss 0.15, and F1 0.87.\n";
+    const quote = "The evaluation requires the Atlas test set and reports generic accuracy 92.3%, loss 0.15, and F1 0.87.";
+    const start = paper.indexOf(quote);
+    s.configureSourceGrounding({ paperPath: "/work/paper.md", paperText: paper });
+    s.observeToolCall({
+      ...command(1, `Verified file: /work/paper.md\nReturned characters: 0-${paper.length} of ${paper.length}\n---\n${paper}`),
+      name: "read_file",
+      args: { path: "/work/paper.md" },
+    });
+
+    expect(s.recordResult({ ...verified, evidence_tool_call_ids: [1] })).toContain("final-first submission cannot bypass");
+    expect(s.recordResult({
+      id: "R-bad-quote", claim: "Accuracy is 92.3%", status: "pending",
+      original_value: "92.3%", source_quote: "Accuracy is 92.3% according to the paper.",
+      source_location: "characters 0-41", source_tool_call_id: 1,
+    })).toContain("Refused new claim");
+    expect(s.recordResult({
+      id: "R-paraphrase", claim: "Generic performance is excellent", status: "pending",
+      source_quote: quote, source_location: `characters ${start}-${start + quote.length}`, source_tool_call_id: 1,
+    })).toContain("claim must be a verbatim statement");
+    expect(s.recordResult({
+      id: "R1", claim: "generic accuracy 92.3%, loss 0.15, and F1 0.87", status: "pending",
+      original_value: "92.3%", source_quote: quote,
+      source_location: `characters 0-${paper.length}`, source_tool_call_id: 1,
+      required_material: "Atlas test set",
+    })).toContain("Registered R1 as pending");
+  });
+
+  it("keeps grounded original values and source provenance immutable across rejected repairs", () => {
+    const s = session();
+    const quote = "The paper reports held-out accuracy of 92.3% for the shipped evaluation.";
+    s.configureSourceGrounding({ paperPath: "/work/paper.md", paperText: quote });
+    s.observeToolCall({
+      ...command(1, `Verified file: /work/paper.md\nReturned characters: 0-${quote.length} of ${quote.length}\n---\n${quote}`),
+      name: "read_file", args: { path: "/work/paper.md" },
+    });
+    expect(s.recordResult({
+      id: "R1", claim: "held-out accuracy of 92.3%", status: "pending", original_value: "92.3%",
+      source_quote: quote, source_location: `characters 0-${quote.length}`, source_tool_call_id: 1,
+    })).toContain("Registered");
+    s.observeToolCall(command(2, "exit code 0 (1.0s)\nmetric=0.91"));
+
+    expect(s.recordResult({
+      id: "R1", status: "verified", original_value: "99.9%", reproduced_value: "0.91",
+      method: "rerun", evidence_tool_call_ids: [2], evidence_excerpt: "metric=0.91",
+    })).toContain("cannot replace its source-grounded original_value");
+    expect(s.recorded.get("R1")).toMatchObject({
+      status: "pending", originalValue: "92.3%", sourceQuote: quote,
+      sourceLocation: `characters 0-${quote.length}`, sourceToolCallId: 1,
+    });
+
+    expect(s.recordResult({
+      id: "R1", status: "verified", original_value: "92.3%", reproduced_value: "0.91",
+      method: "rerun", evidence_tool_call_ids: [2], evidence_excerpt: "fabricated=0.91",
+    })).toContain("Refused finalization");
+    expect(s.recordResult({
+      id: "R1", status: "verified", original_value: "88.8%", evidence_excerpt: "metric=0.91",
+    })).toContain("cannot replace its source-grounded original_value");
+    expect(s.recordResult({
+      id: "R1", status: "verified", reproduced_value: "0.91",
+      method: "rerun", evidence_tool_call_ids: [2], evidence_excerpt: "metric=0.91",
+    })).toContain("evidence validated");
+    expect(s.recorded.get("R1")).toMatchObject({
+      status: "verified", originalValue: "92.3%", sourceQuote: quote,
+      sourceLocation: `characters 0-${quote.length}`, sourceToolCallId: 1,
+    });
+  });
+
+  it("refuses a direct guessed Python script but permits it after write_file provenance", () => {
+    const s = session();
+    s.configureMaterialGrounding({
+      inventoryPath: "/work/MATERIALS_INDEX.md",
+      shippedPaths: ["/work/materials/actual.py"],
+    });
+    expect(s.validateCommand("python /work/materials/train.py")).toContain("not a verified shipped or generated script");
+    expect(s.validateCommand("python /work/materials/actual.py")).toBeUndefined();
+    // Pipelines are intentionally not parsed or blocked as if this were a shell parser.
+    expect(s.validateCommand("cat args.txt | python /work/materials/train.py")).toBeUndefined();
+    s.noteGeneratedPath("/work/results/train.py");
+    expect(s.validateCommand("python /work/results/train.py --seed 1")).toBeUndefined();
+    expect(s.validateCommand("python /work/results/generated-by-command.py")).toContain("not a verified");
+    s.observeToolCall({
+      ...command(2, "Verified file: /work/results/generated-by-command.py\nReturned characters: 0-12 of 12\n---\nprint('ok')"),
+      name: "read_file", args: { path: "/work/results/generated-by-command.py" },
+    });
+    expect(s.validateCommand("python /work/results/generated-by-command.py")).toBeUndefined();
+  });
+
+  it("accepts missing-material only after grounded requirement and shipped provenance inspection", () => {
+    const s = session();
+    const quote = "The reported score requires the Atlas test set and is 92.3%.";
+    s.configureSourceGrounding({ paperPath: "/work/paper.md", paperText: quote });
+    s.configureMaterialGrounding({
+      inventoryPath: "/work/MATERIALS_INDEX.md",
+      shippedPaths: ["/work/materials/README.md", "/work/materials/actual.py"],
+      readmePaths: ["/work/materials/README.md"],
+    });
+    s.observeToolCall({
+      ...command(1, `Verified file: /work/paper.md\nReturned characters: 0-${quote.length} of ${quote.length}\n---\n${quote}`),
+      name: "read_file", args: { path: "/work/paper.md" },
+    });
+    expect(s.recordResult({
+      id: "R1", claim: "score requires the Atlas test set and is 92.3%", status: "pending",
+      original_value: "92.3%", source_quote: quote, source_location: `characters 0-${quote.length}`,
+      source_tool_call_id: 1, required_material: "Atlas test set",
+    })).toContain("Registered");
+    s.observeToolCall({
+      ...command(2, "Verified file: /work/MATERIALS_INDEX.md\n/work/materials/README.md\n/work/materials/actual.py"),
+      name: "read_file", args: { path: "/work/MATERIALS_INDEX.md" },
+    });
+    s.observeToolCall({
+      ...command(3, "Verified file: /work/materials/README.md\nRun actual.py; no dataset is included."),
+      name: "read_file", args: { path: "/work/materials/README.md" },
+    });
+    s.observeToolCall({
+      ...command(4, "Verified directory: /work/materials/Atlas\n(empty directory or not found)"),
+      name: "list_files", args: { path: "/work/materials/Atlas" },
+    });
+    expect(s.recordResult({
+      id: "R1", status: "inconclusive", method: "blocked", blocker_kind: "missing-material",
+      required_material: "Atlas test set", evidence: "The Atlas test set was not shipped.",
+      evidence_tool_call_ids: [2, 3, 4], evidence_excerpt: "(empty directory or not found)",
+    })).toContain("evidence validated");
+  });
+
   it("refuses bad evidence immediately, registers an omitted claim, and supports partial repairs", () => {
     const s = session();
     s.observeToolCall(command(1));

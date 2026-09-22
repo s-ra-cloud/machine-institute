@@ -35,6 +35,12 @@ const logbook = [
 ].join("\n\n");
 const claim = "測定🧪: the supplied experiment reports 0.91.";
 const evidence = "EXPENSIVE_METRIC=0.91";
+const PAPER = `# Paper\n${claim}\n${"測定 paper history ".repeat(800)}`;
+const sourceArgs = (sourceToolCallId: number, end = PAPER.length) => ({
+  source_quote: claim,
+  source_location: `characters 0-${end}`,
+  source_tool_call_id: sourceToolCallId,
+});
 const completion = (content: string | null, calls?: unknown[], finishReason = calls ? "tool_calls" : "stop") => ({
   choices: [{ message: { content, ...(calls ? { tool_calls: calls } : {}) }, finish_reason: finishReason }],
 });
@@ -57,10 +63,11 @@ function options() {
 }
 
 function sandbox() {
+  const files = new Map<string, string>();
   return {
     sandboxId: "mocked-replay-sandbox", image: "mocked-image",
-    writeText: vi.fn(async () => {}),
-    listFiles: vi.fn(async () => []), readText: vi.fn(async () => ""),
+    writeText: vi.fn(async (path: string, content: string) => { files.set(path, content); }),
+    listFiles: vi.fn(async () => []), readText: vi.fn(async (path: string) => files.get(path) ?? ""),
     exec: vi.fn(async (argv: string[]) => ({
       stdout: argv.join(" ").includes("nvidia-smi") ? "Mock GPU, 16 GB" : evidence,
       stderr: "", exitCode: 0, timedOut: false, durationMs: 1,
@@ -81,7 +88,7 @@ beforeEach(() => {
   fetchContributionMaterials.mockResolvedValue({
     documentId: "paper-1",
     files: [{ name: "expensive.py", kind: "text", source: "additional", text: "print('EXPENSIVE_METRIC=0.91')" }],
-    readme: "Run expensive.py.", paperMarkdown: `# Paper\n${"測定 paper history ".repeat(800)}`,
+    readme: "Run expensive.py.", paperMarkdown: PAPER,
     textFileCount: 1, binaryFileCount: 0,
   });
 });
@@ -104,7 +111,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
         const input = request.messages[1].content;
         const claims = JSON.parse(input.split("# AGENT'S RECORDED RESULTS (proposals, not verdicts)\n")[1].split("\n\n# AGENT'S LOGBOOK")[0]);
         judged.push(...claims);
-        expect(input).toContain("Original tool #7");
+        expect(input).toContain("Original tool #8");
         expect(input).toContain(evidence);
         return completion(JSON.stringify({
           summary: "The independent judge verified the cited execution.",
@@ -115,7 +122,10 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
       turn++;
       if (turn === 1) {
         expect(JSON.stringify(request)).toContain("LATEST ACTION — EXTRACT");
-        return completion(null, [call("register", "record_result", { id: "R1", claim, status: "pending" })]);
+        return completion(null, [
+          call("paper-source", "read_file", { path: "/work/paper.md", max_chars: 40000 }),
+          call("register", "record_result", { id: "R1", claim, status: "pending", ...sourceArgs(1) }),
+        ]);
       }
       if (turn === 2) return completion(null, [
         call("duplicate", "record_result", { id: "R1", status: "pending" }),
@@ -128,12 +138,12 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
       ], "length");
       if (turn === 4) {
         expect(JSON.stringify(request)).toContain("LATEST ACTION — PREPARE/EXECUTE");
-        return completion(null, [call("expensive", "run_command", { command: "python expensive.py" })]);
+        return completion(null, [call("expensive", "run_command", { command: "python /work/materials/expensive.py" })]);
       }
       if (turn === 5) {
         return completion(null, [call("rejected-result", "record_result", {
         id: "R1", status: "verified", method: "rerun", reproduced_value: "0.90",
-        evidence_excerpt: evidence, evidence_tool_call_ids: [7],
+        evidence_excerpt: evidence, evidence_tool_call_ids: [8],
         notes: "Scientific details 測定🧪 ".repeat(500),
         })]);
       }
@@ -147,15 +157,15 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
         const state = JSON.parse(stateMessage.content);
         expect(state.totals.claims).toBe(1);
         expect(state.claims[0]).toMatchObject({ id: "R1", status: "pending" });
-        return completion(null, [call("recover-evidence", "read_tool_result", { tool_call_id: 7 })]);
+        return completion(null, [call("recover-evidence", "read_tool_result", { tool_call_id: 8 })]);
       }
       if (turn === 8) {
         const tool = [...request.messages].reverse().find((message: any) => message.role === "tool");
-        expect(tool.content).toContain("Original evidence tool call #7");
+        expect(tool.content).toContain("Original evidence tool call #8");
         expect(tool.content).toContain(evidence);
         return completion(null, [call("corrected-result", "record_result", {
           id: "R1", status: "verified", method: "rerun", reproduced_value: "0.91",
-          evidence_excerpt: evidence, evidence_tool_call_ids: [7],
+          evidence_excerpt: evidence, evidence_tool_call_ids: [8],
         })]);
       }
       expect(JSON.stringify(request)).toContain("LATEST ACTION — REPORT");
@@ -164,9 +174,9 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     const result = await runReproduction(options());
     expect(result.overall).toBe("verified");
     expect(result.stoppedBy).toBe("model");
-    expect(result.toolCallCount).toBe(10);
+    expect(result.toolCallCount).toBe(11);
     expect(judged).toEqual([expect.objectContaining({
-      id: "R1", claim, status: "verified", reproducedValue: "0.91", evidenceToolCallIds: [7],
+      id: "R1", claim, status: "verified", reproducedValue: "0.91", evidenceToolCallIds: [8],
     })]);
     expect(sb.exec.mock.calls.filter(([argv]) => argv.join(" ").includes("expensive.py"))).toHaveLength(1);
     expect(sb.exec.mock.calls.some(([argv]) => argv.join(" ").includes("should-not-run"))).toBe(false);
@@ -182,7 +192,9 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
 
   it("recovers the production browsing/archive loop through a real command, valid record, and judge after compaction", async () => {
     const sb = sandbox();
-    sb.readText.mockResolvedValue(`${"paper search page with reported values\n".repeat(1000)}PAPER_SEARCH_TAIL`);
+    sb.readText.mockImplementation(async (path: string) => path === "/work/paper.md"
+      ? `${PAPER}\n${"paper search page with reported values\n".repeat(1000)}PAPER_SEARCH_TAIL`
+      : "");
     createSandbox.mockResolvedValue(sb);
     const requests: any[] = [];
     let turn = 0;
@@ -218,12 +230,13 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
         expect(JSON.stringify(request)).toContain("LATEST ACTION — EXTRACT");
         return completion(null, [call("register-actual", "record_result", {
           id: "R1", claim, status: "pending", original_value: "0.91",
+          ...sourceArgs(1, 40000),
         })]);
       }
       if (turn === 7) return completion('{"notice":"Archived unchanged; not scientific evidence."}');
       if (turn === 8) {
         expect(JSON.stringify(request)).toContain("LATEST ACTION — PREPARE/EXECUTE");
-        return completion(null, [call("actual-experiment", "run_command", { command: "python expensive.py" })]);
+        return completion(null, [call("actual-experiment", "run_command", { command: "python /work/materials/expensive.py" })]);
       }
       if (turn === 9) {
         expect(JSON.stringify(request)).toContain("LATEST ACTION — ASSESS/RECORD");
@@ -285,7 +298,10 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     createCompletion.mockImplementation(async (request: any) => {
       expect(request.tools).toBeDefined();
       turn++;
-      if (turn === 1) return completion(null, [call("register", "record_result", { id: "R1", claim, status: "pending" })]);
+      if (turn === 1) return completion(null, [
+        call("paper-source", "read_file", { path: "/work/paper.md", max_chars: 40000 }),
+        call("register", "record_result", { id: "R1", claim, status: "pending", ...sourceArgs(1) }),
+      ]);
       if (turn === 2) return completion(null, [
         call("duplicate", "record_result", { id: "R1", status: "pending" }),
         rawCall("malformed", "run_command", '{"command":'),
@@ -301,7 +317,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     expect((error as Error).message).toMatch(/stopped before completing required work.*no-progress/);
     const diagnostics = getReproductionFailureDiagnostics(error);
     expect(diagnostics).toBeDefined();
-    expect(diagnostics).toMatchObject({ stopReason: "no-progress", stage: "completion", callCount: 5 });
+    expect(diagnostics).toMatchObject({ stopReason: "no-progress", stage: "completion", callCount: 6 });
     expect(diagnostics!.claims).toEqual([expect.objectContaining({ id: "R1", status: "pending" })]);
     expect(diagnostics!.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ argumentParse: "invalid-json" }),
