@@ -69,6 +69,11 @@ vi.mock("../ephemeral-keys", () => ({
 vi.mock("../reproduce", () => ({
   runReproduction: (...args: any[]) => state.run(...args),
 }));
+vi.mock("../paper-catalogue", () => ({
+  fetchJournalPaperCatalogue: async () => ({
+    papers: [{ documentId: "paper", title: "Source paper" }],
+  }),
+}));
 
 const routes = new Map<string, any[]>();
 beforeAll(async () => {
@@ -123,6 +128,94 @@ beforeEach(() => {
 });
 
 describe("managed generation route guards (no provider calls)", () => {
+  it.each([undefined, "qP"])("returns catalogue locks scoped to %s", async agentId => {
+    const { storage } = await import("../storage");
+    vi.mocked(storage.getReproducedPapersForJournal).mockResolvedValueOnce([
+      { documentId: "paper", modelName: "gpt-5-mini", status: "completed" },
+    ]);
+    let response: any;
+    await routes.get("get /api/reproductions/available-papers")![0](
+      { query: { agentId } },
+      { json(value: unknown) { response = value; } },
+    );
+    expect(storage.getReproducedPapersForJournal).toHaveBeenLastCalledWith("mirror", agentId ?? "P");
+    expect(response.papers[0]).toMatchObject({
+      lockedModels: ["gpt-5-mini"], reproducedModels: ["gpt-5-mini"],
+    });
+  });
+
+  it.each([undefined, "qP"])("returns persona-specific default prompts for %s", async agentId => {
+    const { getReproducerPrompt, getJudgePrompt } = await import("../prompts/reproduce");
+    let response: any;
+    await routes.get("get /api/reproductions/default-prompts")![0](
+      { query: { agentId } }, { json(value: unknown) { response = value; } },
+    );
+    const persona = agentId === "qP" ? "qP" : "P";
+    expect(response).toEqual({ reproducerPrompt: getReproducerPrompt(persona), judgePrompt: getJudgePrompt(persona) });
+  });
+
+  it.each([undefined, "P", "qP"])("selects persisted defaults for persona %s", async agentId => {
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-only");
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-5-mini");
+    state.create.mockResolvedValue(null);
+    const result = await post("/api/reproductions", {
+      documentId: "paper", agentId, modelProvider: "openai", modelName: "gpt-5-mini",
+      judgeModelName: "gpt-5-mini",
+    });
+    expect(result.status).toBe(409);
+    const { getReproducerPrompt, getJudgePrompt } = await import("../prompts/reproduce");
+    const persona = agentId === "qP" ? "qP" : "P";
+    expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
+      agentId: persona, prompt1: getReproducerPrompt(persona), prompt2: getJudgePrompt(persona),
+      orchestratorName: expect.stringContaining(`${persona}-N1`),
+    }));
+    const { storage } = await import("../storage");
+    expect(storage.getReproducedPapersForJournal).toHaveBeenCalledWith("mirror", persona);
+  });
+
+  it.each([null, "", "qp", "invalid", 1, ["P"]])("rejects invalid persona %j before insert", async agentId => {
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-only");
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-5-mini");
+    const result = await post("/api/reproductions", {
+      documentId: "paper", agentId, modelProvider: "openai", modelName: "gpt-5-mini",
+      judgeModelName: "gpt-5-mini",
+    });
+    expect(result.status).toBe(400);
+    expect(result.body.error).toContain("agentId");
+    expect(state.create).not.toHaveBeenCalled();
+  });
+
+  it("retries qP with its saved persona and prompts despite request overrides", async () => {
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-only");
+    vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-5-mini");
+    state.create.mockResolvedValue(null);
+    state.source.agentId = "qP";
+    try {
+      const result = await post("/api/reproductions/:id/retry", {
+        agentId: "P", reproducerPrompt: "replacement", judgePrompt: "replacement",
+        modelProvider: "openai", modelName: "gpt-5-mini", judgeModelName: "gpt-5-mini",
+      });
+      expect(result.status).toBe(409);
+      expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
+        agentId: "qP", prompt1: state.source.prompt1, prompt2: state.source.prompt2,
+      }));
+    } finally {
+      state.source.agentId = "P";
+    }
+  });
+
+  it.each(["/api/reproductions/default-prompts", "/api/reproductions/available-papers"])(
+    "rejects invalid catalogue/prompt persona on %s", async path => {
+      let status = 200;
+      const res = { status(value: number) { status = value; return this; }, json: vi.fn() };
+      await routes.get(`get ${path}`)![0]({ query: { agentId: "bad" } }, res);
+      expect(status).toBe(400);
+    },
+  );
+
   it.each(["length", "content_filter", "refusal"])(
     "does not complete or publish a background editorial after incomplete OpenAI output (%s)", async reason => {
       vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");

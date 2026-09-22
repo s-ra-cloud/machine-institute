@@ -3,6 +3,7 @@ import { posix } from "node:path";
 import type { ToolCallRecord } from "./model-service";
 import { REPRODUCTION_BLOCKERS, REPRODUCTION_METHODS, VERDICTS, type RecordedResult } from "./prompts/reproduce";
 import { ReproductionContextStore } from "./reproduction-context-store";
+import type { QuestioningState } from "./reproduction-questioning";
 
 type ClaimValidator = (results: RecordedResult[], calls: readonly ToolCallRecord[]) => string[];
 const evidenceTools = new Set(["run_command", "read_file", "list_files"]);
@@ -71,6 +72,7 @@ function resizeChunk(
 
 /** Run-local evidence and accepted claims, independent of the model's compacted context. */
 export class ReproductionSession {
+  questioning?: QuestioningState;
   readonly recorded = new Map<string, RecordedResult>();
   readonly toolCalls: ToolCallRecord[] = [];
   private drafts = new Map<string, RecordedResult>();
@@ -138,7 +140,8 @@ export class ReproductionSession {
   }
 
   get progress(): number {
-    return this.acceptedStateChanges + this.progressKeys.size + this.completedIds.size;
+    return this.acceptedStateChanges + this.progressKeys.size + this.completedIds.size
+      + (this.questioning?.assessment ? 1 : 0) + (this.questioning?.changes.length ?? 0);
   }
 
   captureOutput(name: string, result: string): void {
@@ -345,6 +348,9 @@ export class ReproductionSession {
    * identities, values, evidence, or missing record_result fields.
    */
   activeInstruction(): string {
+    if (this.questioning) {
+      return `qP phase: ${this.questioning.assessment?.decision ?? "assessment (inspection only; write/execute disabled)"}. ${this.questioning.limitation ?? ""} Full authoritative metadata: read_reproduction_context(ref="qp:metadata"). Page referenced source/output with ref="qp:blob:SHA256". ${this.questioning.assessment ? "Continue claim-specific work, or report the recorded limitation, then return all four logbook sections." : "Inspect paper, inventory and materials; register claims; call assess_suitability before execution."}`;
+    }
     const results = Array.from(this.recorded.values());
     const pending = results.filter(result => result.status === "pending");
     const commands = this.toolCalls.filter(call =>
@@ -427,7 +433,11 @@ export class ReproductionSession {
       }
       ref = this.activeIndexRef;
     }
-    const entry = this.contexts.get(ref);
+    // Dynamic content-addressed retrieval: never archive a new full provenance
+    // payload on every turn. Source strings remain solely in the blob store.
+    const qpText = this.questioning && ref === "qp:metadata" ? JSON.stringify(this.questioning.metadata())
+      : this.questioning && ref?.startsWith("qp:blob:") ? this.questioning.readBlob(ref.slice("qp:blob:".length)) : undefined;
+    const entry = qpText !== undefined ? { ref, key: ref, text: qpText } : this.contexts.get(ref);
     if (!entry) return JSON.stringify({ error: "Refused: ref must identify archived reproduction context." });
     const requested = Math.min(8000, Math.max(1, finiteInteger(args.max_chars, 6000)));
     return boundedPage(entry.text, offset, requested, 6000, (chunk, end) => JSON.stringify({

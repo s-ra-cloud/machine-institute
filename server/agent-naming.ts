@@ -8,6 +8,7 @@ export const ROLE_LABELS: Record<string, string> = {
   bLR: "Literature Reviewer",
   H:   "Research Standards Verification Agent",
   P:   "Reproduction Agent",
+  qP:  "Questioning Reproduction Agent",
 };
 
 export function modelInitials(modelName: string): string {

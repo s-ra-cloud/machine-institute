@@ -1,7 +1,12 @@
 import { type User, type InsertUser, type Paper, type InsertPaper, type ResearchEvent, type InsertResearchEvent, type LiteratureReview, type InsertLiteratureReview, type ProjectPaper, type InsertProjectPaper, type EditorialRecord, type InsertEditorial, type AgentMember, type InsertAgentMember, type UserRateLimit, type UserApiKey, type EthicsReport, type InsertEthicsReport, type PeerReview, type InsertPeerReview, type Reproduction, type InsertReproduction, users, papers, researchEvents, literatureReviews, projectPapers, syncMetadata, editorials, agentMembers, userRateLimits, userApiKeys, ethicsReports, peerReviews, reproductions } from "@shared/schema";
 import { db } from "./db";
 import { reproductionFailureDiagnostics, type ReproductionFailureDiagnosticRecord } from "@shared/schema";
-import { eq, desc, gte, lt, lte, inArray, and, notInArray, ne } from "drizzle-orm";
+import { eq, desc, gte, lt, lte, inArray, and, notInArray, ne, getTableColumns } from "drizzle-orm";
+
+export type ReproductionWithoutProvenance = Omit<Reproduction, "questioningJson">;
+// Exclude large evidence at SQL selection time, not just response serialization.
+// Full internal reads remain available for provenance, retries and publication.
+const { questioningJson: _questioningJson, ...reproductionPublicColumns } = getTableColumns(reproductions);
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -87,14 +92,15 @@ export interface IStorage {
 
   createReproduction(run: InsertReproduction): Promise<Reproduction | null>;
   getReproductionById(id: string): Promise<Reproduction | undefined>;
-  getReproductionsByProject(projectId: string): Promise<Reproduction[]>;
-  getAllReproductions(): Promise<Reproduction[]>;
+  getPublicReproductionById(id: string): Promise<ReproductionWithoutProvenance | undefined>;
+  getReproductionsByProject(projectId: string): Promise<ReproductionWithoutProvenance[]>;
+  getAllReproductions(): Promise<ReproductionWithoutProvenance[]>;
   updateReproduction(id: string, updates: Partial<Reproduction>): Promise<Reproduction>;
   saveReproductionFailureDiagnostics(id: string, diagnosticsJson: string): Promise<void>;
   getReproductionFailureDiagnostics(id: string): Promise<ReproductionFailureDiagnosticRecord | undefined>;
   deleteReproduction(id: string): Promise<void>;
   deleteAllReproductions(): Promise<void>;
-  getReproducedPapersForJournal(journalId: string): Promise<Array<{ documentId: string; modelName: string | null; status: string }>>;
+  getReproducedPapersForJournal(journalId: string, agentId?: "P" | "qP"): Promise<Array<{ documentId: string; modelName: string | null; status: string }>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -542,12 +548,17 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async getReproductionsByProject(projectId: string): Promise<Reproduction[]> {
-    return db.select().from(reproductions).where(eq(reproductions.projectId, projectId)).orderBy(desc(reproductions.createdAt));
+  async getPublicReproductionById(id: string): Promise<ReproductionWithoutProvenance | undefined> {
+    const [row] = await db.select(reproductionPublicColumns).from(reproductions).where(eq(reproductions.id, id));
+    return row;
   }
 
-  async getAllReproductions(): Promise<Reproduction[]> {
-    return db.select().from(reproductions).orderBy(desc(reproductions.createdAt));
+  async getReproductionsByProject(projectId: string): Promise<ReproductionWithoutProvenance[]> {
+    return db.select(reproductionPublicColumns).from(reproductions).where(eq(reproductions.projectId, projectId)).orderBy(desc(reproductions.createdAt));
+  }
+
+  async getAllReproductions(): Promise<ReproductionWithoutProvenance[]> {
+    return db.select(reproductionPublicColumns).from(reproductions).orderBy(desc(reproductions.createdAt));
   }
 
   async updateReproduction(id: string, updates: Partial<Reproduction>): Promise<Reproduction> {
@@ -578,10 +589,10 @@ export class DatabaseStorage implements IStorage {
     await db.delete(reproductions);
   }
 
-  async getReproducedPapersForJournal(journalId: string): Promise<Array<{ documentId: string; modelName: string | null; status: string }>> {
+  async getReproducedPapersForJournal(journalId: string, agentId: "P" | "qP" = "P"): Promise<Array<{ documentId: string; modelName: string | null; status: string }>> {
     return db.select({ documentId: reproductions.documentId, modelName: reproductions.modelName, status: reproductions.status })
       .from(reproductions)
-      .where(and(eq(reproductions.journalId, journalId), ne(reproductions.status, "failed")));
+      .where(and(eq(reproductions.journalId, journalId), eq(reproductions.agentId, agentId), ne(reproductions.status, "failed")));
   }
 
   async getAuditedPaperIdsForJournal(journalId: string): Promise<string[]> {

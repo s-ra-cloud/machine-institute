@@ -8,6 +8,7 @@ import { db } from "./db";
 import { researchEvents, literatureReviews, editorials, ethicsReports, peerReviews } from "@shared/schema";
 import { inArray, sql, eq, or } from "drizzle-orm";
 import { createServer } from "http";
+import { migrateReproductionPersona } from "./reproduction-schema";
 
 const app = express();
 const httpServer = createServer(app);
@@ -79,6 +80,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await migrateReproductionPersona();
   setupAuth(app);
   await registerRoutes(httpServer, app);
 

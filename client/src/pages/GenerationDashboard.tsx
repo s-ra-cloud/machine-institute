@@ -12,6 +12,7 @@ import {
   type GenerationCostType,
 } from "@/components/ModelSelector";
 import { PaperPicker } from "@/components/PaperPicker";
+import { REPRODUCTION_PERSONAS, reproductionPersonaName, useReproductionPrompts, type ReproductionPersona } from "@/lib/reproduction-personas";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
@@ -316,8 +317,7 @@ export default function GenerationDashboard() {
     provider: "",
     modelName: "",
   });
-  const [reproPrompt, setReproPrompt] = useState<string>("");
-  const [reproJudgePrompt, setReproJudgePrompt] = useState<string>("");
+  const [reproPersona, setReproPersona] = useState<ReproductionPersona>("P");
   const [reproPromptsExpanded, setReproPromptsExpanded] = useState(false);
   // Persist the active batch id so the progress panel survives page reloads
   // (the batch itself is persisted server-side and survives restarts).
@@ -401,6 +401,7 @@ export default function GenerationDashboard() {
     aR: "Adversarial Peer Reviewer agent stress-testing every claim, assumption and methodology of a single submitted paper.",
     rR: "Rigorous Peer Reviewer agent applying strict methodological scrutiny — statistical correctness, experimental design validity, reproducibility — to a single submitted paper.",
     P: "Reproduction Agent that re-runs a paper's shipped code and data in an isolated GPU sandbox, keeps a full logbook, and has a separate judge model grade each core result as verified, falsified, toy, or inconclusive.",
+    qP: REPRODUCTION_PERSONAS.qP.description,
   };
 
   const activeRoleCode =
@@ -413,7 +414,7 @@ export default function GenerationDashboard() {
           : activeType === "peer-review"
             ? peerPersona
             : activeType === "reproduce"
-              ? "P"
+              ? reproPersona
               : "O";
 
   const agentDescription = AGENT_DESCRIPTIONS[activeRoleCode] ?? AGENT_DESCRIPTIONS.O;
@@ -603,20 +604,22 @@ export default function GenerationDashboard() {
     },
   });
 
-  const { data: defaultReproPrompts } = useQuery<{ reproducerPrompt: string; judgePrompt: string }>({
-    queryKey: ["/api/reproductions/default-prompts"],
+  const { data: defaultReproPrompts, isError: reproDefaultsError, refetch: refetchReproDefaults } = useQuery<{ reproducerPrompt: string; judgePrompt: string }>({
+    queryKey: ["/api/reproductions/default-prompts", reproPersona],
     queryFn: async () => {
-      const res = await fetch("/api/reproductions/default-prompts");
+      const res = await fetch(`/api/reproductions/default-prompts?agentId=${reproPersona}`);
+      if (!res.ok) throw new Error("Failed to load reproduction prompts");
       return res.json();
     },
     enabled: activeType === "reproduce",
   });
+  const { reproducerPrompt: reproPrompt, judgePrompt: reproJudgePrompt, setReproducerPrompt: setReproPrompt, setJudgePrompt: setReproJudgePrompt } = useReproductionPrompts(reproPersona, defaultReproPrompts);
 
   interface ReproAvailablePaper { documentId: string; title: string; authors: string; date: string; url: string; lockedModels: string[]; reproducedModels: string[] }
   const { data: reproAvailableData, isFetching: reproPapersFetching, isError: reproPapersError, refetch: refetchReproPapers } = useQuery<{ papers: ReproAvailablePaper[] }>({
-    queryKey: ["/api/reproductions/available-papers", selectedJournal],
+    queryKey: ["/api/reproductions/available-papers", selectedJournal, reproPersona],
     queryFn: async () => {
-      const res = await fetch(`/api/reproductions/available-papers?journalId=${encodeURIComponent(selectedJournal)}`);
+      const res = await fetch(`/api/reproductions/available-papers?journalId=${encodeURIComponent(selectedJournal)}&agentId=${reproPersona}`);
       if (!res.ok) throw new Error("Failed to load papers");
       return res.json();
     },
@@ -670,6 +673,7 @@ export default function GenerationDashboard() {
           journalId: selectedJournal,
           documentId: reproSelectedDocId,
           paperTitle: reproSelectedTitle,
+          agentId: reproPersona,
           gpu: reproGpu,
           reproducerPrompt: reproPrompt || undefined,
           judgePrompt: reproJudgePrompt || undefined,
@@ -720,10 +724,6 @@ export default function GenerationDashboard() {
     }
     if ((activeType === "peer-review" || activeType === "peer-review-batch") && defaultPeerPrompts) {
       setPeerPrompt(defaultPeerPrompts.prompt);
-    }
-    if (activeType === "reproduce" && defaultReproPrompts) {
-      if (!reproPrompt) setReproPrompt(defaultReproPrompts.reproducerPrompt);
-      if (!reproJudgePrompt) setReproJudgePrompt(defaultReproPrompts.judgePrompt);
     }
   }, [activeType, defaultEditorialPrompt, defaultReviewPrompt, defaultEthicsPrompts, defaultPeerPrompts, defaultReproPrompts, reviewMode, peerPersona]);
 
@@ -1007,6 +1007,8 @@ export default function GenerationDashboard() {
   const reproConfig = generationConfig?.reproduction;
   const canSubmitRepro = !reproIsPending && !hasGeneratingRepro && managedModelReady
     && selectedManagedModel?.tools === true && judgeModelReady &&
+    !reproPapersLoading && !reproPapersError &&
+    reproAvailableData?.papers.some(p => p.documentId === reproSelectedDocId && !p.lockedModels.includes(modelConfig.modelName || "")) &&
     reproSelectedDocId.length > 0 && reproPrompt.trim().length > 0 && reproJudgePrompt.trim().length > 0 &&
     reproConfig?.sandboxConfigured !== false;
 
@@ -1242,7 +1244,7 @@ export default function GenerationDashboard() {
                       : activeType === "peer-review-batch"
                       ? "Produce a batch of peer reviews. Pick how many to run — papers not yet reviewed by the selected persona + model are chosen at random and reviewed one after another."
                       : activeType === "reproduce"
-                      ? "The Reproduction Agent (P) reads the paper and every supplementary file the authors shipped, re-runs their code on a GPU sandbox, keeps a full logbook, and a separate judge grades each core result verified / falsified / toy / inconclusive. The report is published on Future Science as a response to the original paper."
+                      ? `${reproductionPersonaName(reproPersona)} (${reproPersona}): ${REPRODUCTION_PERSONAS[reproPersona].description} The report is published on Future Science as a response to the original paper.`
                       : "Configure and generate a literature review on a specific research question."}
                   </p>
                 </div>
@@ -1634,6 +1636,21 @@ export default function GenerationDashboard() {
                   const gpuOptions = reproConfig?.gpuOptions || ["T4", "A10G", "A100", "H100"];
                   return (
                     <>
+                      <div>
+                        <label htmlFor="reproduction-persona" className="text-sm font-mono block mb-2">Reproducer persona</label>
+                        <select id="reproduction-persona" data-testid="select-repro-persona" value={reproPersona}
+                          onChange={e => {
+                            setReproPersona(e.target.value as ReproductionPersona);
+                            setReproSelectedDocId("");
+                            setReproSelectedTitle("");
+                          }}
+                          className="w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono">
+                          {(["P", "qP"] as const).map(id => <option key={id} value={id}>{id} — {REPRODUCTION_PERSONAS[id].name}</option>)}
+                        </select>
+                        <p className="text-xs text-muted-foreground mt-2" data-testid="text-repro-persona-description">{REPRODUCTION_PERSONAS[reproPersona].description}</p>
+                        <p className="text-xs text-muted-foreground mt-2">Custom reproducer and judge drafts are kept separately for each persona while this form is open.</p>
+                        {reproDefaultsError && <p role="alert" className="text-xs text-red-400 mt-2">Could not load {reproPersona} default prompts. <button type="button" onClick={() => refetchReproDefaults()} className="underline">Retry</button></p>}
+                      </div>
                       <div className="grid md:grid-cols-2 gap-6">
                         <div>
                           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
@@ -1698,13 +1715,13 @@ export default function GenerationDashboard() {
                           selectedTitle={reproSelectedTitle}
                           onSelect={(p) => { setReproSelectedDocId(p.documentId); setReproSelectedTitle(p.title); }}
                           isLocked={(p) => p.lockedModels.includes(currentModel)}
-                          lockLabel="this model"
+                          lockLabel={`${reproPersona} · this model`}
                           renderBadges={(p) => p.reproducedModels.length > 0 && (
                             <span className="text-[9px] font-mono text-muted-foreground/60 border border-border/30 px-2 py-0.5" title={p.reproducedModels.join(", ")}>
                               reproduced ×{p.reproducedModels.length}
                             </span>
                           )}
-                          hint="A paper is locked per reproduction-agent model. Switch to a different model to reproduce the same paper again. The agent reads the paper AND every supplementary file shipped on Future Science (README, scripts, raw results, notebooks)."
+                          hint={`Locks and completed runs shown here are for ${reproPersona} and the selected model. P and qP can evaluate the same paper independently. The agent reads the paper and its supplementary files.`}
                           testIdPrefix="repro"
                         />
                       </div>
@@ -1717,7 +1734,8 @@ export default function GenerationDashboard() {
                           <li>Fetch the paper's full text and all supplementary materials from Future Science.</li>
                           <li>Boot an isolated Modal GPU sandbox (PyTorch + Transformers) and upload the materials.</li>
                           <li>The agent extracts the paper's core results and registers each one.</li>
-                          <li>It re-runs the authors' scripts, re-derives statistics from raw result files, and scales down to a toy run only when the full experiment is infeasible.</li>
+                          <li>{reproPersona === "qP" ? "Before scientific execution, assess suitability for the paper’s question; use suitable code unchanged or automatically adapt working copies while preserving originals and recording the changes and executed version." : "It re-runs the authors' scripts, re-derives statistics from raw result files, and scales down to a toy run only when the full experiment is infeasible."}</li>
+                          {reproPersona === "qP" && <li>The independent judge assesses adaptations and comparability separately. Success of modified code does not verify or falsify the original result.</li>}
                           <li>The judge model grades every result from the logbook and command outputs.</li>
                           <li>The report is published on Future Science as a "Response to a contribution" linked to the original paper; falsified results become major revisions.</li>
                         </ol>
@@ -1742,7 +1760,7 @@ export default function GenerationDashboard() {
                                 <div className="flex items-center justify-between">
                                   <span className="text-[10px] font-mono text-primary/80 uppercase tracking-widest">{p.label}</span>
                                   <button
-                                    onClick={() => { if (p.dflt) p.set(p.dflt); }}
+                                    onClick={() => p.set(undefined)}
                                     className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground/40 hover:text-muted-foreground transition-colors"
                                     data-testid={`button-reset-repro-prompt-${p.key}`}
                                   >
@@ -2477,7 +2495,7 @@ export default function GenerationDashboard() {
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-3 flex-wrap">
                       <FlaskConical className="w-4 h-4 text-primary/60" />
-                      <span className="text-[10px] font-mono text-primary uppercase tracking-widest">Reproduction (P)</span>
+                      <span className="text-[10px] font-mono text-primary uppercase tracking-widest">{reproductionPersonaName(run.agentId)} ({run.agentId || "P"})</span>
                       <StatusBadge status={run.status} />
                       {run.overallVerdict && (
                         <span className={`text-[10px] font-mono px-2 py-0.5 border capitalize ${

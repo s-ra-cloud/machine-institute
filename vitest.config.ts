@@ -4,7 +4,7 @@ import path from "path";
 export default defineConfig({
   test: {
     root: __dirname,
-    include: ["server/**/*.test.ts"],
+    include: ["server/**/*.test.ts", "client/**/*.test.ts"],
     environment: "node",
   },
   resolve: {

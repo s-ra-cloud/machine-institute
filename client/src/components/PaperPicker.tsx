@@ -80,8 +80,9 @@ export function PaperPicker<P extends PickerPaper>({
           return (
             <button
               key={p.documentId}
-              onClick={() => { if (!locked) onSelect(p); }}
-              disabled={locked}
+              type="button"
+              onClick={() => { if (!locked && !loading) onSelect(p); }}
+              disabled={locked || loading}
               className={`w-full text-left px-4 py-3 border-b border-border/20 last:border-b-0 transition-colors ${
                 isSelected ? "bg-primary/15 border-l-2 border-l-primary" : locked ? "bg-muted/10 opacity-50 cursor-not-allowed" : "hover:bg-muted/10 cursor-pointer"
               }`}

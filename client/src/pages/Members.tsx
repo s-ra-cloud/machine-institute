@@ -33,6 +33,8 @@ const ROLE_CODES: Record<string, string> = {
   "H": "Research Standards Verification Agent",
   "V": "Reviser",
   "N": "Manager",
+  "P": "Reproduction Agent",
+  "qP": "Questioning Reproducer",
 };
 
 const MODEL_CODES: Record<string, string> = {
@@ -56,7 +58,7 @@ function parseAgentName(name: string) {
   const framework = parts[0] || "Unknown";
   const defaults = { framework, modelCode: "", modelLabel: "Unknown", roleCode: "", roleLabel: "Researcher", memoryCode: "", memoryLabel: "Unknown" };
   if (parts.length < 2) return defaults;
-  const m = parts[1].match(/^([A-Z][A-Za-z0-9]*?)([a-zA-Z]+)-(N\d+)$/);
+  const m = parts[1].match(/^([A-Z][A-Za-z0-9]*?)(qP|bLR|aLR|bR|aR|iR|rR|[ERAMOHVNP])-(N\d+)$/);
   if (!m) return defaults;
   return {
     framework,

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, pgEnum, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, pgEnum, boolean, uniqueIndex, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -460,6 +460,7 @@ export const reproductions = pgTable("reproductions", {
   reportAbstract: text("report_abstract"),
   overallVerdict: text("overall_verdict"),
   verdictsJson: text("verdicts_json"),
+  questioningJson: text("questioning_json"),
   claimsCount: integer("claims_count"),
   verifiedCount: integer("verified_count"),
   falsifiedCount: integer("falsified_count"),
@@ -480,11 +481,12 @@ export const reproductions = pgTable("reproductions", {
   promptTrace: text("prompt_trace"),
   sourceTrace: text("source_trace"),
 }, (table) => ({
-  // Only active work is locked per paper/model. Completed inconclusive reports
+  // Only active work is locked per paper/model/persona. Completed inconclusive reports
   // remain available while their owners can explicitly launch a rerun.
   uniquePaperModel: uniqueIndex("reproductions_journal_doc_model_uniq")
-    .on(table.journalId, table.documentId, table.modelName)
+    .on(table.journalId, table.documentId, table.modelName, table.agentId)
     .where(sql`status IN ('pending', 'generating')`),
+  validPersona: check("reproductions_agent_id_check", sql`${table.agentId} IN ('P', 'qP')`),
 }));
 
 // Private operational snapshots must never be joined into public reproduction
@@ -509,6 +511,7 @@ export const insertReproductionSchema = createInsertSchema(reproductions).omit({
   reportAbstract: true,
   overallVerdict: true,
   verdictsJson: true,
+  questioningJson: true,
   claimsCount: true,
   verifiedCount: true,
   falsifiedCount: true,
@@ -519,7 +522,7 @@ export const insertReproductionSchema = createInsertSchema(reproductions).omit({
   status: true,
 }).extend({
   projectId: z.string().min(1),
-  agentId: z.string().min(1).default("P"),
+  agentId: z.enum(["P", "qP"]).default("P"),
   journalId: z.string().min(1),
   documentId: z.string().min(1),
   paperTitle: z.string().nullable().optional(),

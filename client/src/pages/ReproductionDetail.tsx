@@ -10,6 +10,7 @@ import { ReviewProgress } from "@/components/ReviewProgress";
 import { ModelSelector, useGenerationConfig, type ModelConfig } from "@/components/ModelSelector";
 import { useAuth } from "@/lib/auth";
 import type { Reproduction } from "@shared/schema";
+import { reproductionPersonaName } from "@/lib/reproduction-personas";
 
 interface ClaimVerdict {
   id: string;
@@ -32,6 +33,96 @@ const REPRODUCTION_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.co
 
 export function verdictStyle(verdict: string | null | undefined): string {
   return VERDICT_STYLES[verdict || ""] || "text-muted-foreground border-border/30 bg-muted/5";
+}
+
+export function formatQuestioningState(value: string): string {
+  try { return JSON.stringify(JSON.parse(value), null, 2); }
+  catch { return `Saved assessment could not be parsed.\n${value}`; }
+}
+
+type ProvenancePage = {
+  kind: "manifest" | "blob"; hash: string | null; encoding: string;
+  offset: number; limit: number; total: number; nextOffset: number | null;
+  blobCount: number; data: string;
+};
+
+function ProvenanceInspector({ id }: { id: string }) {
+  const [opened, setOpened] = useState(false);
+  const [hashInput, setHashInput] = useState("");
+  const [hash, setHash] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+  const pageSize = 8192;
+  async function load(start: number, selectedHash: string): Promise<ProvenancePage> {
+    const query = new URLSearchParams({ offset: String(start), limit: String(pageSize) });
+    if (selectedHash) query.set("hash", selectedHash);
+    const response = await fetch(`/api/reproductions/${encodeURIComponent(id)}/provenance?${query}`);
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "Could not load provenance.");
+    return body;
+  }
+  const { data, error, isFetching } = useQuery<ProvenancePage>({
+    queryKey: ["/api/reproductions", id, "provenance", hash, offset],
+    queryFn: () => load(offset, hash),
+    enabled: opened,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  async function download() {
+    if (!data || !window.confirm(`Download the complete ${hash ? "selected blob" : "manifest"} (${data.total.toLocaleString()} text characters)? Blob content is downloaded separately by its SHA-256 address.`)) return;
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      const parts: string[] = [];
+      let next: number | null = 0;
+      // Retain UTF-16 chunks until joining: a Unicode surrogate pair may
+      // straddle a page boundary and must not be encoded separately.
+      while (next !== null) {
+        const page: ProvenancePage = await load(next, hash);
+        parts.push(page.data);
+        next = page.nextOffset;
+      }
+      const url = URL.createObjectURL(new Blob([parts.join("")], { type: hash ? "text/plain;charset=utf-8" : "application/json" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = hash ? `${hash}.txt` : `${id}-provenance-manifest.json`;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Download failed.");
+    } finally { setDownloading(false); }
+  }
+  return <div className="space-y-3" data-testid="provenance-inspector">
+    <Button variant="outline" size="sm" onClick={() => setOpened(!opened)}>
+      {opened ? "Close provenance inspector" : "Inspect saved provenance"}
+    </Button>
+    {opened && <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">Loaded only on request, one bounded page at a time. The manifest lists original, modified and executed versions. Paste a content SHA-256 address from the manifest to inspect or download that exact version. No source blobs are loaded automatically.</p>
+      <form className="flex flex-wrap gap-2" onSubmit={event => {
+        event.preventDefault();
+        if (/^[a-f0-9]{64}$/.test(hashInput.trim())) { setHash(hashInput.trim()); setOffset(0); }
+      }}>
+        <input aria-label="Provenance blob SHA-256" className="min-w-0 flex-1 border border-border bg-background p-2 text-xs font-mono"
+          value={hashInput} onChange={event => setHashInput(event.target.value)} placeholder="64-character SHA-256 content address" pattern="[a-f0-9]{64}" required />
+        <Button type="submit" size="sm" variant="outline" disabled={downloading}>Inspect blob</Button>
+        <Button type="button" size="sm" variant="outline" disabled={downloading} onClick={() => { setHash(""); setHashInput(""); setOffset(0); }}>Manifest</Button>
+      </form>
+      {isFetching && <p className="text-xs">Loading provenance page…</p>}
+      {error && <p className="text-xs text-destructive" role="alert">{error.message}</p>}
+      {data && <>
+        <p className="text-xs font-mono break-all">{data.kind === "blob" ? hash : "Manifest"} · {data.total.toLocaleString()} UTF-16 units · {data.blobCount} content blobs</p>
+        <pre className="text-xs whitespace-pre-wrap break-words max-h-96 overflow-auto border border-border p-3" data-testid="text-questioning-state">{data.data}</pre>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" disabled={offset === 0 || isFetching || downloading} onClick={() => setOffset(Math.max(0, offset - pageSize))}>Previous page</Button>
+          <span className="text-xs">{offset.toLocaleString()}–{Math.min(offset + data.limit, data.total).toLocaleString()} / {data.total.toLocaleString()}</span>
+          <Button variant="outline" size="sm" disabled={data.nextOffset === null || isFetching || downloading} onClick={() => setOffset(data.nextOffset!)}>Next page</Button>
+          <Button variant="outline" size="sm" disabled={downloading || isFetching} onClick={download}>{downloading ? "Downloading…" : `Download ${hash ? "selected blob" : "manifest"}`}</Button>
+        </div>
+      </>}
+      {downloadError && <p className="text-xs text-destructive" role="alert">{downloadError}</p>}
+    </div>}
+  </div>;
 }
 
 export function providerPaymentGuidance(diagnostics: unknown): string | null {
@@ -259,7 +350,7 @@ export default function ReproductionDetail() {
             <div className="border border-border/30 bg-muted/5 p-8 md:p-12 mb-10">
               <div className="flex items-center gap-3 mb-5 flex-wrap">
                 <span className="bg-primary/20 text-primary px-3 py-1 text-xs font-mono border border-primary/30 flex items-center gap-1">
-                  <FlaskConical className="w-3 h-3" /> Reproduction Report
+                  <FlaskConical className="w-3 h-3" /> {reproductionPersonaName(run.agentId)} Report
                 </span>
                 {run.status === "completed" && <span className="bg-green-500/10 text-green-400 px-2 py-0.5 text-xs font-mono">completed</span>}
                 {run.status === "generating" && (
@@ -284,7 +375,7 @@ export default function ReproductionDetail() {
               <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground font-mono">
                 <div className="flex items-center gap-2">
                   <Bot className="w-4 h-4 text-primary/60" />
-                  <span data-testid="text-reproduction-agent">{run.orchestratorName || run.agentId}</span>
+                  <span data-testid="text-reproduction-agent">{run.orchestratorName || run.agentId} · {reproductionPersonaName(run.agentId)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-primary/60" />
@@ -353,7 +444,7 @@ export default function ReproductionDetail() {
                 <div>
                   <h2 className="text-sm font-heading font-semibold">Choose models for the new run</h2>
                   <p className="mt-1 text-[10px] font-mono text-muted-foreground/60">
-                    A retry is a new run. Select an enabled Replit-managed reproducer and judge explicitly; the original run’s model history remains unchanged.
+                    A retry is a new run using the saved {run.agentId || "P"} persona and scientific instructions. Select an enabled Replit-managed reproducer and judge explicitly; the original run’s model history remains unchanged.
                   </p>
                 </div>
                 <ModelSelector
@@ -385,6 +476,13 @@ export default function ReproductionDetail() {
             </FadeIn>
           )}
 
+          {run.agentId === "qP" && (
+            <section className="mb-8 border border-border/40 p-5 space-y-3" data-testid="section-questioning-assessment">
+              <h2 className="text-lg font-heading font-semibold">Suitability assessment & change provenance</h2>
+              <p className="text-sm text-muted-foreground">The report distinguishes original-code reproduction from adapted analysis, explains modifications and comparability limits, and includes the independent judge’s assessment. A successful adapted run alone does not verify or falsify the original result.</p>
+              {run.status === "completed" ? <ProvenanceInspector id={run.id} /> : <p className="text-xs text-muted-foreground">Structured provenance is available after a completed run.</p>}
+            </section>
+          )}
           <FadeIn delay={0.3}>
             {run.status === "pending" || run.status === "generating" ? (
               <ReviewProgress
@@ -507,7 +605,7 @@ export default function ReproductionDetail() {
 
                 <div className="mt-6 pt-4 text-center">
                   <p className="text-xs font-mono text-muted-foreground/50">
-                    Generated by {run.orchestratorName || run.agentId} — Machine Institute Reproduction Agent (P)
+                    Generated by {run.orchestratorName || run.agentId} — Machine Institute {reproductionPersonaName(run.agentId)} ({run.agentId || "P"})
                   </p>
                 </div>
               </div>

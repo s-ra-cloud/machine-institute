@@ -11,6 +11,7 @@ import { runBoundedReproductionJudge } from "../reproduction-judge";
 import type { RecordedResult } from "../prompts/reproduce";
 import type { ToolCallRecord } from "../model-service";
 import { ContextBudgetError, estimateRequestTokens } from "../llm-context";
+import { QuestioningState } from "../reproduction-questioning";
 
 const config = {
   providerMode: "platform" as const,
@@ -50,6 +51,29 @@ beforeEach(() => {
 });
 
 describe("bounded reproduction judge context handling", () => {
+  it("independently receives suitability, code changes and executed version evidence without promoting adapted success", async () => {
+    const q = new QuestioningState();
+    q.assessment = { research_question: "Estimate a population mean", question_quote: "Estimate a population mean from the sample",
+      decision: "adapt", rationale: "Unequal sampling requires weights.", claim_ids: ["R1"], evidence: [{ tool_call_id: 1, excerpt: "metric=1" }],
+      intended_changes: "Use weighted mean", comparability: "Changed method is not original reproduction",
+      planned_changes: [{ path: "/work/working/materials/analysis.py", reason: "Correct unequal sampling probabilities", claim_ids: ["R1"] }] };
+    q.addOriginal("/work/materials/analysis.py", "unweighted_mean(sample)");
+    q.write("/work/working/materials/analysis.py", "weighted_mean(sample)", "Correct unequal sampling probabilities");
+    const execution = q.snapshot("python materials/analysis.py");
+    execution.status = "executed";
+    q.recordExecutionOutput(execution, "metric=1");
+    generate.mockResolvedValue({ content: JSON.stringify({ summary: "Adaptation addresses sample weights, but comparability is not established.", results: [{ id: "R1", claim: "R1", verdict: "verified", evidence: "metric=1" }] }) });
+    const judged = await runBoundedReproductionJudge({ config, prompt: "Custom independent judge", title: "Paper", abstract: "Abstract",
+      logbook: "Agent asserts success", recordedResults: [claim("R1")], toolCalls: [call(1, "metric=1")], questioning: q });
+    expect(generate.mock.calls[0][1]).toContain("scientifically defensible");
+    const input = generate.mock.calls[0][2];
+    expect(input).toContain("unweighted_mean(sample)");
+    expect(input).toContain("weighted_mean(sample)");
+    expect(input).toContain("/work/qp-executions/run-1");
+    expect(input).toContain("metric=1");
+    expect(judged.results[0].verdict).toBe("inconclusive");
+    expect(judged.summary).toContain("comparability is not established");
+  });
   it("drops redundant transcript while retaining a deep original cited metric", async () => {
     const deep = `${"x".repeat(34_000)} metric=1`;
     const calls = [call(1, deep), ...Array.from({ length: 30 }, (_, i) => call(i + 2, "old transcript ".repeat(300)))];

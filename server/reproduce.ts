@@ -21,6 +21,9 @@ import {
 } from "./prompts/reproduce";
 import { deriveContributionKeywords } from "./prompts/peer-review";
 import { ReproductionSession } from "./reproduction-session";
+import { QuestioningState, QUESTIONING_TOOL, QUESTIONING_SETUP_TOOL, questioningSetupCommand } from "./reproduction-questioning";
+import { cleanQuestioningEnvironment, isolatedQuestioningCommand, QUESTIONING_MANIFEST_SCRIPT, QUESTIONING_LINK_SNAPSHOT_SCRIPT } from "./reproduction-isolation";
+import { QuestioningProvenanceLimitError } from "./reproduction-provenance-store";
 import { ContextBudgetError, isContextOverflow, isProviderPaymentFailure, RequestContextBudget } from "./llm-context";
 import { runBoundedReproductionJudge } from "./reproduction-judge";
 import { ACTIVE_INSTRUCTION_MAX_BYTES, describeToolContext, RUNTIME_CONTEXT_HEADROOM } from "./tool-context";
@@ -47,6 +50,7 @@ const REQUIRED_LOGBOOK_SECTIONS = [
 ] as const;
 
 export interface ReproductionOutput {
+  questioningJson?: string;
   markdown: string;
   logbook: string;
   title: string;
@@ -65,6 +69,7 @@ export interface ReproductionOutput {
 }
 
 export interface RunReproductionOptions {
+  agentId?: "P" | "qP";
   reproductionId: string;
   projectId: string;
   journalId: string;
@@ -424,14 +429,20 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
 async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diagnostics: ReproductionDiagnostics): Promise<ReproductionOutput> {
   const startTime = Date.now();
   const { projectId, journalId, initiativeDocId, initiativeSlug, journalDisplayName, documentId, paperTitle, modelConfig, judgeModelConfig, gpu, emitEvent } = opts;
-  const effectivePrompt = buildEffectiveReproducerPrompt(opts.reproducerPrompt);
+  const questioning = opts.agentId === "qP" ? new QuestioningState() : undefined;
+  const tools = questioning ? [...TOOLS, QUESTIONING_TOOL, QUESTIONING_SETUP_TOOL].map(t => {
+    if (t.name === "write_file") return { ...t, parameters: { ...t.parameters, properties: { ...(t.parameters as any).properties, reason: { type: "string", description: "Scientific justification linked to assessed claims" } } } };
+    if (t.name === "run_command") return { ...t, description: "After assessment and planned changes, execute a versioned scientific entrypoint: python|python3|bash|sh|node|Rscript|julia materials/FILE [arguments]. No inline shell or -c commands; put scientific logic in a planned source file. Runs unprivileged in the sealed snapshot; /work/results is writable and PYTHONPATH includes setup_environment packages. Originals remain accessible through inspection tools only." };
+    return t;
+  }) : TOOLS;
+  const effectivePrompt = buildEffectiveReproducerPrompt(opts.reproducerPrompt, opts.agentId);
   // Fixed input must leave room for bounded state and a useful retrieval page,
   // not merely fit an empty first turn before booting a paid sandbox.
   const instructionBudget = new RequestContextBudget(modelConfig, 8000, "reproduction instructions", getContextWindow(modelConfig));
   const fixedRequest = {
     model: modelConfig.modelName,
     messages: [{ role: "system", content: effectivePrompt }],
-    tools: TOOLS.map(tool => ({ type: "function", function: tool })),
+    tools: tools.map(tool => ({ type: "function", function: tool })),
     max_tokens: 8000,
     temperature: 0.2,
     tool_choice: "auto",
@@ -468,18 +479,29 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   await emitEvent("reproduction-materials", "Fetching supplementary materials (README, scripts, raw results, notebooks) from Future Science...");
   const materials = await fetchContributionMaterials(documentId);
   await emitEvent("reproduction-materials", `Materials found: ${materials.textFileCount} text file(s), ${materials.binaryFileCount} binary file(s)${materials.readme ? ", README present" : ", no README"}.`);
+  const paperText = materials.paperMarkdown || fullText || `# ${title}\n\n${abstract}`;
+  const inventory = formatMaterialsInventory(materials);
+  if (questioning) {
+    // Enforce capacity before booting/uploading to a paid sandbox.
+    questioning.addOriginal("/work/paper.md", paperText);
+    for (const file of materials.files) {
+      if (file.kind === "text" && file.text && file.source !== "paper")
+        questioning.addOriginal(materialSandboxPath(file), file.text);
+    }
+    questioning.addOriginal("/work/MATERIALS_INDEX.md", `# Shipped materials for "${title}"\n\n${inventory}\n`);
+  }
 
   await emitEvent("reproduction-sandbox", `Booting Modal ${gpu} sandbox (image build is cached after the first run)...`);
   const env: Record<string, string> = { PYTHONUNBUFFERED: "1", MPLBACKEND: "Agg", TOKENIZERS_PARALLELISM: "false" };
   const hfToken = process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN;
-  if (hfToken) {
+  if (hfToken && !questioning) {
     env.HF_TOKEN = hfToken;
     env.HUGGING_FACE_HUB_TOKEN = hfToken;
-  } else {
+  } else if (!questioning) {
     await emitEvent("reproduction-sandbox", "Warning: HF_TOKEN is not configured — gated Hugging Face models (e.g. Llama 3) will not be downloadable.");
   }
   diagnostics.stage("sandbox");
-  const sandbox = await ReproductionSandbox.create({ gpu, timeoutMs: REPRODUCTION_BUDGET.sandboxTimeoutMs, env });
+  const sandbox = await ReproductionSandbox.create({ gpu, timeoutMs: REPRODUCTION_BUDGET.sandboxTimeoutMs, ...(questioning ? { questioning: true } : { env }) });
 
   const session = new ReproductionSession(
     (recordedResults, toolCalls) => getReproductionClaimIssues({ recordedResults, toolCalls, budgetExhausted: false }),
@@ -488,14 +510,15 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     },
   );
   const recorded = session.recorded;
+  session.questioning = questioning;
   let toolLoopResult: Awaited<ReturnType<typeof runToolLoop>> | null = null;
   let logbook = "";
   let gpuInfo = "(not probed)";
   let executionFailed = false;
+  const uploadedSourceBlobs = new Set<string>();
 
   try {
     await emitEvent("reproduction-sandbox", `Sandbox ${sandbox.sandboxId} ready.`);
-    const paperText = materials.paperMarkdown || fullText || `# ${title}\n\n${abstract}`;
     await sandbox.writeText("/work/paper.md", paperText);
     let uploaded = 0;
     for (const f of materials.files) {
@@ -503,8 +526,19 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       await sandbox.writeText(materialSandboxPath(f), f.text);
       uploaded++;
     }
-    const inventory = formatMaterialsInventory(materials);
     await sandbox.writeText("/work/MATERIALS_INDEX.md", `# Shipped materials for "${title}"\n\n${inventory}\n`);
+    if (questioning) {
+      // No model-supplied command ever runs as root. The UID cannot alter original
+      // directories, sudo configuration, or the immutable execution snapshots.
+      const protection = await sandbox.exec(cleanQuestioningEnvironment(["bash", "-c", "set -e; mkdir -p /work/working /work/qp-executions /work/results /work/python-packages /work/qp-empty /work/qp-probe-results /work/qp-results; chown -R root:root /work; chmod -R go-w /work; chmod 755 /work; command -v bwrap >/dev/null"]), { timeoutMs: 30000 });
+      if (protection.exitCode !== 0) throw new Error("qP sandbox protection unavailable; refusing arbitrary execution.");
+      for (const [path, sha256] of Object.entries(questioning.originals)) await sandbox.writeText(path.replace("/work/", "/work/working/"), questioning.readBlob(sha256)!);
+      const isolateSources = await sandbox.exec(cleanQuestioningEnvironment(["bash", "-c", "set -e; chmod 700 /work/working; if [ -d /work/materials ]; then chmod 700 /work/materials; fi; chmod 600 /work/paper.md /work/MATERIALS_INDEX.md"]), { timeoutMs: 30000 });
+      if (isolateSources.exitCode !== 0) throw new Error("qP original-source isolation failed.");
+      const isolationProbe = await sandbox.exec(isolatedQuestioningCommand({ snapshot: "/work/qp-empty", output: "/work/qp-probe-results", argv: ["/bin/true"] }), { timeoutMs: 30000 });
+      if (isolationProbe.exitCode !== 0) throw new Error("qP kernel namespace isolation unavailable; refusing execution.");
+      await sandbox.writeText("/work/qp-dependency-manifest.py", QUESTIONING_MANIFEST_SCRIPT);
+    }
     const shippedPaths = materials.files
       .filter(file => file.kind === "text" && file.source !== "paper" && Boolean(file.text))
       .map(file => materialSandboxPath(file));
@@ -517,18 +551,35 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     });
     await emitEvent("reproduction-upload", `Uploaded the paper and ${uploaded} material file(s) into the sandbox.`);
 
-    const probe = await sandbox.exec(["bash", "-lc", "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>&1 | head -n 3; python -c 'import torch, transformers; print(\"torch\", torch.__version__, \"cuda\", torch.cuda.is_available(), \"transformers\", transformers.__version__)' 2>&1"], { timeoutMs: 120_000 });
+    const probeCommand = ["bash", questioning ? "-c" : "-lc", "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>&1 | head -n 3; python -c 'import torch, transformers; print(\"torch\", torch.__version__, \"cuda\", torch.cuda.is_available(), \"transformers\", transformers.__version__)' 2>&1"];
+    const probe = await sandbox.exec(questioning ? cleanQuestioningEnvironment(probeCommand) : probeCommand, { timeoutMs: 120_000 });
     gpuInfo = (probe.stdout || probe.stderr || "").trim() || "(no output)";
     await emitEvent("reproduction-gpu", `Sandbox environment: ${gpuInfo.replace(/\s+/g, " ").slice(0, 300)}`);
 
     const executeTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
+      const phaseRefusal = questioning?.gate(name);
+      if (phaseRefusal) return phaseRefusal;
       switch (name) {
+        case "setup_environment": {
+          const command = questioningSetupCommand(args.packages);
+          if (!questioning || !command) return "Refused: select only approved scientific package names; no shell, URLs, versions or extra arguments are accepted.";
+          const setup = await sandbox.exec(isolatedQuestioningCommand({ snapshot: "/work/qp-empty", output: "/work/qp-probe-results", argv: command, setup: true }), { timeoutMs: 120000 });
+          const seal = await sandbox.exec(cleanQuestioningEnvironment(["bash", "-c", "chown -R root:root /work/python-packages && chmod -R go-w /work/python-packages"]), { timeoutMs: 30000 });
+          if (seal.exitCode !== 0) throw new Error("Unable to protect qP dependencies; refusing execution.");
+          return `Environment setup only; not scientific evidence.\n${fmtExec(setup)}\nDependencies are immutable during scientific execution and frozen after the first run. Missing dependencies remain explicit limitations.`;
+        }
+        case "assess_suitability":
+          return questioning ? questioning.assess(args.assessment, session.toolCalls, Array.from(recorded.values())) : "Unknown tool.";
         case "read_reproduction_context":
           return session.readContext(args);
         case "read_tool_result":
           return session.readToolResult(args);
         case "list_files": {
           const path = String(args.path || "/work");
+          if (questioning) {
+            const names = questioning.listKnownSources(path);
+            return `Verified directory: ${path}\n${names.length ? names.join("\n") : "(empty directory or not found in the uploaded/versioned source inventory)"}`;
+          }
           const entries = await sandbox.listFiles(path);
           if (entries.length === 0) return `Verified directory: ${path}\n(empty directory or not found)`;
           return `Verified directory: ${path}\n${entries.map(e => `${e.isDir ? "d " : "f "}${e.name}${e.size !== undefined ? ` (${e.size} B)` : ""}`).join("\n")}`;
@@ -537,13 +588,18 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           const path = String(args.path || "");
           const max = Math.min(Math.max(Number(args.max_chars) || 12_000, 200), 40_000);
           const offset = Math.max(Number(args.offset) || 0, 0);
-          const text = await sandbox.readText(path);
+          const text = questioning ? questioning.readKnownSource(path) : await sandbox.readText(path);
+          if (text === undefined) return "Refused: qP inspection can read only uploaded originals, working source and recorded immutable snapshots. Host paths, symlinks, proc/environment and mutable execution results are not exposed. Retrieve captured execution output with read_tool_result.";
           const slice = text.slice(offset, offset + max);
           const more = offset + max < text.length ? `\n\n[... ${text.length - offset - max} more chars; total ${text.length}. Use offset=${offset + max} to continue ...]` : "";
           return `Verified file: ${path}\nReturned characters: ${offset}-${offset + slice.length} of ${text.length}\n---\n${slice}${more}`;
         }
         case "write_file": {
           const path = String(args.path || "");
+          if (questioning) {
+            const refusal = questioning.write(path, String(args.content ?? ""), args.reason);
+            if (refusal) return refusal;
+          }
           if (!path.startsWith("/work")) return "Refused: files may only be written under /work.";
           await sandbox.writeText(path, String(args.content ?? ""));
           session.noteGeneratedPath(path);
@@ -558,8 +614,59 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           const remainingMs = startTime + REPRODUCTION_BUDGET.wallClockMs - Date.now();
           if (remainingMs <= 0) return "Deadline exhausted — command was not executed.";
           const timeoutMs = Math.min(Math.max(requested, 5_000), REPRODUCTION_BUDGET.perCommandMs, remainingMs);
-          const result = await sandbox.exec(["bash", "-lc", command], { timeoutMs });
-          return fmtExec(result);
+          const argv = questioning?.executionArgv(command);
+          if (questioning && !argv) return "Refused: qP execution must name a versioned source entrypoint: python|python3|bash|sh|node|Rscript|julia materials/FILE [arguments]. Shell inline commands, -c, unrecorded source and original absolute paths cannot bypass adaptation provenance. Put justified code in a planned working file; use setup_environment for packages.";
+          const version = questioning?.snapshot(command);
+          if (version) {
+            version.argv = argv;
+            version.entrypointSha256 = version.files[`${version.snapshot}/${argv![1]}`];
+            // Previous versions remain inspectable via read_file (root SDK),
+            // but subsequent model commands can access only the current input tree.
+            for (const previous of questioning!.executions.slice(0, -1)) {
+              const isolate = await sandbox.exec(cleanQuestioningEnvironment(["chmod", "700", previous.snapshot]), { timeoutMs: 30000 });
+              if (isolate.exitCode !== 0) throw new Error("Unable to isolate prior qP execution version.");
+            }
+            for (const sha256 of Array.from(new Set(Object.values(version.files)))) {
+              if (uploadedSourceBlobs.has(sha256)) continue;
+              await sandbox.writeText(`/work/qp-blobs/${sha256}`, questioning!.readBlob(sha256)!);
+              const sealBlob = await sandbox.exec(cleanQuestioningEnvironment(["chmod", "444", `/work/qp-blobs/${sha256}`]), { timeoutMs: 30000 });
+              if (sealBlob.exitCode !== 0) throw new Error("Unable to seal qP source blob.");
+              uploadedSourceBlobs.add(sha256);
+            }
+            await sandbox.writeText("/work/qp-link-manifest.json", JSON.stringify(version.files));
+            const link = await sandbox.exec(cleanQuestioningEnvironment(["python", "-I", "-c", QUESTIONING_LINK_SNAPSHOT_SCRIPT, version.snapshot]), { timeoutMs: 30000 });
+            if (link.exitCode !== 0) throw new Error("Unable to materialize immutable qP source references.");
+            const seal = await sandbox.exec(cleanQuestioningEnvironment(["bash", "-c", `chmod -R a-w ${version.snapshot}; chmod -R a+rX ${version.snapshot}`]), { timeoutMs: 30000 });
+            if (seal.exitCode !== 0) throw new Error("Unable to seal qP execution snapshot.");
+            const output = `/work/qp-results/run-${questioning!.executions.length}`;
+            const prepare = await sandbox.exec(cleanQuestioningEnvironment(["mkdir", "-p", output]), { timeoutMs: 30000 });
+            if (prepare.exitCode !== 0) throw new Error("Unable to prepare isolated qP output directory.");
+            if (!questioning!.dependencyManifest.length) {
+              const manifest = await sandbox.exec(cleanQuestioningEnvironment(["python", "-I", "/work/qp-dependency-manifest.py"]), { timeoutMs: Math.min(15 * 60 * 1000, remainingMs) });
+              if (manifest.exitCode !== 0) throw new Error("Unable to hash immutable qP dependencies.");
+              try {
+                const parsed = JSON.parse(await sandbox.readText("/work/qp-dependencies.json"));
+                if (!Array.isArray(parsed) || parsed.length !== 3 || parsed.some(p => typeof p.sha256 !== "string")) throw new Error("Invalid manifest");
+                questioning!.setDependencyManifest(parsed);
+              } catch (error) {
+                if (error instanceof QuestioningProvenanceLimitError) throw error;
+                throw new Error("Invalid qP dependency manifest; refusing execution.");
+              }
+            }
+            version.dependencyHashes = questioning!.dependencyManifest.map((entry: any) => ({ root: entry.root, sha256: entry.sha256 }));
+            questioning!.ensureExecutionOutputCapacity();
+          }
+          const scientificTimeout = version ? Math.min(timeoutMs, startTime + REPRODUCTION_BUDGET.wallClockMs - Date.now()) : timeoutMs;
+          if (scientificTimeout <= 0) {
+            if (version) questioning!.recordExecutionOutput(version, "Deadline exhausted — command was not executed.");
+            return "Deadline exhausted — command was not executed.";
+          }
+          const result = await sandbox.exec(version
+            ? isolatedQuestioningCommand({ snapshot: version.snapshot, output: `/work/qp-results/run-${questioning!.executions.length}`, argv: argv! })
+            : ["bash", "-lc", command], { timeoutMs: scientificTimeout, ...(version ? { workdir: version.snapshot } : {}) });
+          const formatted = fmtExec(result);
+          if (version) { version.status = "executed"; questioning!.recordExecutionOutput(version, formatted); }
+          return formatted;
         }
         case "record_result": {
           return session.recordResult(args);
@@ -569,7 +676,12 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       }
     };
     const execute = async (name: string, args: Record<string, unknown>): Promise<string> => {
-      const output = await executeTool(name, args);
+      let output: string;
+      try { output = await executeTool(name, args); }
+      catch (error) {
+        if (!(error instanceof QuestioningProvenanceLimitError)) throw error;
+        output = `Refused: ${error.message}`;
+      }
       session.captureOutput(name, output);
       return output;
     };
@@ -625,7 +737,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         { role: "user", content: "x".repeat(ACTIVE_INSTRUCTION_MAX_BYTES) },
       ],
     });
-    toolLoopResult = await runToolLoop(modelConfig, effectivePrompt, userMessage, TOOLS, execute, {
+    toolLoopResult = await runToolLoop(modelConfig, effectivePrompt, userMessage, tools, execute, {
       onOutcome: event => { try { diagnostics.observe(event); } catch { /* best effort */ } },
       getArgumentRepair: () => [
         "Current accepted claim state (not an inferred correction):",
@@ -662,6 +774,12 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         }
       },
       onPrematureStop: (assistantText) => {
+        if (questioning && !questioning.assessment) return session.activeInstruction();
+        if (questioning?.finalizeBlockedClaims(Array.from(recorded.values()))) {
+          const logbookIssues = getReproductionCompletionIssues({ recordedResults: [], toolCalls: [], logbook: assistantText, budgetExhausted: false })
+            .filter(issue => issue.startsWith("the final logbook is missing"));
+          return logbookIssues.length ? `${session.activeInstruction()}\n${logbookIssues.join("; ")}` : null;
+        }
         const continuation = buildReproductionContinuation({
           recordedResults: Array.from(recorded.values()),
           toolCalls: session.toolCalls,
@@ -690,9 +808,10 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         logbook += `\n\n## System-enforced final claim states\nThese accepted states supersede any unaccepted proposed statuses in the agent logbook:\n${states}`;
       }
     }
+    const suitabilityBlocked = questioning?.finalizeBlockedClaims(recordedResults);
     const completionIssues = getReproductionCompletionIssues({
       recordedResults, toolCalls: session.toolCalls, logbook, budgetExhausted,
-    });
+    }).filter(issue => !suitabilityBlocked || issue.startsWith("the final logbook is missing"));
     if (completionIssues.length) {
       try { diagnostics.observe({ kind: "completion-validation", validationErrors: completionIssues }); } catch { /* best effort */ }
       throw new Error(`The reproduction agent stopped before completing required work (${toolLoopResult.stoppedBy}): ${completionIssues.join("; ")}.`);
@@ -721,15 +840,17 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   diagnostics.stage("judge");
   await emitEvent("reproduction-judge", `Judge (${judgeModelConfig.modelName || judgeModelConfig.provider}) grading ${recordedList.length} recorded result(s)...`);
   let judgeSummary = "";
+  let independentlyJudged = false;
   let results: ClaimVerdict[] = [];
   try {
     const judged = await runBoundedReproductionJudge({
-      config: judgeModelConfig, prompt: opts.judgePrompt, title, abstract, logbook,
+      config: judgeModelConfig, prompt: opts.judgePrompt, title, abstract, logbook, questioning,
       recordedResults: recordedList, toolCalls,
       onDiagnostic: message => emitEvent("reproduction-context", message),
     });
     judgeSummary = judged.summary;
     results = judged.results;
+    independentlyJudged = questioning ? judged.independentAssessmentAvailable === true : Boolean(judged.summary);
   } catch (err) {
     // An ungradable context must never become a self-certified reproduction.
     if (err instanceof ContextBudgetError || isContextOverflow(err) || isProviderPaymentFailure(err)) throw err;
@@ -747,6 +868,14 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   }
 
   diagnostics.stage("report");
+  if (questioning) {
+    questioning.independentAssessment = independentlyJudged ? judgeSummary : "Independent judge unavailable; no adaptation endorsement. Original-result findings remain inconclusive.";
+    results = questioning.constrainOriginalVerdicts(results);
+    if (!independentlyJudged) {
+      results = results.map(r => ({ ...r, verdict: "inconclusive" }));
+      judgeSummary = "Independent qP judge unavailable; adaptation is not endorsed and original-result verdicts remain inconclusive.";
+    }
+  }
   const overall = deriveOverallVerdict(results);
   const counts = countVerdicts(results);
   await emitEvent("reproduction-judge", `Verdicts: ${counts.verified} verified, ${counts.falsified} falsified, ${counts.toy} toy, ${counts.inconclusive} inconclusive → overall ${overall}.`);
@@ -787,10 +916,11 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   });
 
   return {
-    markdown,
+    markdown: questioning ? `# qP — Questioning Reproducer\n\n${questioning.markdown()}\n\n${markdown.replace(/This report follows the protocol[^]*?## Environment/, "Original-result verdicts below are separated from the qP suitability and adapted-analysis assessment above.\n\n## Environment")}` : markdown,
+    questioningJson: questioning?.json(),
     logbook,
-    title: buildReproductionTitle(title),
-    abstract: buildReproductionAbstract({ paperTitle: title, overall, counts, summary: judgeSummary, gpu, realExecution: true }),
+    title: questioning ? `qP Questioning Reproduction: ${title}` : buildReproductionTitle(title),
+    abstract: `${questioning ? `qP — Questioning Reproducer. Suitability: ${questioning.assessment?.decision ?? "not assessed"}. Adapted analysis is distinct from original-result reproduction. ` : ""}${buildReproductionAbstract({ paperTitle: title, overall, counts, summary: judgeSummary, gpu, realExecution: true })}`,
     overall,
     results,
     counts,

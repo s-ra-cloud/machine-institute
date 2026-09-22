@@ -30,9 +30,10 @@ import { getManagedModels, resolveManagedSelection, ManagedModelError } from "./
 import { assertReproductionProviderCredit, ProviderCredentialPreflightError, ProviderCreditPreflightError } from "./provider-credit-preflight";
 import { isProviderPaymentFailure, ProviderPaymentError } from "./llm-context";
 import { createFallbackReproductionDiagnostics, getReproductionFailureDiagnostics, type ReproductionFailureDiagnostics } from "./reproduction-diagnostics";
-import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt, verdictsToRevisions, type ClaimVerdict } from "./prompts/reproduce";
+import { getReproducerPrompt, getJudgePrompt, buildEffectiveReproducerPrompt, verdictsToRevisions, type ClaimVerdict } from "./prompts/reproduce";
 import { GPU_OPTIONS, DEFAULT_GPU, resolveGpu, isModalConfigured } from "./modal-sandbox";
 import { insertReproductionSchema, type Reproduction } from "@shared/schema";
+import { provenancePage } from "./reproduction-provenance";
 
 function managedGeneration(task: string) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -89,10 +90,10 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function publicReproduction(run: Reproduction) {
+function publicReproduction(run: Omit<Reproduction, "questioningJson"> & { questioningJson?: string | null }) {
   // Use the same projection for anonymous, member, and admin consumers. Private
   // snapshots have their own authenticated, non-cacheable endpoint.
-  const { prompt1, prompt2, promptTrace, sourceTrace, sandboxId, ...publicRun } = run;
+  const { prompt1, prompt2, promptTrace, sourceTrace, sandboxId, questioningJson, ...publicRun } = run;
   if (run.status !== "failed") return publicRun;
   // Old failures may contain raw provider errors or stale successful content.
   return {
@@ -2505,6 +2506,7 @@ I will now provide the papers.`;
         journalId: data.journalId,
         documentId: data.documentId,
         paperUsed: result.paperUsed,
+        agentId: data.agentId,
         ethicsReportId: linkedEthicsReportId,
         ethicsRequested: includeEthicsCoauthor,
         ethicsUsed: result.ethicsUsed,
@@ -2698,8 +2700,10 @@ I will now provide the papers.`;
   // platform allowlist regardless of LLM provider mode.
 
   const REPRODUCTION_ACCESS_EMAILS = ["jevans@uchicago.edu", "sacharaoult@gmail.com", "akozlo@uchicago.edu"];
-  app.get("/api/reproductions/default-prompts", (_req, res) => {
-    res.json({ reproducerPrompt: REPRODUCER_PROMPT, judgePrompt: JUDGE_PROMPT });
+  app.get("/api/reproductions/default-prompts", (req, res) => {
+    const agentId = req.query.agentId === undefined ? "P" : req.query.agentId;
+    if (agentId !== "P" && agentId !== "qP") return res.status(400).json({ error: "Invalid agentId. Expected P or qP." });
+    res.json({ reproducerPrompt: getReproducerPrompt(agentId), judgePrompt: getJudgePrompt(agentId) });
   });
 
   app.get("/api/reproductions/status", optionalAuth, async (req, res) => {
@@ -2710,10 +2714,12 @@ I will now provide the papers.`;
   // (non-failed) run per paper, and which completed.
   app.get("/api/reproductions/available-papers", async (req, res) => {
     try {
+      const agentId = req.query.agentId === undefined ? "P" : req.query.agentId;
+      if (agentId !== "P" && agentId !== "qP") return res.status(400).json({ error: "Invalid agentId. Expected P or qP." });
       const journalId = (req.query.journalId as string | undefined) || "mirror";
       const [catalogue, rows] = await Promise.all([
         fetchJournalPaperCatalogue(journalId),
-        storage.getReproducedPapersForJournal(journalId),
+        storage.getReproducedPapersForJournal(journalId, agentId),
       ]);
       if (!catalogue) return res.status(400).json({ error: "Unknown journal." });
       const locked = new Map<string, Set<string>>();
@@ -2754,13 +2760,34 @@ I will now provide the papers.`;
 
   app.get("/api/reproductions/:id", optionalAuth, async (req, res) => {
     try {
-      const run = await storage.getReproductionById(String(req.params.id));
+      const run = await storage.getPublicReproductionById(String(req.params.id));
       if (!run) return res.status(404).json({ error: "Reproduction not found" });
       res.setHeader("Cache-Control", "no-store");
       return res.json(publicReproduction(run));
     } catch (err: any) {
       console.error("Error fetching reproduction:", err);
       return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/reproductions/:id/provenance", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const run = await storage.getReproductionById(String(req.params.id));
+      if (!run) return res.status(404).json({ error: "Reproduction not found." });
+      if (run.status !== "completed" || !run.questioningJson) {
+        return res.status(404).json({ error: "No completed provenance record is available." });
+      }
+      const page = provenancePage(run.questioningJson, req.query);
+      if (!page) return res.status(404).json({ error: "Provenance blob not found." });
+      return res.json(page);
+    } catch (error) {
+      if (error instanceof SyntaxError) return res.status(422).json({ error: "Saved provenance is malformed or contains invalid content hashes." });
+      if (error instanceof Error && /pagination|Page limit|blob hash|parameter exceeds/i.test(error.message)) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error("Failed to retrieve reproduction provenance.");
+      return res.status(500).json({ error: "Could not load reproduction provenance." });
     }
   });
 
@@ -2791,6 +2818,8 @@ I will now provide the papers.`;
 
   app.post("/api/reproductions", requireAuth, managedGeneration("reproduction"), async (req, res) => {
     try {
+      const agentId = req.body.agentId === undefined ? "P" : req.body.agentId;
+      if (agentId !== "P" && agentId !== "qP") return res.status(400).json({ error: "Invalid agentId. Expected P or qP." });
       const {
         projectId, journalId, documentId, paperTitle, gpu,
         reproducerPrompt, judgePrompt,
@@ -2827,24 +2856,24 @@ I will now provide the papers.`;
         throw error;
       }
 
-      const existing = await storage.getReproducedPapersForJournal(effectiveJournalId);
+      const existing = await storage.getReproducedPapersForJournal(effectiveJournalId, agentId);
       if (existing.some(r => r.documentId === documentId && r.modelName === resolvedModel)) {
         return res.status(409).json({ error: "This paper already has a reproduction run with this model. Select a different model to reproduce it again." });
       }
 
       const parsed = insertReproductionSchema.safeParse({
         projectId: projectId || effectiveJournalId,
-        agentId: "P",
+        agentId,
         journalId: effectiveJournalId,
         documentId,
         paperTitle: paperTitle || null,
         gpu: resolveGpu(gpu),
         judgeModelProvider: judgeConfig.provider,
         judgeModelName: judgeConfig.modelName,
-        prompt1: reproducerPrompt || REPRODUCER_PROMPT,
-        prompt2: judgePrompt || JUDGE_PROMPT,
+        prompt1: reproducerPrompt || getReproducerPrompt(agentId),
+        prompt2: judgePrompt || getJudgePrompt(agentId),
         userId: user?.id || null,
-        orchestratorName: orchestratorName || buildConventionName(resolvedModel, "P"),
+        orchestratorName: orchestratorName || buildConventionName(resolvedModel, agentId),
         agentDescription: agentDescription || null,
         modelProvider: modelConfig.provider,
         modelName: resolvedModel,
@@ -2867,6 +2896,9 @@ I will now provide the papers.`;
 
   app.post("/api/reproductions/:id/retry", requireAuth, async (req, res) => {
     try {
+      if (req.body.agentId !== undefined && req.body.agentId !== "P" && req.body.agentId !== "qP") {
+        return res.status(400).json({ error: "Invalid agentId. Expected P or qP." });
+      }
       const source = await storage.getReproductionById(String(req.params.id));
       if (!source) return res.status(404).json({ error: "Reproduction not found." });
       if (!canRetryReproduction(source)) {
@@ -2940,19 +2972,19 @@ I will now provide the papers.`;
 
   async function generateReproductionBackground(
     reproductionId: string,
-    data: { projectId: string; journalId: string; documentId: string; paperTitle?: string | null; gpu: string; prompt1: string; prompt2: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
+    data: { agentId: "P" | "qP"; projectId: string; journalId: string; documentId: string; paperTitle?: string | null; gpu: string; prompt1: string; prompt2: string; userId?: string | null; orchestratorName?: string | null; agentDescription?: string | null },
     modelConfig: ModelProviderConfig,
     judgeConfig: ModelProviderConfig,
   ) {
     const initiativeDocId = INITIATIVE_DOC_IDS[data.journalId] || INITIATIVE_DOC_IDS["mirror"];
     const resolvedModel = resolveModelName(modelConfig);
-    const robotAgentName = buildConventionName(resolvedModel, "P");
+    const robotAgentName = buildConventionName(resolvedModel, data.agentId);
     const gpu = resolveGpu(data.gpu);
     const diagnosticCapture: { latest?: ReproductionFailureDiagnostics } = {};
 
     async function emit(phase: string, message: string) {
       try {
-        await storage.createResearchEvent({ source: robotAgentName, agentId: "P", phase, message });
+        await storage.createResearchEvent({ source: robotAgentName, agentId: data.agentId, phase, message });
       } catch (e) {
         console.error(`[Reproduction ${reproductionId}] Failed to emit event:`, e);
       }
@@ -2964,6 +2996,7 @@ I will now provide the papers.`;
       await storage.updateReproduction(reproductionId, { status: "generating" });
       const result = await runReproduction({
         reproductionId,
+        agentId: data.agentId,
         projectId: data.projectId,
         journalId: data.journalId,
         initiativeDocId,
@@ -2982,7 +3015,8 @@ I will now provide the papers.`;
 
       const safeHtml = sanitizeHtml(markdownToHtml(result.markdown));
       const promptTrace = JSON.stringify({
-        reproducerPrompt: buildEffectiveReproducerPrompt(data.prompt1),
+        agentId: data.agentId,
+        reproducerPrompt: buildEffectiveReproducerPrompt(data.prompt1, data.agentId),
         judgePrompt: data.prompt2,
         model: resolvedModel, provider: modelConfig.provider, providerMode: modelConfig.providerMode,
         judgeModel: judgeConfig.modelName, judgeProvider: judgeConfig.provider,
@@ -3007,6 +3041,7 @@ I will now provide the papers.`;
         reportAbstract: result.abstract,
         overallVerdict: result.overall,
         verdictsJson: JSON.stringify(result.results),
+        questioningJson: result.questioningJson ?? null,
         claimsCount: result.counts.total,
         verifiedCount: result.counts.verified,
         falsifiedCount: result.counts.falsified,
@@ -3036,7 +3071,7 @@ I will now provide the papers.`;
             initiativeSlug: data.journalId,
             orchestratorName: humanOrchestratorName,
             agentDescription: buildFsAgentDescription({
-              model: resolvedModel, agentId: "P", providerMode: modelConfig.providerMode,
+              model: resolvedModel, agentId: data.agentId, providerMode: modelConfig.providerMode,
               extra: [`Judge model: ${judgeConfig.modelName}`, `Sandbox: Modal ${gpu}`],
               userDescription: data.agentDescription,
             }),
@@ -3068,6 +3103,7 @@ I will now provide the papers.`;
         contentHtml: null,
         contentMarkdown: null,
         logbookMarkdown: null,
+        questioningJson: null,
       });
       try {
         const diagnostics = getReproductionFailureDiagnostics(err)
@@ -3103,7 +3139,7 @@ I will now provide the papers.`;
       if (!process.env.FUTURE_SCIENCE_API_KEY) return res.status(500).json({ error: "FUTURE_SCIENCE_API_KEY is not configured." });
 
       const initiativeDocId = INITIATIVE_DOC_IDS[run.journalId] || INITIATIVE_DOC_IDS["mirror"];
-      const robotAgentName = buildConventionName(run.modelName || "", "P");
+      const robotAgentName = buildConventionName(run.modelName || "", run.agentId);
       const humanOrchestratorName = run.orchestratorName && run.orchestratorName !== robotAgentName ? run.orchestratorName : undefined;
       let results: ClaimVerdict[] = [];
       try { results = JSON.parse(run.verdictsJson || "[]"); } catch {}
@@ -3125,7 +3161,7 @@ I will now provide the papers.`;
         initiativeSlug: run.journalId,
         orchestratorName: humanOrchestratorName,
         agentDescription: buildFsAgentDescription({
-          model: run.modelName || "", agentId: "P", providerMode: run.providerMode,
+          model: run.modelName || "", agentId: run.agentId, providerMode: run.providerMode,
           extra: [`Judge model: ${run.judgeModelName || run.modelName || ""}`, `Sandbox: Modal ${run.gpu}`],
           userDescription: run.agentDescription,
         }),

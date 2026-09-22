@@ -21,7 +21,11 @@ const JUDGE_TIMEOUT_MS = 600_000;
 const MAX_CONTEXT_RETRIES = 2;
 const TRANSCRIPT_RESULT_CHARS = 3_000;
 
+import type { QuestioningState } from "./reproduction-questioning";
+import { QUESTIONING_JUDGE_PROMPT } from "./prompts/reproduce";
+
 export interface RunBoundedReproductionJudgeOptions {
+  questioning?: QuestioningState;
   config: ModelProviderConfig;
   prompt: string;
   title: string;
@@ -35,6 +39,7 @@ export interface RunBoundedReproductionJudgeOptions {
 export interface BoundedReproductionJudgeResult {
   summary: string;
   results: ClaimVerdict[];
+  independentAssessmentAvailable?: boolean;
 }
 
 type InputReduction = 0 | 1 | 2 | 3 | 4;
@@ -332,6 +337,15 @@ function aggregate(
 export async function runBoundedReproductionJudge(
   opts: RunBoundedReproductionJudgeOptions,
 ): Promise<BoundedReproductionJudgeResult> {
+  if (opts.questioning) {
+    const q = opts.questioning;
+    // Source/change text is reducible like the logbook; phase and comparability
+    // obligations remain fixed even when the evidence needs partitioning.
+    opts = { ...opts,
+      prompt: `${opts.prompt}\n\n${QUESTIONING_JUDGE_PROMPT}\nqP decision: ${q.assessment?.decision ?? "not assessed"}. ${q.changes.length} changes; ${q.executions.length} executions. Evidence omitted by context reduction is NOT endorsement of adaptation.`,
+      logbook: `# qP suitability and bounded provenance excerpts\n${q.judgeContext()}\n# Agent logbook\n${opts.logbook}`,
+    };
+  }
   const started = Date.now();
   const seenIds = new Set<string>();
   const recordedResults = opts.recordedResults.filter(result => {
@@ -473,6 +487,7 @@ export async function runBoundedReproductionJudge(
 
   return {
     summary: summaries.join("\n\n"),
-    results: aggregate(recordedResults, judged),
+    results: opts.questioning ? opts.questioning.constrainOriginalVerdicts(aggregate(recordedResults, judged)) : aggregate(recordedResults, judged),
+    ...(opts.questioning ? { independentAssessmentAvailable: judged.size > 0 } : {}),
   };
 }

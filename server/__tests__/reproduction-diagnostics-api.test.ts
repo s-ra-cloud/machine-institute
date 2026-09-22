@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import type { Express } from "express";
 import type { Server } from "http";
 import {
@@ -22,7 +23,13 @@ vi.mock("../db", () => ({
 }));
 vi.mock("../storage", () => ({
   storage: {
-    getReproductionById: async (id: string) => state.runs.get(id),
+    getReproductionById: vi.fn(async (id: string) => state.runs.get(id)),
+    getPublicReproductionById: vi.fn(async (id: string) => {
+      const row = state.runs.get(id);
+      if (!row) return undefined;
+      const { questioningJson, ...publicRow } = row;
+      return publicRow;
+    }),
     getAllReproductions: async () => [...state.runs.values()],
     getReproductionsByProject: async () => [...state.runs.values()],
     createReproduction: async (data: any) => {
@@ -126,6 +133,106 @@ afterEach(() => {
 });
 
 describe("reproduction diagnostic privacy and persistence", () => {
+  const provenancePath = "/api/reproductions/:id/provenance";
+  const hashOf = (text: string) => createHash("sha256").update(text).digest("hex");
+  function saveProvenance(value: unknown) {
+    Object.assign(state.runs.get("failed"), {
+      status: "completed", agentId: "qP", contentHtml: "<p>Bounded report</p>",
+      contentMarkdown: "Bounded report", questioningJson: JSON.stringify(value),
+    });
+  }
+  async function recover(query: Record<string, string> = {}) {
+    let offset: number | null = 0;
+    const chunks: string[] = [];
+    do {
+      const result = await request("get", provenancePath, false, { ...query, offset: String(offset), limit: "16384" });
+      expect(result.status).toBe(200);
+      expect(Buffer.byteLength(JSON.stringify(result.body))).toBeLessThan(100_000);
+      expect(result.body.data.length).toBeLessThanOrEqual(16384);
+      chunks.push(result.body.data);
+      offset = result.body.nextOffset;
+    } while (offset !== null);
+    return chunks.join("");
+  }
+
+  it("omits multi-megabyte provenance from list, project list and detail payloads", async () => {
+    const { storage } = await import("../storage");
+    vi.mocked(storage.getReproductionById).mockClear();
+    vi.mocked(storage.getPublicReproductionById).mockClear();
+    saveProvenance({ originals: { "large.py": { content: "UNIQUE_EVIDENCE".repeat(150_000) } } });
+    for (const [path, query] of [
+      ["/api/reproductions", {}], ["/api/reproductions", { projectId: "project" }],
+      ["/api/reproductions/:id", {}],
+    ] as const) {
+      const result = await request("get", path, false, query);
+      expect(result.status).toBe(200);
+      expect(JSON.stringify(result.body)).not.toContain("questioningJson");
+      expect(JSON.stringify(result.body)).not.toContain("UNIQUE_EVIDENCE");
+      expect(Buffer.byteLength(JSON.stringify(result.body))).toBeLessThan(10_000);
+    }
+    expect(storage.getPublicReproductionById).toHaveBeenCalledWith("failed");
+    expect(storage.getReproductionById).not.toHaveBeenCalled();
+    const first = await request("get", provenancePath, false, { limit: "16384" });
+    expect(first.status).toBe(200);
+    expect(Buffer.byteLength(JSON.stringify(first.body))).toBeLessThan(100_000);
+    expect(storage.getReproductionById).toHaveBeenCalledWith("failed");
+  });
+
+  it("deduplicates legacy inline versions and recovers original, changed and executed contents exactly", async () => {
+    const before = "original 🧪\n".repeat(4000);
+    const after = "adapted 🧪\n".repeat(4000);
+    saveProvenance({
+      persona: "qP", originals: { "source.py": { content: before, sha256: hashOf(before) } },
+      changes: [{ path: "source.py", before, after, sha256: hashOf(after) }],
+      executions: [{ files: { "source.py": { content: after, sha256: hashOf(after) } }, output: "result" }],
+    });
+    const manifest = JSON.parse(await recover());
+    expect(manifest.record.originals["source.py"].content.$blob).toBe(hashOf(before));
+    expect(manifest.record.changes[0].before.$blob).toBe(hashOf(before));
+    expect(manifest.record.changes[0].after.$blob).toBe(hashOf(after));
+    expect(manifest.record.executions[0].files["source.py"].content.$blob).toBe(hashOf(after));
+    expect(Object.keys(manifest.blobs)).toHaveLength(3);
+    expect(await recover({ hash: hashOf(before) })).toBe(before);
+    expect(await recover({ hash: hashOf(after) })).toBe(after);
+  });
+
+  it("supports content-addressed runtime blobs and bounds even a giant manifest record", async () => {
+    const content = "\u0000".repeat(25_000);
+    const hash = hashOf(content);
+    saveProvenance({
+      schemaVersion: 2, blobs: { [hash]: content },
+      originals: { "source.py": hash },
+      changes: [{ beforeHash: hash, afterHash: hash }],
+      executions: [{ files: Object.fromEntries(Array.from({ length: 3000 }, (_, i) => [`file${i}`, hash])) }],
+    });
+    const manifest = JSON.parse(await recover());
+    expect(manifest.record.originals["source.py"]).toBe(hash);
+    expect(manifest.record.changes[0].beforeHash).toBe(hash);
+    expect(manifest.record.executions[0].files.file0).toBe(hash);
+    expect(manifest.blobs[hash].length).toBe(content.length);
+    expect(await recover({ hash })).toBe(content);
+  });
+
+  it.each([
+    { offset: "-1" }, { offset: "1.5" }, { offset: ["1"] }, { limit: "0" },
+    { limit: "16385" }, { hash: "../source.py" }, { offset: "9007199254740992" },
+  ])("rejects invalid provenance pagination %j", async query => {
+    saveProvenance({ assessment: null });
+    expect((await request("get", provenancePath, false, query)).status).toBe(400);
+  });
+
+  it("returns explicit errors for missing, failed, malformed and hash-mismatched records", async () => {
+    expect((await request("get", provenancePath)).status).toBe(404);
+    saveProvenance({ blobs: { [hashOf("right")]: "wrong" } });
+    expect((await request("get", provenancePath)).status).toBe(422);
+    state.runs.get("failed").questioningJson = "{bad";
+    expect((await request("get", provenancePath)).status).toBe(422);
+    saveProvenance({});
+    expect((await request("get", provenancePath, false, { hash: "0".repeat(64) })).status).toBe(404);
+    state.runs.clear();
+    expect((await request("get", provenancePath)).status).toBe(404);
+  });
+
   it("suppresses only diagnostic response bodies in the general HTTP log", () => {
     const source = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
     const guard = source.match(/if \(!((?:\/\^).*?)\.test\(path\)\) capturedJsonResponse = bodyJson;/);

@@ -40,6 +40,8 @@ export interface CreateSandboxOptions {
   gpu: GpuType;
   timeoutMs: number;
   env?: Record<string, string>;
+  /** qP never accepts inherited/custom image credentials or caller secrets. */
+  questioning?: boolean;
 }
 
 function truncateCapture(s: string): string {
@@ -66,14 +68,14 @@ export class ReproductionSandbox {
       tokenSecret: process.env.MODAL_TOKEN_SECRET,
     });
     const app = await modal.apps.fromName(APP_NAME, { createIfMissing: true });
-    const baseImage = process.env.MODAL_SANDBOX_IMAGE || DEFAULT_IMAGE;
+    const baseImage = opts.questioning ? DEFAULT_IMAGE : process.env.MODAL_SANDBOX_IMAGE || DEFAULT_IMAGE;
     const image = modal.images.fromRegistry(baseImage).dockerfileCommands([
-      "RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates build-essential && rm -rf /var/lib/apt/lists/*",
+      `RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates build-essential${opts.questioning ? " bubblewrap" : ""} && rm -rf /var/lib/apt/lists/*`,
       `RUN pip install --no-cache-dir ${PIP_PACKAGES.join(" ")}`,
       "RUN mkdir -p /work/materials /work/results /work/outputs",
       "WORKDIR /work",
     ]);
-    const secrets = opts.env && Object.keys(opts.env).length > 0
+    const secrets = !opts.questioning && opts.env && Object.keys(opts.env).length > 0
       ? [await modal.secrets.fromObject(opts.env)]
       : [];
     const sb = await modal.sandboxes.create(app, image, {
