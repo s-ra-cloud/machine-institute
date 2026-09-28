@@ -38,7 +38,7 @@ import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt } from 
 const config: ModelProviderConfig = {
   providerMode: "platform",
   provider: "openai",
-  modelName: "gpt-4o",
+  modelName: "openai/gpt-4o",
 };
 
 const logbook = [
@@ -209,9 +209,9 @@ beforeEach(() => {
   createSandbox.mockReset();
   loadPaperContext.mockReset();
   fetchContributionMaterials.mockReset();
-  process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
-  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
-  process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-key");
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+  vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-4o");
   setupContext();
 });
 

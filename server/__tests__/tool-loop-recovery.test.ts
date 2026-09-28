@@ -13,11 +13,12 @@ import { runToolLoop, type ModelProviderConfig } from "../model-service";
 const config: ModelProviderConfig = {
   providerMode: "platform",
   provider: "openai",
-  modelName: "gpt-4o",
+  modelName: "openai/gpt-4o",
 };
 
 const completion = (content: string | null, toolCalls?: unknown[]) => ({
   choices: [{
+    finish_reason: toolCalls?.length ? "tool_calls" : "stop",
     message: {
       content,
       ...(toolCalls ? { tool_calls: toolCalls } : {}),
@@ -28,9 +29,9 @@ const completion = (content: string | null, toolCalls?: unknown[]) => ({
 describe("Tool loop — premature-stop recovery", () => {
   beforeEach(() => {
     createCompletion.mockReset();
-    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
-    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
-    process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-key");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-4o");
   });
 
   it("adds the continuation after a premature stop and re-enables tools", async () => {

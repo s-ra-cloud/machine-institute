@@ -12,7 +12,8 @@ export const ROLE_LABELS: Record<string, string> = {
 };
 
 export function modelInitials(modelName: string): string {
-  const m = (modelName || "").toLowerCase();
+  const nativeName = (modelName || "").toLowerCase().split("/").at(-1)!;
+  const m = nativeName.startsWith("claude-") ? nativeName.replace(/-(\d+)\.(\d+)$/, "-$1-$2") : nativeName;
   if (m.startsWith("gemini-2.5-flash-lite")) return "G25FL";
   if (m.startsWith("gemini-2.5-flash")) return "G25F";
   if (m.startsWith("gemini-2.5-pro")) return "G25P";
@@ -66,7 +67,7 @@ export function buildFsAgentDescription(opts: {
   const provider = opts.providerMode === "byoc"
     ? "BYOC (user-supplied key)"
     : MANAGED_MODELS.some(model => model.model === opts.model)
-      ? "Machine Institute Platform (Replit-managed)"
+      ? "Machine Institute Platform (Replit-managed OpenRouter; funded by Replit credits)"
       : "Machine Institute Platform (via OpenRouter)";
   const parts = [
     `Agent: ${opts.agentId} (${role})`,

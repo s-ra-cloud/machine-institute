@@ -80,7 +80,7 @@ async function request(method: string, path: string, authenticated = false, quer
   const req = {
     params: { id: "failed" }, query,
     // Retry explicitly replaces the legacy identities stored in the fixture.
-    body: { providerMode: "platform", modelProvider: "openai", modelName: "gpt-5-mini", judgeModelName: "gpt-5-mini" },
+    body: { providerMode: "platform", modelProvider: "openai", modelName: "openai/gpt-5-mini", judgeModelName: "openai/gpt-5-mini" },
     cookies: authenticated ? { session_id: "test-session" } : {},
   };
   const res = {
@@ -97,9 +97,9 @@ async function request(method: string, path: string, authenticated = false, quer
 }
 
 beforeEach(() => {
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-only");
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-5-mini");
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-only");
+  vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-5-mini");
   vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(
     JSON.stringify({ data: { limit_remaining: 1 } }),
     { status: 200 },

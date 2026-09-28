@@ -18,7 +18,7 @@ export async function assertReproductionProviderCredit(
   onWarning?: (message: string) => void,
 ): Promise<ProviderCreditPreflightOutcome> {
   resolveManagedSelection(config);
-  try { onWarning?.("Managed model setup is verified; Replit credit availability is checked when the provider request executes."); } catch { /* observability only */ }
+  try { onWarning?.("Replit-managed OpenRouter is configured; model and Replit credit availability are checked when the provider request executes."); } catch { /* observability only */ }
   return "unknown";
 }
 export async function assertReproductionRuntimeProviderCredits(

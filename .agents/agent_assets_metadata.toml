@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "GhtrM1saz6EmQTe6D81WZ"
+uri = "file://attached_assets/lab-generation-config.json"
+type = "unspecified"
+title = "Lab generation configuration"
+description = "Full /api/generation/config response after restart. All 15 catalogue models are permitted; execution is disabled because the managed OpenRouter connection is not provisioned in this workspace."
+logical_id = "b0148759-fd6c-42e6-b328-6daf3809c35a"
+content_hash = "sha256:edf065f52e9a938f9aa56dc3e534ef0c227eb55bce719e4747bcfef8e77a7ffc"
+size = 6690
+mtime_ms = 1790618431464
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:7fca964b-5ad6-43c0-92eb-ec6b89d6f2b8/b0148759-fd6c-42e6-b328-6daf3809c35a/8a49f0ba-ed3f-4bcd-af67-6d93e1263138"
+storage_version_token = "1790618441665914"
+content_type = "application/octet-stream"

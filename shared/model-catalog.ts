@@ -20,7 +20,7 @@ export interface AvailableManagedModel extends ManagedModel {
 }
 // Standard, uncached text-token rates in USD; not a quote for reasoning, cached
 // input, long-context surcharges or future price changes. Review centrally.
-export const MANAGED_MODELS: ManagedModel[] = [
+const NATIVE_MODELS: ManagedModel[] = [
   { provider: "openai", model: "gpt-4.1", label: "GPT-4.1", contextWindow: 1047576, maxOutputTokens: 32768, tools: true, inputPricePerMillion: 2, outputPricePerMillion: 8, pricingSource: "https://openai.com/api/pricing/" },
   { provider: "openai", model: "gpt-4.1-nano", label: "GPT-4.1 Nano", contextWindow: 1047576, maxOutputTokens: 32768, tools: true, inputPricePerMillion: .1, outputPricePerMillion: .4, pricingSource: "https://openai.com/api/pricing/" },
   { provider: "openai", model: "gpt-4o-mini", label: "GPT-4o Mini", contextWindow: 128000, maxOutputTokens: 16384, tools: true, inputPricePerMillion: .15, outputPricePerMillion: .6, pricingSource: "https://openai.com/api/pricing/" },
@@ -37,6 +37,11 @@ export const MANAGED_MODELS: ManagedModel[] = [
   { provider: "google", model: "gemini-2.5-flash", label: "Gemini 2.5 Flash", contextWindow: 1048576, maxOutputTokens: 65536, tools: true, inputPricePerMillion: .3, outputPricePerMillion: 2.5, pricingSource: "https://ai.google.dev/gemini-api/docs/pricing" },
   { provider: "google", model: "gemini-2.5-pro", label: "Gemini 2.5 Pro", contextWindow: 1048576, maxOutputTokens: 65536, tools: true, inputPricePerMillion: 1.25, outputPricePerMillion: 10, pricingSource: "https://ai.google.dev/gemini-api/docs/pricing" },
 ];
+/** Exact OpenRouter slugs; provider remains the native scientific model identity. */
+export const MANAGED_MODELS: ManagedModel[] = NATIVE_MODELS.map(model => ({
+  ...model,
+  model: `${model.provider}/${model.provider === "anthropic" ? model.model.replace(/-(\d+)-(\d+)$/, "-$1.$2") : model.model}`,
+}));
 export interface TaskCostOptions {
   batchCount?: number;
   includeEthics?: boolean;
@@ -66,7 +71,7 @@ export function estimateTaskCost(modelName: string, type: GenerationCostType, op
   const price = (m: ManagedModel, input: number, output: number) => {
     // Pro's documented long-context tier starts above 200k input per request.
     // Aggregated reproduction tokens are many requests, not one long prompt.
-    const longContext = m.model === "gemini-2.5-pro" && type === "literature-review" && input > 200000;
+    const longContext = m.model === "google/gemini-2.5-pro" && type === "literature-review" && input > 200000;
     return (input * (m.inputPricePerMillion ?? 0) * (longContext ? 2 : 1)
       + output * (m.outputPricePerMillion ?? 0) * (longContext ? 1.5 : 1)) / 1e6;
   };

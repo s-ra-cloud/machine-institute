@@ -18,7 +18,7 @@ const source = "print('measured score = 0.91')";
 const logbook = "## Claims\nScore is 0.91.\n## Reproduction Log\nEvidence is in the tool trace.\n## Discrepancies\nAdapted outputs are separate.\n## Limitations\nLimited to shipped materials.";
 const complete = (content: string | null, tool_calls?: unknown[]) => ({ choices: [{ finish_reason: tool_calls ? "tool_calls" : "stop", message: { content, ...(tool_calls ? { tool_calls } : {}) } }] });
 const tool = (name: string, args: Record<string, unknown>) => ({ id: Math.random().toString(), type: "function", function: { name, arguments: JSON.stringify(args) } });
-const config = { providerMode: "platform" as const, provider: "openai", modelName: "gpt-4o" };
+const config = { providerMode: "platform" as const, provider: "openai", modelName: "openai/gpt-4o" };
 const options = () => ({
   agentId: "qP" as const, reproductionId: "q", projectId: "p", journalId: "j", initiativeDocId: "i", initiativeSlug: "i", journalDisplayName: "Journal", documentId: "paper",
   reproducerPrompt: getReproducerPrompt("qP"), judgePrompt: getJudgePrompt("qP"), modelConfig: config, judgeModelConfig: config, gpu: "T4" as const, emitEvent: vi.fn(async () => {}),
@@ -32,9 +32,9 @@ function sandbox() {
 }
 beforeEach(() => {
   vi.clearAllMocks(); mock.complete.mockReset();
-  process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test";
-  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
-  process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test");
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+  vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-4o");
   mock.context.mockResolvedValue({ title: "Mean estimation", authors: "Authors", date: "2026", abstract: "Mean estimation", url: "https://example.test", fullText: paper, fsAbstracts: [] });
   mock.materials.mockResolvedValue({ files: [{ name: "analyze.py", source: "additional", kind: "text", text: source }], paperMarkdown: paper, textFileCount: 1, binaryFileCount: 0 });
 });

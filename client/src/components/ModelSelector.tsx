@@ -189,7 +189,7 @@ export function ModelSelector({
           {hasPlatformAccess ? <Cpu className="w-3.5 h-3.5 text-primary" /> : <Lock className="w-3.5 h-3.5" />}
           <span className="text-xs font-mono uppercase tracking-widest">{label}</span>
         </div>
-        <span className="text-[9px] font-mono text-muted-foreground/50">Managed by Replit</span>
+        <span className="text-[9px] font-mono text-muted-foreground/50">Replit-managed OpenRouter · funded by Replit credits</span>
       </div>
 
       <div className={compact ? "p-3" : "p-5"}>

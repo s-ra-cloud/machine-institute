@@ -116,11 +116,11 @@ beforeEach(() => {
   state.editorialUpdates.mockClear();
   state.editorialEvents.mockClear();
   vi.stubEnv("OPENROUTER_API_KEY", "platform-route-test-key");
-  for (const provider of ["OPENAI", "ANTHROPIC", "GEMINI"]) {
+  for (const provider of ["OPENROUTER"]) {
     vi.stubEnv(`AI_INTEGRATIONS_${provider}_BASE_URL`, "");
     vi.stubEnv(`AI_INTEGRATIONS_${provider}_API_KEY`, "");
-    vi.stubEnv(`AI_INTEGRATIONS_${provider}_MODELS`, "");
   }
+  vi.stubEnv("LAB_ALLOWED_MODELS", undefined);
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
     JSON.stringify({ data: { limit_remaining: 0 } }),
     { status: 200 },
@@ -155,13 +155,12 @@ describe("managed generation route guards (no provider calls)", () => {
   });
 
   it.each([undefined, "P", "qP"])("selects persisted defaults for persona %s", async agentId => {
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-only");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-5-mini");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-only");
     state.create.mockResolvedValue(null);
     const result = await post("/api/reproductions", {
-      documentId: "paper", agentId, modelProvider: "openai", modelName: "gpt-5-mini",
-      judgeModelName: "gpt-5-mini",
+      documentId: "paper", agentId, modelProvider: "openai", modelName: "openai/gpt-5-mini",
+      judgeModelName: "openai/gpt-5-mini",
     });
     expect(result.status).toBe(409);
     const { getReproducerPrompt, getJudgePrompt } = await import("../prompts/reproduce");
@@ -175,12 +174,11 @@ describe("managed generation route guards (no provider calls)", () => {
   });
 
   it.each([null, "", "qp", "invalid", 1, ["P"]])("rejects invalid persona %j before insert", async agentId => {
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-only");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-5-mini");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-only");
     const result = await post("/api/reproductions", {
-      documentId: "paper", agentId, modelProvider: "openai", modelName: "gpt-5-mini",
-      judgeModelName: "gpt-5-mini",
+      documentId: "paper", agentId, modelProvider: "openai", modelName: "openai/gpt-5-mini",
+      judgeModelName: "openai/gpt-5-mini",
     });
     expect(result.status).toBe(400);
     expect(result.body.error).toContain("agentId");
@@ -188,15 +186,14 @@ describe("managed generation route guards (no provider calls)", () => {
   });
 
   it("retries qP with its saved persona and prompts despite request overrides", async () => {
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-only");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-5-mini");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-only");
     state.create.mockResolvedValue(null);
     state.source.agentId = "qP";
     try {
       const result = await post("/api/reproductions/:id/retry", {
         agentId: "P", reproducerPrompt: "replacement", judgePrompt: "replacement",
-        modelProvider: "openai", modelName: "gpt-5-mini", judgeModelName: "gpt-5-mini",
+        modelProvider: "openai", modelName: "openai/gpt-5-mini", judgeModelName: "openai/gpt-5-mini",
       });
       expect(result.status).toBe(409);
       expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -218,14 +215,13 @@ describe("managed generation route guards (no provider calls)", () => {
 
   it.each(["length", "content_filter", "refusal"])(
     "does not complete or publish a background editorial after incomplete OpenAI output (%s)", async reason => {
-      vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
-      vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "synthetic");
-      vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-4o");
+      vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+      vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "synthetic");
       state.completion.mockResolvedValue({ choices: [{
         finish_reason: reason === "refusal" ? "stop" : reason,
         message: { content: "UNACCEPTED_PARTIAL_EDITORIAL", ...(reason === "refusal" ? { refusal: "refused" } : {}) },
       }] });
-      const result = await post("/api/editorials/generate", { modelProvider: "openai", modelName: "gpt-4o", providerMode: "platform" });
+      const result = await post("/api/editorials/generate", { modelProvider: "openai", modelName: "openai/gpt-4o", providerMode: "platform" });
       expect(result.status).toBe(201);
       await vi.waitFor(() => expect(state.editorialUpdates).toHaveBeenCalledWith("editorial-test", expect.objectContaining({ status: "failed" })));
       expect(state.completion).toHaveBeenCalledTimes(1);
@@ -266,7 +262,7 @@ describe("managed generation route guards (no provider calls)", () => {
       [{}, 400],
       [{ providerMode: "byoc", modelProvider: "openai", modelName: "gpt-5-mini" }, 400],
       [{ modelProvider: "openrouter", modelName: "openai/gpt-4o" }, 400],
-      [{ modelProvider: "openai", modelName: "gpt-5-mini", judgeModelName: "gpt-5-mini" }, 503],
+      [{ modelProvider: "openai", modelName: "openai/gpt-5-mini", judgeModelName: "openai/gpt-5-mini" }, 503],
     ])(`blocks ${path} before work: %j`, async (body, status) => {
       const result = await post(path, body as Record<string, unknown>);
       expect(result.status).toBe(status);
@@ -277,12 +273,11 @@ describe("managed generation route guards (no provider calls)", () => {
   }
 
   it("requires an explicit supported judge replacement for a legacy retry", async () => {
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-only");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-5-mini");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-only");
     const original = { ...state.source };
     const result = await post("/api/reproductions/:id/retry", {
-      providerMode: "platform", modelProvider: "openai", modelName: "gpt-5-mini",
+      providerMode: "platform", modelProvider: "openai", modelName: "openai/gpt-5-mini",
     });
     expect(result.status).toBe(400);
     expect(state.source).toEqual(original);
@@ -296,24 +291,20 @@ describe("managed generation route guards (no provider calls)", () => {
   });
 
   it("copies prompts and derives the replacement judge provider without changing history", async () => {
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test-only");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-5-mini");
-    vi.stubEnv("AI_INTEGRATIONS_GEMINI_BASE_URL", "https://managed.example.test");
-    vi.stubEnv("AI_INTEGRATIONS_GEMINI_API_KEY", "test-only");
-    vi.stubEnv("AI_INTEGRATIONS_GEMINI_MODELS", "gemini-2.5-flash");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-only");
     const original = { ...state.source };
     // Simulate a reservation conflict, capturing the attempted insert without
     // launching a background runner or requiring network access.
     state.create.mockResolvedValue(null);
     const result = await post("/api/reproductions/:id/retry", {
-      providerMode: "platform", modelProvider: "openai", modelName: "gpt-5-mini",
-      judgeModelProvider: "openrouter", judgeModelName: "gemini-2.5-flash",
+      providerMode: "platform", modelProvider: "openai", modelName: "openai/gpt-5-mini",
+      judgeModelProvider: "openrouter", judgeModelName: "google/gemini-2.5-flash",
     });
     expect(result.status).toBe(409);
     expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
-      modelProvider: "openai", modelName: "gpt-5-mini", providerMode: "platform",
-      judgeModelProvider: "google", judgeModelName: "gemini-2.5-flash",
+      modelProvider: "openai", modelName: "openai/gpt-5-mini", providerMode: "platform",
+      judgeModelProvider: "google", judgeModelName: "google/gemini-2.5-flash",
       prompt1: original.prompt1, prompt2: original.prompt2, userId: original.userId,
     }));
     expect(state.source).toEqual(original);

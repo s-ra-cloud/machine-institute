@@ -22,7 +22,7 @@ import { ReproductionSession } from "../reproduction-session";
 const config = {
   providerMode: "platform" as const,
   provider: "openai",
-  modelName: "gpt-4o",
+  modelName: "openai/gpt-4o",
 };
 const call = {
   id: "call-1",
@@ -33,19 +33,16 @@ const call = {
 describe("tool-loop context protection", () => {
   beforeEach(() => {
     createMock.mockReset();
-    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
-    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
-    process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
-    process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY = "test-key";
-    process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL = "https://managed.example.test";
-    process.env.AI_INTEGRATIONS_ANTHROPIC_MODELS = "claude-sonnet-4-6";
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-key");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-4o,anthropic/claude-sonnet-4.6");
   });
 
   it("retries a context rejection in place without rerunning the tool", async () => {
     createMock
       .mockRejectedValueOnce(new Error("maximum context length is 32768 tokens"))
-      .mockResolvedValueOnce({ choices: [{ message: { content: null, tool_calls: [call] } }] })
-      .mockResolvedValueOnce({ choices: [{ message: { content: "done", tool_calls: [] } }] });
+      .mockResolvedValueOnce({ choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [call] } }] })
+      .mockResolvedValueOnce({ choices: [{ finish_reason: "stop", message: { content: "done", tool_calls: [] } }] });
     const execute = vi.fn(async () => "exit code 0");
 
     const result = await runToolLoop(
@@ -139,9 +136,9 @@ describe("tool-loop context protection", () => {
     const draft = "UNFINISHED_DRAFT ".repeat(4000);
     const repair = "Continue repair of the pending claims. ".repeat(1500);
     createMock
-      .mockResolvedValueOnce({ choices: [{ message: { content: draft } }] })
-      .mockResolvedValueOnce({ choices: [{ message: { content: null, tool_calls: [call] } }] })
-      .mockResolvedValueOnce({ choices: [{ message: { content: "Honest resource-stop logbook." } }] });
+      .mockResolvedValueOnce({ choices: [{ finish_reason: "stop", message: { content: draft } }] })
+      .mockResolvedValueOnce({ choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [call] } }] })
+      .mockResolvedValueOnce({ choices: [{ finish_reason: "stop", message: { content: "Honest resource-stop logbook." } }] });
     const execute = vi.fn(async () => "exit code 0\nMEASURED=1");
     const result = await runToolLoop(config, "IMMUTABLE CUSTOM SCIENTIFIC INSTRUCTIONS", "paper", [
       { name: "run_command", description: "run", parameters: { type: "object" } },
@@ -173,7 +170,7 @@ describe("tool-loop context protection", () => {
   it("keeps resource-stop fallback when local fitting fails and reports only sizes", async () => {
     let state = "small initial state";
     const diagnostic = vi.fn();
-    createMock.mockResolvedValueOnce({ choices: [{ message: { content: null, tool_calls: [call] } }] });
+    createMock.mockResolvedValueOnce({ choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [call] } }] });
     const execute = vi.fn(async () => {
       state = "PRIVATE_GENERATED_STATE ".repeat(4000);
       return "exit code 0";
@@ -221,18 +218,13 @@ describe("tool-loop context protection", () => {
   });
 
   it("recognizes an Anthropic 200 error body without exposing its prompt", async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        type: "error",
-        error: { type: "invalid_request_error", message: "prompt is too long PRIVATE_PROMPT_MARKER max_num_tokens (32768)" },
-      }),
-    }));
-    vi.stubGlobal("fetch", fetchMock);
+    createMock.mockResolvedValueOnce({
+      error: { type: "invalid_request_error", message: "prompt is too long PRIVATE_PROMPT_MARKER max_num_tokens (32768)" },
+    });
     let thrown: unknown;
     try {
       await generateWithConfig(
-        { providerMode: "platform", provider: "anthropic", modelName: "claude-sonnet-4-6" },
+        { providerMode: "platform", provider: "anthropic", modelName: "anthropic/claude-sonnet-4.6" },
         "system",
         "PRIVATE_USER_PROMPT",
         { contextRequest: true, timeoutMs: 50 },

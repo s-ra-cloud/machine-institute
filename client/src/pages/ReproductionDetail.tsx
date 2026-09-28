@@ -133,18 +133,18 @@ export function providerPaymentGuidance(diagnostics: unknown): string | null {
   const isTransient = events.some(event => event && typeof event === "object"
     && (event as { providerLimitSource?: unknown }).providerLimitSource === "openrouter_in_flight_budget");
   if (isTransient) {
-    return "OpenRouter temporarily reached its in-flight spending limit. Wait for that temporary hold to clear before retrying.";
+    return "The model gateway temporarily reached its in-flight spending limit. Wait for that temporary hold to clear before retrying. New Lab runs use Replit-managed OpenRouter, funded by Replit credits.";
   }
   const isKeyCap = events.some(event => event && typeof event === "object"
     && (event as { providerLimitSource?: unknown }).providerLimitSource === "openrouter_key_limit");
   const legacyOpenRouter = isTransient || isKeyCap || events.some(event => event && typeof event === "object"
     && String((event as { providerLimitSource?: unknown }).providerLimitSource || "").startsWith("openrouter_"));
   if (!legacyOpenRouter) {
-    return "The Replit-managed model provider could not authorize this request. Check the managed integration and its billing status, then retry with an enabled model.";
+    return "Replit-managed OpenRouter could not authorize this request. Ask the deployment administrator to check the managed integration, Replit credits and spending limits, then retry with an enabled model.";
   }
   return isKeyCap
-    ? "The OpenRouter API key reached its spending cap. Raise or reset that key limit before retrying; this is managed in OpenRouter, not through a Replit subscription or Replit platform support."
-    : "OpenRouter could not fund the model request. Add OpenRouter credits or check the API key's spending limit before retrying; this is managed in OpenRouter, not through a Replit subscription or Replit platform support.";
+    ? "The recorded gateway request reached a spending cap. Historical runs retain their original billing diagnostics. New retries use Replit-managed OpenRouter: ask the administrator to check Replit credits and managed integration limits, not personal OpenRouter keys."
+    : "The recorded gateway request could not be funded. Historical runs retain their original billing diagnostics. New retries use Replit-managed OpenRouter funded by Replit credits, not personal OpenRouter keys.";
 }
 
 function FailureDiagnostics({ id, adminId }: { id: string; adminId: string }) {

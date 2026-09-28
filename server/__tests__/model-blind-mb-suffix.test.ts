@@ -168,12 +168,9 @@ function post(path: string, body: any) {
 }
 
 beforeAll(async () => {
-  process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
-  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
-  process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-5";
-  process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY = "test-key";
-  process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL = "https://managed.example.test";
-  process.env.AI_INTEGRATIONS_ANTHROPIC_MODELS = "claude-sonnet-4-5";
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-key");
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+  vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-5,anthropic/claude-sonnet-4.5");
   process.env.FUTURE_SCIENCE_API_KEY = process.env.FUTURE_SCIENCE_API_KEY || "test-fs-key";
   const express = (await import("express")).default;
   const { createServer } = await import("http");
@@ -213,7 +210,7 @@ describe("MB suffix — single review path", () => {
   it("appends MB to the evaluator code when modelBlind=true", async () => {
     const res = await post("/api/peer-reviews", {
       persona: "bR",
-      modelName: "claude-sonnet-4-5",
+      modelName: "anthropic/claude-sonnet-4.5",
       documentId: "doc-1",
       modelBlind: true,
     });
@@ -226,7 +223,7 @@ describe("MB suffix — single review path", () => {
   it("does NOT append MB when modelBlind is off", async () => {
     const res = await post("/api/peer-reviews", {
       persona: "bR",
-      modelName: "claude-sonnet-4-5",
+      modelName: "anthropic/claude-sonnet-4.5",
       documentId: "doc-2",
     });
     expect(res.status).toBe(201);
@@ -244,7 +241,7 @@ describe("MB suffix — batch path", () => {
     fsAbstracts = [paper(1), paper(2), paper(3)];
     const res = await post("/api/peer-reviews/batch", {
       persona: "aR",
-      modelName: "gpt-5",
+      modelName: "openai/gpt-5",
       count: 3,
       modelBlind: true,
     });
@@ -264,7 +261,7 @@ describe("MB suffix — batch path", () => {
     fsAbstracts = [paper(1), paper(2)];
     const res = await post("/api/peer-reviews/batch", {
       persona: "aR",
-      modelName: "gpt-5",
+      modelName: "openai/gpt-5",
       count: 2,
     });
     expect(res.status).toBe(201);
@@ -281,7 +278,7 @@ describe("MB suffix — custom orchestrator name", () => {
   it("appends MB to a custom orchestrator name on the single path", async () => {
     const res = await post("/api/peer-reviews", {
       persona: "bR",
-      modelName: "claude-sonnet-4-5",
+      modelName: "anthropic/claude-sonnet-4.5",
       documentId: "doc-1",
       modelBlind: true,
       orchestratorName: "Custom Orchestrator X1",
@@ -295,7 +292,7 @@ describe("MB suffix — custom orchestrator name", () => {
     fsAbstracts = [paper(1), paper(2)];
     const res = await post("/api/peer-reviews/batch", {
       persona: "aR",
-      modelName: "gpt-5",
+      modelName: "openai/gpt-5",
       count: 2,
       modelBlind: true,
       orchestratorName: "Custom BatchRunner MB",
@@ -310,7 +307,7 @@ describe("MB suffix — custom orchestrator name", () => {
   it("leaves a custom orchestrator name untouched when modelBlind is off", async () => {
     const res = await post("/api/peer-reviews", {
       persona: "bR",
-      modelName: "claude-sonnet-4-5",
+      modelName: "anthropic/claude-sonnet-4.5",
       documentId: "doc-3",
       orchestratorName: "Custom Orchestrator X1",
     });

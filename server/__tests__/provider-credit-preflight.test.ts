@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertReproductionProviderCredit, assertReproductionRuntimeProviderCredits } from "../provider-credit-preflight";
-const config = { providerMode: "platform" as const, provider: "openai", modelName: "gpt-4o" };
+const config = { providerMode: "platform" as const, provider: "openai", modelName: "openai/gpt-4o" };
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe("managed setup preflight", () => {
   it("rejects legacy selections without querying OpenRouter", async () => {
@@ -9,13 +9,13 @@ describe("managed setup preflight", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it("rejects unavailable managed setup before material/GPU work", async () => {
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "");
     await expect(assertReproductionProviderCredit(config)).rejects.toMatchObject({ status: 503 });
   });
   it("reports unknown funding, never fabricated available funds", async () => {
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "test");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
-    vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-4o");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-4o");
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     await expect(assertReproductionProviderCredit(config)).resolves.toBe("unknown");
     await expect(assertReproductionRuntimeProviderCredits([config, { ...config, modelName: "missing" }])).rejects.toThrow();

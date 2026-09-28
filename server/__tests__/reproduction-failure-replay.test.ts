@@ -59,7 +59,7 @@ const call = (id: string, name: string, args: Record<string, unknown>) =>
   rawCall(id, name, JSON.stringify(args));
 
 function options() {
-  const config = { providerMode: "platform" as const, provider: "openai", modelName: "gpt-4o" };
+  const config = { providerMode: "platform" as const, provider: "openai", modelName: "openai/gpt-4o" };
   return {
     reproductionId: "replay-1", projectId: "project-1", journalId: "journal-1",
     initiativeDocId: "initiative-1", initiativeSlug: "initiative",
@@ -85,9 +85,9 @@ function sandbox() {
 }
 
 beforeEach(() => {
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_API_KEY", "synthetic-test-key");
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_BASE_URL", "https://managed.example.test");
-  vi.stubEnv("AI_INTEGRATIONS_OPENAI_MODELS", "gpt-4o");
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "synthetic-test-key");
+  vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+  vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-4o");
   createCompletion.mockReset();
   createSandbox.mockReset();
   loadPaperContext.mockResolvedValue({

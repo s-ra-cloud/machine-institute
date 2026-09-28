@@ -3118,12 +3118,9 @@ I will now provide the papers.`;
         const transient = err instanceof ProviderPaymentError
           && err.limitSource === "openrouter_in_flight_budget"
           && err.paymentReason === "in_flight_budget_exhausted";
-        const owner = modelConfig.providerMode === "byoc"
-          ? "your OpenRouter account"
-          : "the deployment's OpenRouter account";
         await emit("failure", transient
-          ? `Reproduction stopped because ${owner} temporarily reached its in-flight spending limit. No report was completed; retry after the temporary limit clears.`
-          : `Reproduction stopped because ${owner} could not fund the model request. No report was completed; add OpenRouter credits or check the key's spending limit before retrying. OpenRouter credits are separate from a Replit subscription.`);
+          ? "Reproduction stopped because Replit-managed OpenRouter temporarily reached its in-flight spending limit. No report was completed; retry after the temporary limit clears."
+          : "Reproduction stopped because Replit-managed OpenRouter could not fund the model request. No report was completed; ask the deployment administrator to check Replit credits and managed integration limits before retrying. Personal OpenRouter keys are not used for new Lab runs.");
       } else {
         await emit("failure", "Reproduction failed. No report was completed; institute members can retry the run.");
       }

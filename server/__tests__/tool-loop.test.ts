@@ -16,20 +16,20 @@ const tools: ToolSpec[] = [
 ];
 
 function assistantToolCall(id: string, text: string) {
-  return { choices: [{ message: { content: null, tool_calls: [{ id, type: "function", function: { name: "echo", arguments: JSON.stringify({ text }) } }] } }] };
+  return { choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [{ id, type: "function", function: { name: "echo", arguments: JSON.stringify({ text }) } }] } }] };
 }
 function assistantFinal(content: string) {
-  return { choices: [{ message: { content, tool_calls: [] } }] };
+  return { choices: [{ finish_reason: "stop", message: { content, tool_calls: [] } }] };
 }
 
-const platform = { providerMode: "platform" as const, provider: "openai", modelName: "gpt-4o" };
+const platform = { providerMode: "platform" as const, provider: "openai", modelName: "openai/gpt-4o" };
 
 describe("runToolLoop", () => {
   beforeEach(() => {
     createMock.mockReset();
-    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
-    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://managed.example.test";
-    process.env.AI_INTEGRATIONS_OPENAI_MODELS = "gpt-4o";
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-key");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+    vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-4o");
   });
 
   it("executes tool calls and returns the final assistant message", async () => {
