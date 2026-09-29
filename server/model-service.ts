@@ -291,7 +291,7 @@ export interface ToolLoopOptions {
   numberToolResults?: boolean;
   onToolCall?: (record: ToolCallRecord) => Promise<void> | void;
   /** Task-specific guard applied to the model-visible (already truncated) tool result. */
-  transformToolResult?: (name: string, result: string) => string;
+  transformToolResult?: (name: string, result: string, callIndex: number) => string;
   onRound?: (round: number, assistantText: string | null) => Promise<void> | void;
   /**
    * Return a user message when a tool-free response is not yet a valid finish.
@@ -308,7 +308,7 @@ export interface ToolLoopOptions {
    */
   getRecoveryProgress?: () => number;
   /** Opt-in early stop when a task-specific guard detects repeated nonprogress. */
-  getStallReason?: () => string | null;
+  getStallReason?: (nextToolName?: string) => string | null;
   /** Replacement text used when older tool output is compacted. */
   elidedToolOutputMessage?: string;
   /** Return an empty result instead of throwing when a forced resource stop's
@@ -839,7 +839,7 @@ export async function runToolLoop(
     }
 
     for (const call of calls) {
-      if (!forceFinal && options.getStallReason?.()) {
+      if (!forceFinal && options.getStallReason?.(call.function.name)) {
         forceFinal = true;
         stoppedBy = "no-progress";
       }
@@ -904,7 +904,7 @@ export async function runToolLoop(
       }
       result = truncateToolResult(result ?? "", maxToolResultChars);
       if (dispatched && !error && options.transformToolResult) {
-        result = options.transformToolResult(call.function.name, result);
+        result = options.transformToolResult(call.function.name, result, toolCalls.length + 1);
       }
       await observe({ kind: "tool", round, callCount: toolCalls.length + (dispatched ? 1 : 0),
         toolName: call.function.name, argumentParse, validationErrors, toolExcerpt: result.slice(0, 2000) });

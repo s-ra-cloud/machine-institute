@@ -45,6 +45,12 @@ Ground claims before accepting pending state, not only when validating final exe
 
 **How to apply:** Require canonical-paper quotations backed by an actual source read and preserve the claim, original value, and provenance across repairs. Use the returned page range instead of requiring model-calculated quote offsets. Missing-material conclusions also need a source-backed requirement and inspection of supplied inventory/instructions; an absent guessed filename is not enough.
 
+A verified quantitative Results passage does not by itself cause a model to register a claim; give the model a bounded next-action handoff tied to the original numbered read and page range.
+
+**Why:** An observed run had a concrete Results passage, but kept browsing, tried an invalid archive ref and stopped at the repeated-read guard with no accepted claims. Earlier diagnostics were truncated, so do not infer a specific provider defect.
+
+**How to apply:** Keep the instruction separate from canonical source/evidence, never prefill scientific values, and maintain strict validator ownership. Test both the registration and honest early-failure paths with mocked tool/model responses; a provider's tool-call-looking final text is not an executed tool call.
+
 Distinguish provider-reported context constraints from local retry targets and output-generation caps.
 
 **Why:** Repeated fractional reductions created a local target below the immutable instructions even though diagnostics still displayed a larger context window. Treating an ambiguous output-cap field as an input limit can produce the same failure.

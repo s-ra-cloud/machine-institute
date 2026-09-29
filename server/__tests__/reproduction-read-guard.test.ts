@@ -80,4 +80,35 @@ describe("reproduction read guard", () => {
     }
     expect(guard.stopReason).toBeNull();
   });
+
+  it("hands off a visible Results passage using its original numbered read and exact page range", () => {
+    const guard = new ReproductionReadGuard();
+    const text = "## 3. Results\nThe held-out evaluation reports 0.992 recovery and 16/16 donor answers.";
+    const result = `Verified file: /work/paper.md\nReturned characters: 11412-${11412 + text.length} of 32245\n---\n${text}`;
+    const guided = guard.observe("read_file", result, state, 12);
+    expect(guided).toContain(text);
+    expect(guided).toContain("source_tool_call_id=12");
+    expect(guided).toContain(`source_location="characters 11412-${11412 + text.length}"`);
+    expect(guided).toContain('status="pending"');
+    expect(guided).not.toContain('claim="');
+    expect(guard.extractionInstruction).toContain("read_tool_result");
+    guard.observe("read_reproduction_context", '{"error":"Refused: ref must identify archived reproduction context."}', state, 13);
+    for (let i = 0; i < 2; i++) guard.observe("list_files", "Verified directory: /work\nf paper.md", state, 14 + i);
+    expect(guard.observe("list_files", "Verified directory: /work\nf paper.md", state, 16))
+      .toContain("source_tool_call_id=12");
+    expect(guard.observe("record_result", "Registered R1 as pending", { acceptedClaims: 1, assessed: false }, 17))
+      .not.toContain("NEXT ACTION");
+    expect(guard.extractionInstruction).toBeNull();
+    expect(guard.stopReason).toBeNull();
+  });
+
+  it("does not promote unverified pages, non-results numbers, or clipped results to a source handoff", () => {
+    const guard = new ReproductionReadGuard();
+    guard.observe("read_file", "Refused: unavailable", state, 1);
+    guard.observe("read_file", "Verified file: /work/paper.md\nReturned characters: 0-32 of 200\n---\n## Introduction\nStudy 2024.", state, 2);
+    guard.observe("read_file", "Verified file: /work/paper.md\nReturned characters: 0-48 of 200\n---\n## 3. Results\nNo numerical claim is reported here.", state, 3);
+    guard.observe("read_file", "Verified file: /work/paper.md\nReturned characters: 0-300 of 500\n---\n## Introduction\n"
+      + "x".repeat(100) + "\n\n[... 200 chars truncated ...]\n\n## 3. Results\nAccuracy is 0.91.", state, 4);
+    expect(guard.extractionInstruction).toBeNull();
+  });
 });

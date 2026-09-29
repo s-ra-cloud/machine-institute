@@ -756,7 +756,8 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       allowResourceStopFallback: true,
       contextProtection: {
         getState: maxBytes => session.contextState(maxBytes),
-        getActiveInstruction: () => session.activeInstruction(),
+        getActiveInstruction: () => [session.activeInstruction(), readGuard.extractionInstruction]
+          .filter(Boolean).join("\n"),
         archiveContext: (key, text) => session.archiveContext(key, text),
         resizeRetrieval: (name, args, result, maxBytes) => session.resizeRetrieval(name, args, result, maxBytes),
         compactUserMessage,
@@ -764,11 +765,15 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       },
       elidedToolOutputMessage: "[Earlier output elided. Use read_tool_result with the original tool call ID; do not rerun the experiment to retrieve it.]",
       getRecoveryProgress: () => session.progress,
-      transformToolResult: (name, result) => readGuard.observe(name, result, {
+      transformToolResult: (name, result, callIndex) => readGuard.observe(name, result, {
         acceptedClaims: recorded.size + Array.from(recorded.values()).filter(claim => claim.status !== "pending").length,
         assessed: Boolean(questioning?.assessment),
-      }),
-      getStallReason: () => readGuard.stopReason,
+      }, callIndex),
+      // A claim/assessment already batched with the seventh repeated read can
+      // still establish real progress. Refuse further browsing, not that repair.
+      getStallReason: nextToolName =>
+        nextToolName === "record_result" || nextToolName === "assess_suitability"
+          ? null : readGuard.stopReason,
       onToolCall: async (rec: ToolCallRecord) => {
         session.observeToolCall(rec);
         if (rec.name === "run_command") {
@@ -782,7 +787,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         }
       },
       onPrematureStop: (assistantText) => {
-        if (questioning && !questioning.assessment) return session.activeInstruction();
+        if (questioning && !questioning.assessment) return [session.activeInstruction(), readGuard.extractionInstruction].filter(Boolean).join("\n");
         if (questioning?.finalizeBlockedClaims(Array.from(recorded.values()))) {
           const logbookIssues = getReproductionCompletionIssues({ recordedResults: [], toolCalls: [], logbook: assistantText, budgetExhausted: false })
             .filter(issue => issue.startsWith("the final logbook is missing"));
@@ -794,7 +799,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           logbook: assistantText,
           budgetExhausted: false,
         });
-        return continuation ? `${session.activeInstruction()}\n${continuation}\n${session.repairContext()}` : null;
+        return continuation ? `${session.activeInstruction()}\n${readGuard.extractionInstruction ?? ""}\n${continuation}\n${session.repairContext()}` : null;
       },
       maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
     });
