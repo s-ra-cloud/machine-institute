@@ -7,6 +7,8 @@ import {
   ModelSelector,
   formatModelEstimate,
   getModelEstimate,
+  areReproductionModelModesCompatible,
+  isByokModelSelectionReady,
   type GenerationConfig,
   type ModelConfig,
   type GenerationCostType,
@@ -264,6 +266,13 @@ function deriveAgentName(modelConfig: ModelConfig, agentSuffix: string): string 
   return `MachInstit ${initials}${agentSuffix}-N1`;
 }
 
+function redactSubmittedKeys(message: string, ...keys: Array<string | undefined>): string {
+  return keys.filter((key): key is string => Boolean(key)).reduce(
+    (safe, key) => safe.replaceAll(key, "[redacted]"),
+    message,
+  );
+}
+
 export default function GenerationDashboard() {
   const { authenticated, user, login, isLoading: authLoading, isAdmin } = useAuth();
   const hasPlatformAccess = PLATFORM_ACCESS_EMAILS.includes(user?.email ?? "");
@@ -273,6 +282,13 @@ export default function GenerationDashboard() {
     provider: "",
     modelName: "",
   });
+  const [byocKeys, setByocKeys] = useState<Partial<Record<GenerationType, Record<string, string>>>>({});
+  const getByocKey = (task: GenerationType) => byocKeys[task]?.[modelConfig.provider] ?? "";
+  const setByocKey = (task: GenerationType, key: string) => setByocKeys(previous => ({
+    ...previous,
+    [task]: { ...previous[task], [modelConfig.provider]: key },
+  }));
+  const clearByocKey = (task: GenerationType) => setByocKeys(previous => ({ ...previous, [task]: {} }));
   const [orchestratorName, setOrchestratorName] = useState(user?.displayName ?? "");
   const [topic, setTopic] = useState("Autonomous AI research agents and their role in scientific discovery");
   const [prompt, setPrompt] = useState("");
@@ -317,6 +333,7 @@ export default function GenerationDashboard() {
     provider: "",
     modelName: "",
   });
+  const [reproJudgeByocKey, setReproJudgeByocKey] = useState("");
   const [reproPersona, setReproPersona] = useState<ReproductionPersona>("P");
   const [reproPromptsExpanded, setReproPromptsExpanded] = useState(false);
   // Persist the active batch id so the progress panel survives page reloads
@@ -665,6 +682,8 @@ export default function GenerationDashboard() {
 
   const generateReproductionMutation = useMutation({
     mutationFn: async () => {
+      const submittedByocKey = modelConfig.providerMode === "byok" ? getByocKey("reproduce") : undefined;
+      const submittedJudgeByocKey = reproJudgeConfig.providerMode === "byok" ? reproJudgeByocKey : undefined;
       const res = await fetch("/api/reproductions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -683,11 +702,15 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
+          ...(submittedByocKey ? { byocApiKey: submittedByocKey } : {}),
+          judgeProviderMode: reproJudgeConfig.providerMode,
+          judgeModelProvider: reproJudgeConfig.provider,
+          ...(submittedJudgeByocKey ? { judgeByocApiKey: submittedJudgeByocKey } : {}),
         }),
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || "Failed to start reproduction");
+        throw new Error(redactSubmittedKeys(err.error || "Failed to start reproduction", submittedByocKey, submittedJudgeByocKey));
       }
       return res.json();
     },
@@ -696,6 +719,10 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/reproductions/available-papers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
       if (data?.id) navigate(`/reproductions/${data.id}`);
+    },
+    onSettled: () => {
+      clearByocKey("reproduce");
+      setReproJudgeByocKey("");
     },
   });
 
@@ -778,6 +805,7 @@ export default function GenerationDashboard() {
 
   const generateEditorialMutation = useMutation({
     mutationFn: async () => {
+      const submittedByocKey = modelConfig.providerMode === "byok" ? getByocKey("editorial") : undefined;
       const res = await fetch("/api/editorials/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -790,12 +818,13 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
+          ...(submittedByocKey ? { byocApiKey: submittedByocKey } : {}),
           journalId: selectedJournal,
         }),
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || "Failed to generate editorial");
+        throw new Error(redactSubmittedKeys(err.error || "Failed to generate editorial", submittedByocKey));
       }
       return res.json();
     },
@@ -803,10 +832,12 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/editorials"] });
       queryClient.invalidateQueries({ queryKey: ["/api/editorials/status"] });
     },
+    onSettled: () => clearByocKey("editorial"),
   });
 
   const generateReviewMutation = useMutation({
     mutationFn: async () => {
+      const submittedByocKey = modelConfig.providerMode === "byok" ? getByocKey("literature-review") : undefined;
       const res = await fetch("/api/literature-reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -820,6 +851,7 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
+          ...(submittedByocKey ? { byocApiKey: submittedByocKey } : {}),
           journalId: selectedJournal,
           fullTextCount,
           includeArxiv,
@@ -827,7 +859,7 @@ export default function GenerationDashboard() {
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || "Failed to generate review");
+        throw new Error(redactSubmittedKeys(err.error || "Failed to generate review", submittedByocKey));
       }
       return res.json();
     },
@@ -835,10 +867,12 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/literature-reviews-all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
     },
+    onSettled: () => clearByocKey("literature-review"),
   });
 
   const generateEthicsMutation = useMutation({
     mutationFn: async () => {
+      const submittedByocKey = modelConfig.providerMode === "byok" ? getByocKey("ethics-report") : undefined;
       const res = await fetch("/api/ethics-reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -854,11 +888,12 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
+          ...(submittedByocKey ? { byocApiKey: submittedByocKey } : {}),
         }),
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || "Failed to generate ethics report");
+        throw new Error(redactSubmittedKeys(err.error || "Failed to generate ethics report", submittedByocKey));
       }
       return res.json();
     },
@@ -867,10 +902,12 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
       if (data?.id) navigate(`/ethics-reports/${data.id}`);
     },
+    onSettled: () => clearByocKey("ethics-report"),
   });
 
   const generatePeerReviewMutation = useMutation({
     mutationFn: async () => {
+      const submittedByocKey = modelConfig.providerMode === "byok" ? getByocKey("peer-review") : undefined;
       const res = await fetch("/api/peer-reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -888,11 +925,12 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
+          ...(submittedByocKey ? { byocApiKey: submittedByocKey } : {}),
         }),
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || "Failed to generate peer review");
+        throw new Error(redactSubmittedKeys(err.error || "Failed to generate peer review", submittedByocKey));
       }
       return res.json();
     },
@@ -902,10 +940,12 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/generation/rate-limit-status"] });
       if (data?.id) navigate(`/peer-reviews/${data.id}`);
     },
+    onSettled: () => clearByocKey("peer-review"),
   });
 
   const generatePeerBatchMutation = useMutation({
     mutationFn: async () => {
+      const submittedByocKey = modelConfig.providerMode === "byok" ? getByocKey("peer-review-batch") : undefined;
       const res = await fetch("/api/peer-reviews/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -922,11 +962,12 @@ export default function GenerationDashboard() {
           providerMode: modelConfig.providerMode,
           modelProvider: modelConfig.provider,
           modelName: modelConfig.modelName,
+          ...(submittedByocKey ? { byocApiKey: submittedByocKey } : {}),
         }),
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || "Failed to start batch");
+        throw new Error(redactSubmittedKeys(err.error || "Failed to start batch", submittedByocKey));
       }
       return res.json() as Promise<{ batchId: string; total: number }>;
     },
@@ -936,6 +977,7 @@ export default function GenerationDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews/available-papers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/peer-reviews/eligible-count"] });
     },
+    onSettled: () => clearByocKey("peer-review-batch"),
   });
 
   const clearHistoryMutation = useMutation({
@@ -994,19 +1036,26 @@ export default function GenerationDashboard() {
     && generationConfig?.setupRequired !== true
     && selectedManagedModel?.enabled !== false
     && Boolean(selectedManagedModel);
-  const judgeModelReady = selectedJudgeModel?.enabled !== false && Boolean(selectedJudgeModel);
-  const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && managedModelReady;
-  const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && managedModelReady;
-  const canSubmitEthics = !ethicsIsPending && !hasGeneratingEthics && managedModelReady &&
+  const modelReadyForTask = (task: GenerationType) => modelConfig.providerMode === "byok"
+    ? isByokModelSelectionReady(modelConfig, getByocKey(task))
+    : managedModelReady;
+  const judgeModelReady = reproJudgeConfig.providerMode === "byok"
+    ? isByokModelSelectionReady(reproJudgeConfig, reproJudgeByocKey)
+    : selectedJudgeModel?.enabled !== false && Boolean(selectedJudgeModel);
+  const canSubmitEditorial = !editorialIsPending && !hasGeneratingEditorial && modelReadyForTask("editorial");
+  const canSubmitReview = !reviewIsPending && !hasGeneratingReview && researchQuestion.trim().length >= 10 && modelReadyForTask("literature-review");
+  const canSubmitEthics = !ethicsIsPending && !hasGeneratingEthics && modelReadyForTask("ethics-report") &&
     ethicsPrompt1.trim().length > 0 && selectedPaperDocId.length > 0;
-  const canSubmitPeer = !peerIsPending && !hasGeneratingPeer && managedModelReady &&
+  const canSubmitPeer = !peerIsPending && !hasGeneratingPeer && modelReadyForTask("peer-review") &&
     peerSelectedDocId.length > 0 && peerPrompt.trim().length > 0;
 
   const reproIsPending = generateReproductionMutation.isPending;
   const hasGeneratingRepro = recentReproductions?.some(r => r.status === "pending" || r.status === "generating");
   const reproConfig = generationConfig?.reproduction;
-  const canSubmitRepro = !reproIsPending && !hasGeneratingRepro && managedModelReady
-    && selectedManagedModel?.tools === true && judgeModelReady &&
+  const reproModelReady = modelReadyForTask("reproduce")
+    && (modelConfig.providerMode === "byok" || selectedManagedModel?.tools === true);
+  const reproModesMatch = areReproductionModelModesCompatible(modelConfig, reproJudgeConfig);
+  const canSubmitRepro = !reproIsPending && !hasGeneratingRepro && reproModelReady && judgeModelReady && reproModesMatch &&
     !reproPapersLoading && !reproPapersError &&
     reproAvailableData?.papers.some(p => p.documentId === reproSelectedDocId && !p.lockedModels.includes(modelConfig.modelName || "")) &&
     reproSelectedDocId.length > 0 && reproPrompt.trim().length > 0 && reproJudgePrompt.trim().length > 0 &&
@@ -1015,7 +1064,7 @@ export default function GenerationDashboard() {
   const batchIsPending = generatePeerBatchMutation.isPending;
   const eligibleCount = eligibleCountData?.eligibleCount ?? null;
   const batchRunning = !!activeBatchId && batchStatus && !batchStatus.complete;
-  const batchEstimate = getModelEstimate(
+  const batchEstimate = modelConfig.providerMode === "byok" ? null : getModelEstimate(
     selectedManagedModel,
     "peer-review",
     1,
@@ -1023,7 +1072,7 @@ export default function GenerationDashboard() {
     { includeEthics: peerIncludeEthics },
   );
   const batchEstimateText = formatModelEstimate(batchEstimate);
-  const canSubmitBatch = !batchIsPending && !batchRunning && managedModelReady &&
+  const canSubmitBatch = !batchIsPending && !batchRunning && modelReadyForTask("peer-review-batch") &&
     peerPrompt.trim().length > 0 && batchCount >= 1 &&
     (eligibleCount === null || batchCount <= eligibleCount);
 
@@ -1031,6 +1080,8 @@ export default function GenerationDashboard() {
     <ModelSelector
       value={modelConfig}
       onChange={setModelConfig}
+      apiKey={getByocKey(activeType ?? "editorial")}
+      onApiKeyChange={key => setByocKey(activeType ?? "editorial", key)}
       hasPlatformAccess={hasPlatformAccess}
       activeType={(activeType === "peer-review-batch" ? "peer-review" : activeType === "reproduce" ? "reproduction" : activeType) as GenerationCostType}
       quantity={activeType === "peer-review-batch" ? batchCount : 1}
@@ -1685,6 +1736,8 @@ export default function GenerationDashboard() {
                           <ModelSelector
                             value={reproJudgeConfig}
                             onChange={setReproJudgeConfig}
+                            apiKey={reproJudgeByocKey}
+                            onApiKeyChange={setReproJudgeByocKey}
                             hasPlatformAccess={hasPlatformAccess}
                             activeType="judge"
                             label="Judge model"
@@ -1694,8 +1747,13 @@ export default function GenerationDashboard() {
                             setupMessage={generationConfig?.setupMessage}
                             compact
                           />
+                          {!reproModesMatch && (
+                            <p className="mt-2 text-[10px] font-mono text-amber-200" role="alert" data-testid="text-repro-provider-mode-mismatch">
+                              Reproducer and judge billing modes must match. Choose managed models for both, or your own provider for both; the form will not switch either selection automatically.
+                            </p>
+                          )}
                           <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
-                            A separately selected managed model reads the agent's logbook and every command output, then issues verified / falsified / toy / inconclusive per result. Its estimated model usage is shown above; Modal GPU usage is separate.
+                            A separately selected model reads the agent&apos;s logbook and every command output, then issues verified / falsified / toy / inconclusive per result. For BYOK, enter a key for the judge provider too, including when it differs from the reproducer&apos;s provider. Managed estimates apply only to managed models; own-provider charges are billed separately. Modal GPU usage is separate.
                           </p>
                         </div>
                       </div>
@@ -2071,7 +2129,9 @@ export default function GenerationDashboard() {
                     </button>
                     {activeType === "peer-review-batch" && (
                       <span className="text-xs font-mono text-muted-foreground/70" data-testid="text-batch-credits">
-                        {batchEstimateText
+                        {modelConfig.providerMode === "byok"
+                          ? "BYOK provider usage is billed to your provider account, separately from Replit credits; no managed-model estimate applies."
+                          : batchEstimateText
                           ? `Estimated batch total: ${batchEstimateText} (${batchCount} review${batchCount === 1 ? "" : "s"}${peerIncludeEthics ? " with H co-author audits" : ""})`
                           : "Pricing estimate unavailable. Actual Replit model usage is billed separately."}
                       </span>

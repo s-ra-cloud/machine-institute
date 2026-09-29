@@ -52,7 +52,7 @@ Active status is true when events exist from the last 10 minutes.
 - `GET /api/literature-reviews/default-prompt` — Get the default BLR prompt
 - `POST /api/literature-reviews` — Submit a review request. Supports configurable model selection.
   - Body: `{projectId, agentId, researchQuestion, prompt?, topic?, modelProvider?, modelName?, providerMode?, byocApiKey?, orchestratorName?, agentDescription?}`
-  - `providerMode`: `"platform"` for new Replit-managed OpenRouter runs. Historical `"byoc"` values remain readable but cannot execute new work.
+  - `providerMode`: `"platform"` for Replit-managed OpenRouter or `"byoc"` for a user-supplied provider key. BYOK keys are request-only and must never be stored in run records.
   - `modelProvider`: `"openrouter"`, `"openai"`, or `"anthropic"`
   - Per-user rate limiting: 10 reviews/24h for authenticated platform users
   - Traceability: stores `promptTrace`, `sourceTrace`, model info, and user ID
@@ -111,7 +111,7 @@ qP provenance schema v2 stores source/output text once in a SHA-256 blob map. Or
 - `GET /api/reproductions?projectId=X`, `GET /api/reproductions/:id`, `DELETE /api/reproductions/:id` (admin)
 - `POST /api/reproductions` — Start a run (auth + institute allowlist: the GPU sandbox is billed to the institute's Modal account).
   - Body: `{projectId, journalId, documentId, paperTitle?, gpu?: "T4"|"A10G"|"A100"|"H100", reproducerPrompt?, judgePrompt?, judgeModelName?, judgeModelProvider?, modelProvider?, modelName?, providerMode?, byocApiKey?, orchestratorName?, agentDescription?}`
-  - LLM execution uses the Replit-managed OpenRouter OpenAI-compatible gateway, funded by Replit credits, normalized into the same evidence-checked `runToolLoop`. Native OpenAI, Anthropic and Google identities remain separate from transport. New BYOC/personal-key execution is disabled; historical records are preserved.
+  - Managed LLM execution uses the Replit-managed OpenRouter OpenAI-compatible gateway, funded by Replit credits. BYOK uses a user-supplied provider key, charged to that provider's account; both paths retain the evidence-checked `runToolLoop`. Historical records are preserved.
   - Per-paper-per-model lock (`reproductions_journal_doc_model_uniq`, non-failed rows).
   - Pipeline (`server/reproduce.ts`): `loadPaperContext` → `fetchContributionMaterials` (`server/fs-materials.ts`: every `additionalMaterialsFiles` entry — README, `.py` scripts, `analysis_N_results.json`, `.ipynb`; binaries listed by URL) → `ReproductionSandbox.create` (`server/modal-sandbox.ts`, PyTorch CUDA image, `HF_TOKEN` injected) → upload to `/work/paper.md` + `/work/materials/` → tool loop with `list_files / read_file / write_file / run_command / record_result` (budget: 100 tool calls, 2 h wall-clock, 15 min per command) → sandbox terminated → judge call → deterministic paper-level verdict (any falsified ⇒ falsified; all verified ⇒ verified; some ⇒ partially verified; toy-only ⇒ toy; else inconclusive).
   - Publishes via `submitReproductionToFutureScience` as **"Response to a contribution"** with `linkOriginalContribution` = the original paper's URL; falsified results → `majorRevisions`, toy/inconclusive → `minorRevisions`. Title `Reproduction Report: "<paper title>"`, agentName `MachInstit <ModelCode>P-N1`, live-feed agentId `P`.
@@ -133,7 +133,7 @@ Frontend: "Reproduce a publication" card on `/generate` (GPU + judge-model picke
 ### AI Generation Config API
 
 - `GET /api/generation/config` — Get managed model metadata, enabled/unavailable state, reading budgets, and default topics. Credentials are never returned.
-- `POST /api/generation/validate-key` — Retired: returns HTTP 410. BYOC validation and new BYOC execution are disabled; select a configured Replit-managed model.
+- `POST /api/generation/validate-key` — Authenticated syntax-only BYOK key validation; it does not make a provider call or verify available funds.
 - `GET /api/generation/rate-limit-status` — (Requires auth) Get per-user rate limits for all resource types
 
 ### Project Papers API (publication log per project)

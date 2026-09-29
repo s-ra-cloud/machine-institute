@@ -6,8 +6,8 @@ vi.mock("openai", () => ({ default: class {
   constructor(options: unknown) { constructorOptions(options); }
   chat = { completions: { create: openaiCreate } };
 } }));
-import { createManagedChatClient } from "../managed-adapter";
-import { generateWithConfig, runToolLoop } from "../model-service";
+import { createByocChatClient, createManagedChatClient } from "../managed-adapter";
+import { generateWithConfig, runToolLoop, validateApiKey } from "../model-service";
 const configs = [
   { providerMode: "platform" as const, provider: "openai", modelName: "openai/gpt-4o" },
   { providerMode: "platform" as const, provider: "anthropic", modelName: "anthropic/claude-sonnet-4.6" },
@@ -79,4 +79,43 @@ it("caps output and applies GPT-5 options at the managed gateway", async () => {
   expect(openaiCreate.mock.calls[0][0]).toMatchObject({ model: "openai/gpt-5-mini", max_tokens: 8000, reasoning_effort: "minimal" });
   expect(openaiCreate.mock.calls[0][0]).not.toHaveProperty("temperature");
   expect(openaiCreate.mock.calls[0][1]).toEqual({ maxRetries: 0 });
+});
+
+describe("BYOK provider transport and key handling", () => {
+  const config = {
+    providerMode: "byoc" as const,
+    provider: "openai",
+    modelName: "gpt-4o",
+    apiKey: "sk-project-test-key-123456789",
+  };
+  it("uses the explicitly selected direct provider, model, and transient key", async () => {
+    openaiCreate.mockResolvedValue(completion("stop"));
+    const result = await generateWithConfig(config, "rules", "question");
+    expect(result).toMatchObject({ provider: "openai", model: "gpt-4o", content: "complete" });
+    expect(constructorOptions).toHaveBeenCalledWith(expect.objectContaining({
+      baseURL: "https://api.openai.com/v1",
+      apiKey: config.apiKey,
+    }));
+    expect(openaiCreate.mock.calls[0][0].model).toBe(config.modelName);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("rejects a missing key, unsupported provider, or URL-shaped model before a request", async () => {
+    expect(() => createByocChatClient({ ...config, apiKey: undefined })).toThrow(/API key/i);
+    expect(() => createByocChatClient({ ...config, provider: "google" })).toThrow(/provider/i);
+    expect(() => createByocChatClient({ ...config, modelName: "https://attacker.invalid" })).toThrow(/model/i);
+    expect(openaiCreate).not.toHaveBeenCalled();
+  });
+  it("validates key syntax without making a provider call or returning a key", async () => {
+    const result = await validateApiKey("openai", config.apiKey);
+    expect(result).toEqual({ valid: true });
+    expect(JSON.stringify(result)).not.toContain(config.apiKey);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("keeps provider payment errors distinct from Replit-managed billing", async () => {
+    openaiCreate.mockRejectedValue(Object.assign(new Error(`authorization failed with ${config.apiKey}`), { status: 402 }));
+    const error = await generateWithConfig(config, "rules", "question").catch(error => error);
+    expect(error.message).toMatch(/provider account/i);
+    expect(error.message).not.toMatch(/Replit/i);
+    expect(error.message).not.toContain(config.apiKey);
+  });
 });

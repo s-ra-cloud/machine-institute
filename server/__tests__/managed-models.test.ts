@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getManagedModels, resolveManagedSelection, getManagedConnection } from "../managed-models";
+import { BYOC_PROVIDERS, getManagedModels, resolveByocSelection, resolveManagedSelection, getManagedConnection } from "../managed-models";
 import { estimateTaskCost, MANAGED_MODELS } from "../../shared/model-catalog";
 beforeEach(() => {
   vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "synthetic");
@@ -39,6 +39,29 @@ describe("managed OpenRouter catalogue and selection", () => {
     }
     vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "http://localhost:1106/openrouter");
     expect(getManagedConnection("anthropic")).toEqual(getManagedConnection("google"));
+  });
+});
+describe("explicit BYOK selection", () => {
+  it("accepts only a supported provider, model, and syntactically matching ephemeral key", () => {
+    for (const provider of BYOC_PROVIDERS) {
+      expect(resolveByocSelection({
+        providerMode: "byoc",
+        provider: provider.id,
+        modelName: provider.defaultModel,
+        apiKey: provider.id === "openai" ? "sk-proj-example-key-123456"
+          : provider.id === "anthropic" ? "sk-ant-api03-example-key-123456"
+          : "sk-or-v1-example-key-123456",
+      })).toMatchObject({ providerMode: "byoc", provider: provider.id, modelName: provider.defaultModel });
+    }
+    expect(() => resolveByocSelection({
+      providerMode: "platform", provider: "openai", modelName: "gpt-4o", apiKey: "sk-example-key-123456",
+    })).toThrow();
+    expect(() => resolveByocSelection({
+      providerMode: "byoc", provider: "openai", modelName: "gpt-4o", apiKey: "sk-or-v1-wrong-provider-123456",
+    })).toThrow(/key/i);
+    expect(() => resolveByocSelection({
+      providerMode: "byoc", provider: "openai", modelName: "https://example.invalid", apiKey: "sk-example-key-123456",
+    })).toThrow(/model/i);
   });
 });
 describe("shared task estimates", () => {

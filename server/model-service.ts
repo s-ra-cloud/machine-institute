@@ -1,5 +1,6 @@
 import { MANAGED_MODELS } from "../shared/model-catalog";
-import { createManagedChatClient, type ManagedChatClient } from "./managed-adapter";
+import { createByocChatClient, createManagedChatClient, type ManagedChatClient } from "./managed-adapter";
+import { BYOC_PROVIDERS, isSyntacticallyValidApiKey } from "./managed-models";
 import {
   ContextBudgetError,
   MAX_CONTEXT_RETRIES,
@@ -37,11 +38,7 @@ export const PLATFORM_MODELS = MANAGED_MODELS;
 
 // `defaultContextWindow` is used for bring-your-own-key models where we don't know
 // the exact model, so we fall back to a sensible per-provider window.
-export const BYOC_PROVIDERS = [
-  { id: "openai", label: "OpenAI", baseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o", defaultContextWindow: 128000 },
-  { id: "anthropic", label: "Anthropic", baseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-20250514", defaultContextWindow: 200000 },
-  { id: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", defaultModel: "deepseek/deepseek-chat", defaultContextWindow: 64000 },
-];
+export { BYOC_PROVIDERS };
 
 // Reading-budget constants for literature-review full-text reading.
 // Roughly 8,000 tokens are budgeted per paper read in full. The synthesis call reserves
@@ -91,7 +88,9 @@ export function getReadingBudget(config: ModelProviderConfig): ReadingBudget {
 }
 
 export function createLLMClient(config: ModelProviderConfig, options: { maxRetries?: number } = {}): ManagedChatClient {
-  return createManagedChatClient(config, options);
+  return config.providerMode === "byoc"
+    ? createByocChatClient(config, options)
+    : createManagedChatClient(config, options);
 }
 
 export async function generateWithConfig(
@@ -148,7 +147,7 @@ export async function generateWithConfig(
 
   const choice = completion?.choices?.[0];
   if (choice?.finish_reason !== "stop" || choice?.message?.refusal != null || choice?.message?.tool_calls?.length) {
-    throw new Error(`Managed model did not return a complete, non-refused text answer (model=${model}). No result was accepted.`);
+    throw new Error(`${config.providerMode === "byoc" ? "BYOK provider" : "Managed model"} did not return a complete, non-refused text answer (model=${model}). No result was accepted.`);
   }
   const content = choice.message?.content;
   if (typeof content !== "string" || !content.trim()) {
@@ -181,11 +180,16 @@ export function sanitizeContextRequestError(
   const code = error?.code ?? error?.type ?? "context_request_failed";
   const rawMessage = contextRequestErrorText(error);
   const contextLike = isContextOverflow(error);
+  const byoc = config?.providerMode === "byoc";
   const message = contextLike
     ? `Context length exceeded (${status ?? "unknown"})`
-    : Number(status) === 429 ? "Managed model rate limit reached. Wait before retrying."
-    : Number(status) === 401 || Number(status) === 403 ? "Managed model access was rejected. An administrator must check the Replit integration configuration."
-    : `LLM request failed (${status ?? "unknown"}). Retry later or ask an administrator to check the managed integration.`;
+    : Number(status) === 429 ? `${byoc ? "Your provider" : "Managed model"} rate limit reached. Wait before retrying.`
+    : Number(status) === 401 || Number(status) === 403 ? byoc
+      ? "Your provider rejected the BYOK credentials or access. Check the selected provider, model, and key."
+      : "Managed model access was rejected. An administrator must check the Replit integration configuration."
+    : byoc
+      ? `BYOK provider request failed (${status ?? "unknown"}). Check your provider account and key, then retry.`
+      : `LLM request failed (${status ?? "unknown"}). Retry later or ask an administrator to check the managed integration.`;
   const result = new Error(message);
   const constraint = providerContextConstraint(error);
   const reportedLimit = constraint?.limit ?? reportedContextLimit(error);
@@ -218,11 +222,19 @@ function contextRequestErrorText(error: unknown, depth = 0): string {
 
 export function resolveModelName(config: ModelProviderConfig): string {
   if (config.modelName) return config.modelName;
-  throw new Error("Select a Replit-managed model explicitly.");
+  throw new Error("Select a model explicitly.");
 }
 
 export async function validateApiKey(provider: string, apiKey: string): Promise<{ valid: boolean; error?: string }> {
-  return { valid: false, error: "BYOC validation is disabled. Select a Replit-managed model." };
+  if (!BYOC_PROVIDERS.some(candidate => candidate.id === provider)) {
+    return { valid: false, error: "Select a supported BYOK provider." };
+  }
+  if (!isSyntacticallyValidApiKey(provider, apiKey)) {
+    return { valid: false, error: "The key format does not match the selected provider." };
+  }
+  // Deliberately no provider request: checking syntax cannot spend credits, and
+  // the key is never retained or sent back to the caller.
+  return { valid: true };
 }
 
 // ---------------------------------------------------------------------------

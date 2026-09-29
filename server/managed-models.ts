@@ -4,6 +4,39 @@ import type { ModelProviderConfig } from "./model-service";
 export class ManagedModelError extends Error {
   constructor(message: string, readonly status = 400) { super(message); this.name = "ManagedModelError"; }
 }
+
+/** BYOK connects directly to these providers and never uses the managed gateway. */
+export const BYOC_PROVIDERS = [
+  { id: "openai", label: "OpenAI", baseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o", defaultContextWindow: 128_000 },
+  { id: "anthropic", label: "Anthropic", baseURL: "https://api.anthropic.com/v1", defaultModel: "claude-sonnet-4-20250514", defaultContextWindow: 200_000 },
+  { id: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", defaultModel: "deepseek/deepseek-chat", defaultContextWindow: 64_000 },
+] as const;
+
+export function resolveByocSelection(config: Partial<ModelProviderConfig>): ModelProviderConfig {
+  if (config.providerMode !== "byoc") throw new ManagedModelError("Select BYOK mode explicitly.");
+  const selected = BYOC_PROVIDERS.find(provider => provider.id === config.provider);
+  if (!selected) throw new ManagedModelError("Select a supported BYOK provider (OpenAI, Anthropic, or OpenRouter).");
+  if (typeof config.modelName !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$/.test(config.modelName)) {
+    throw new ManagedModelError("Select a valid model name for the chosen BYOK provider.");
+  }
+  if (typeof config.apiKey !== "string" || !isSyntacticallyValidApiKey(selected.id, config.apiKey)) {
+    throw new ManagedModelError("Enter a valid-looking API key for the selected BYOK provider.");
+  }
+  return {
+    providerMode: "byoc",
+    provider: selected.id,
+    modelName: config.modelName,
+    apiKey: config.apiKey,
+  };
+}
+
+export function isSyntacticallyValidApiKey(provider: string, apiKey: string): boolean {
+  if (typeof apiKey !== "string" || apiKey.length < 16 || apiKey.length > 512 || apiKey.trim() !== apiKey || /\s/.test(apiKey)) return false;
+  if (provider === "openai") return /^sk-(?!or-|ant-)[A-Za-z0-9_-]+$/.test(apiKey);
+  if (provider === "anthropic") return /^sk-ant-[A-Za-z0-9_-]+$/.test(apiKey);
+  if (provider === "openrouter") return /^sk-or-[A-Za-z0-9_-]+$/.test(apiKey);
+  return false;
+}
 /**
  * Endpoints/credentials must be provisioned by Replit AI Integrations.
  * LAB_ALLOWED_MODELS optionally restricts catalogue selections, not upstream availability.

@@ -7,7 +7,13 @@ import { FadeIn } from "@/components/ui/motion";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 import { ReviewProgress } from "@/components/ReviewProgress";
-import { ModelSelector, useGenerationConfig, type ModelConfig } from "@/components/ModelSelector";
+import {
+  areReproductionModelModesCompatible,
+  isByokModelSelectionReady,
+  ModelSelector,
+  useGenerationConfig,
+  type ModelConfig,
+} from "@/components/ModelSelector";
 import { useAuth } from "@/lib/auth";
 import type { Reproduction } from "@shared/schema";
 import { reproductionPersonaName } from "@/lib/reproduction-personas";
@@ -207,6 +213,8 @@ export default function ReproductionDetail() {
   const [retryJudgeConfig, setRetryJudgeConfig] = useState<ModelConfig>({
     providerMode: "platform", provider: "", modelName: "",
   });
+  const [retryByocApiKey, setRetryByocApiKey] = useState("");
+  const [retryJudgeByocApiKey, setRetryJudgeByocApiKey] = useState("");
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -228,22 +236,38 @@ export default function ReproductionDetail() {
   });
   const retryMutation = useMutation({
     mutationFn: async () => {
+      const submittedByocKey = retryModelConfig.providerMode === "byok" ? retryByocApiKey : undefined;
+      const submittedJudgeByocKey = retryJudgeConfig.providerMode === "byok" ? retryJudgeByocApiKey : undefined;
       const res = await fetch(`/api/reproductions/${id}/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          providerMode: "platform",
+          providerMode: retryModelConfig.providerMode,
           modelProvider: retryModelConfig.provider,
           modelName: retryModelConfig.modelName,
           judgeModelName: retryJudgeConfig.modelName,
+          ...(submittedByocKey ? { byocApiKey: submittedByocKey } : {}),
+          judgeProviderMode: retryJudgeConfig.providerMode,
+          judgeModelProvider: retryJudgeConfig.provider,
+          ...(submittedJudgeByocKey ? { judgeByocApiKey: submittedJudgeByocKey } : {}),
         }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error || "Retry failed");
+      if (!res.ok) {
+        const message = String(body?.error || "Retry failed");
+        throw new Error([submittedByocKey, submittedJudgeByocKey].filter((key): key is string => Boolean(key)).reduce(
+          (safe, key) => safe.replaceAll(key, "[redacted]"),
+          message,
+        ));
+      }
       return body as Reproduction;
     },
     onSuccess: (retry) => navigate(`/reproductions/${retry.id}`),
     onError: (err: any) => setRetryMessage(err?.message || "Retry failed"),
+    onSettled: () => {
+      setRetryByocApiKey("");
+      setRetryJudgeByocApiKey("");
+    },
   });
 
   const { data: run, isLoading } = useQuery<Reproduction>({
@@ -297,10 +321,14 @@ export default function ReproductionDetail() {
     && (run.status === "failed" || (run.status === "completed" && run.overallVerdict === "inconclusive"));
   const retryModel = managedConfig.data?.platformModels.find(model => model.model === retryModelConfig.modelName);
   const retryJudge = managedConfig.data?.platformModels.find(model => model.model === retryJudgeConfig.modelName);
-  const retryModelsReady = Boolean(
-    retryModel && retryModel.enabled !== false && retryModel.tools
-    && retryJudge && retryJudge.enabled !== false,
-  );
+  const retryReproducerReady = retryModelConfig.providerMode === "byok"
+    ? isByokModelSelectionReady(retryModelConfig, retryByocApiKey)
+    : Boolean(retryModel && retryModel.enabled !== false && retryModel.tools);
+  const retryJudgeReady = retryJudgeConfig.providerMode === "byok"
+    ? isByokModelSelectionReady(retryJudgeConfig, retryJudgeByocApiKey)
+    : Boolean(retryJudge && retryJudge.enabled !== false);
+  const retryModesMatch = areReproductionModelModesCompatible(retryModelConfig, retryJudgeConfig);
+  const retryModelsReady = retryReproducerReady && retryJudgeReady && retryModesMatch;
   let verdicts: ClaimVerdict[] = [];
   try { verdicts = JSON.parse(run.verdictsJson || "[]"); } catch {}
 
@@ -444,12 +472,14 @@ export default function ReproductionDetail() {
                 <div>
                   <h2 className="text-sm font-heading font-semibold">Choose models for the new run</h2>
                   <p className="mt-1 text-[10px] font-mono text-muted-foreground/60">
-                    A retry is a new run using the saved {run.agentId || "P"} persona and scientific instructions. Select an enabled Replit-managed reproducer and judge explicitly; the original run’s model history remains unchanged.
+                    A retry is a new run using the saved {run.agentId || "P"} persona and scientific instructions. Select a managed model or provide your own provider and key for both the reproducer and judge; the original run&apos;s model history remains unchanged.
                   </p>
                 </div>
                 <ModelSelector
                   value={retryModelConfig}
                   onChange={setRetryModelConfig}
+                  apiKey={retryByocApiKey}
+                  onApiKeyChange={setRetryByocApiKey}
                   activeType="reproduction"
                   label="Replacement reproducer"
                   models={managedConfig.data?.platformModels ?? []}
@@ -463,6 +493,8 @@ export default function ReproductionDetail() {
                 <ModelSelector
                   value={retryJudgeConfig}
                   onChange={setRetryJudgeConfig}
+                  apiKey={retryJudgeByocApiKey}
+                  onApiKeyChange={setRetryJudgeByocApiKey}
                   activeType="judge"
                   label="Replacement judge"
                   models={managedConfig.data?.platformModels ?? []}
@@ -472,6 +504,16 @@ export default function ReproductionDetail() {
                   compact
                   requireExplicitSelection
                 />
+                {!retryModesMatch && (
+                  <p className="text-[10px] font-mono text-amber-200" role="alert" data-testid="text-retry-provider-mode-mismatch">
+                    Reproducer and judge billing modes must match. Choose managed models for both, or your own provider for both; neither selection changes automatically.
+                  </p>
+                )}
+                {retryModelConfig.providerMode === "byok" && retryJudgeConfig.providerMode === "byok" && retryModelConfig.provider !== retryJudgeConfig.provider && (
+                  <p className="text-[10px] font-mono text-muted-foreground/70" data-testid="text-retry-judge-key-guidance">
+                    The judge uses a different provider, so enter that provider&apos;s own API key in the judge selector.
+                  </p>
+                )}
               </section>
             </FadeIn>
           )}
@@ -535,7 +577,7 @@ export default function ReproductionDetail() {
             <FadeIn delay={0.31}>
               <div className="mb-10 border border-yellow-400/20 bg-yellow-400/5 p-6">
                 <p className="text-sm text-yellow-200/80">
-                  This reproduction was inconclusive. You can rerun it with the selected managed models while preserving the original run’s history.
+                  This reproduction was inconclusive. You can rerun it with the selected managed or own-provider models while preserving the original run&apos;s history.
                 </p>
                 <Button
                   onClick={() => { setRetryMessage(null); retryMutation.mutate(); }}

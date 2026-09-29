@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   create: vi.fn(),
   run: vi.fn(),
   completion: vi.fn(),
+  getSource: vi.fn(async () => state.source),
   publish: vi.fn(),
   editorialUpdates: vi.fn(async (..._args: any[]) => {}),
   editorialEvents: vi.fn(async (..._args: any[]) => {}),
@@ -44,7 +45,7 @@ vi.mock("../db", () => ({
 }));
 vi.mock("../storage", () => ({
   storage: {
-    getReproductionById: async () => state.source,
+    getReproductionById: (...args: any[]) => state.getSource(...args),
     getReproducedPapersForJournal: vi.fn(async () => []),
     createReproduction: (...args: any[]) => state.create(...args),
     createEditorial: async (data: any) => ({ ...data, id: "editorial-test", status: "pending" }),
@@ -112,6 +113,7 @@ beforeEach(() => {
   state.create.mockReset();
   state.run.mockReset();
   state.completion.mockReset();
+  state.getSource.mockClear();
   state.publish.mockReset();
   state.editorialUpdates.mockClear();
   state.editorialEvents.mockClear();
@@ -285,8 +287,12 @@ describe("managed generation route guards (no provider calls)", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("retires key validation without making a paid call", async () => {
-    expect((await post("/api/generation/validate-key", { provider: "openrouter", apiKey: "test" })).status).toBe(410);
+  it("validates key syntax without making a paid call", async () => {
+    const result = await post("/api/generation/validate-key", {
+      provider: "openrouter", apiKey: "sk-or-v1-test-key-123456789",
+    });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ valid: true });
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -316,20 +322,79 @@ describe("managed generation route guards (no provider calls)", () => {
     const owner = state.source.userId;
     state.source.userId = "someone-else";
     try {
-      expect((await post("/api/reproductions/:id/retry", {})).status).toBe(403);
+      expect((await post("/api/reproductions/:id/retry", {
+        providerMode: "byok", modelProvider: "openai", modelName: "gpt-4o",
+        byocApiKey: "sk-project-ephemeral-key-123456",
+        judgeProviderMode: "byok", judgeModelName: "gpt-4o",
+      })).status).toBe(403);
       expect(state.create).not.toHaveBeenCalled();
     } finally {
       state.source.userId = owner;
     }
   });
 
-  it("advertises unavailable managed models and no default or BYOC providers", async () => {
+  it("advertises managed models and supported BYOC providers", async () => {
     let config: any;
     await routes.get("get /api/generation/config")![0]({}, { json: (value: unknown) => { config = value; } });
-    expect(config.byocProviders).toEqual([]);
+    expect(config.byocProviders.map((provider: any) => provider.id)).toEqual(["openai", "anthropic", "openrouter"]);
     expect(config.defaultModel).toBeNull();
     expect(config.platformModels.length).toBeGreaterThan(0);
     expect(config.platformModels.every((model: any) => !model.enabled && model.unavailableReason)).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("uses a supplied BYOK key for reproduction without persisting it or consulting Replit billing", async () => {
+    const key = "sk-project-ephemeral-key-123456";
+    state.create.mockResolvedValue(null);
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "");
+    vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "");
+    const result = await post("/api/reproductions", {
+      documentId: "paper",
+      providerMode: "byok",
+      modelProvider: "openai",
+      modelName: "gpt-4o",
+      byocApiKey: key,
+      judgeProviderMode: "byok",
+      judgeModelName: "gpt-4o",
+    });
+    expect(result.status).toBe(409);
+    expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
+      modelProvider: "openai", modelName: "gpt-4o", providerMode: "byoc",
+    }));
+    expect(JSON.stringify(state.create.mock.calls)).not.toContain(key);
+    expect(state.run).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("requires a separate ephemeral judge key when its BYOK provider differs", async () => {
+    const result = await post("/api/reproductions", {
+      documentId: "paper",
+      providerMode: "byoc",
+      modelProvider: "openai",
+      modelName: "gpt-4o",
+      byocApiKey: "sk-project-ephemeral-key-123456",
+      judgeProviderMode: "byok",
+      judgeModelProvider: "anthropic",
+      judgeModelName: "claude-sonnet-4-20250514",
+    });
+    expect(result.status).toBe(400);
+    expect(result.body.error).toMatch(/API key/i);
+    expect(state.create).not.toHaveBeenCalled();
+    expect(state.run).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid BYOK credentials before reading the saved reproduction", async () => {
+    const result = await post("/api/reproductions/:id/retry", {
+      providerMode: "byok",
+      modelProvider: "openai",
+      modelName: "gpt-4o",
+      byocApiKey: "not-a-valid-key",
+      judgeProviderMode: "byok",
+      judgeModelName: "gpt-4o",
+    });
+    expect(result.status).toBe(400);
+    expect(result.body.error).toMatch(/API key/i);
+    expect(state.getSource).not.toHaveBeenCalled();
+    expect(state.create).not.toHaveBeenCalled();
   });
 });

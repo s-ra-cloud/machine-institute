@@ -5,3 +5,4 @@
 - [Available-papers endpoints are slow](available-papers-slow.md) — peer/ethics paper pickers re-fetch the whole FS catalogue (~30s, no cache) per request; UI must show real loading/error states, not conflate empty with loading.
 - [Reproduction recovery](reproduction-recovery-contract.md) — strict evidence checks need live repair and orchestration replays; saved retry prompts must receive current runtime requirements.
 - [Questioning execution provenance](questioning-provenance.md) — qP needs controlled source entrypoints, not shell-command classification, to distinguish adapted analysis from original verification.
+- [Lab model modes](lab-model-modes.md) — managed billing must not replace the Lab's BYOK option; retain both when changing provider integrations.

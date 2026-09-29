@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
+const { createMock, constructorOptions } = vi.hoisted(() => ({
+  createMock: vi.fn(),
+  constructorOptions: vi.fn(),
+}));
 
 vi.mock("openai", () => ({
   default: class OpenAIMock {
     chat = { completions: { create: createMock } };
-    constructor(_opts: unknown) {}
+    constructor(opts: unknown) { constructorOptions(opts); }
   },
 }));
 
@@ -27,6 +30,7 @@ const platform = { providerMode: "platform" as const, provider: "openai", modelN
 describe("runToolLoop", () => {
   beforeEach(() => {
     createMock.mockReset();
+    constructorOptions.mockReset();
     vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-key");
     vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
     vi.stubEnv("LAB_ALLOWED_MODELS", "openai/gpt-4o");
@@ -92,11 +96,37 @@ describe("runToolLoop", () => {
     expect(result.toolCalls[0].result).toContain("kaboom");
   });
 
-  it("rejects legacy Anthropic BYOC rather than silently switching to managed billing", async () => {
+  it("rejects a BYOK request without a syntactically valid key before any provider call", async () => {
     await expect(runToolLoop(
       { providerMode: "byoc", provider: "anthropic", modelName: "claude", apiKey: "k" },
       "sys", "user", tools, async () => "", { maxToolCalls: 1, deadlineMs: Date.now() + 1000 },
-    )).rejects.toThrow(/Replit-managed/);
+    )).rejects.toThrow(/API key/i);
     expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("uses Anthropic's OpenAI-compatible endpoint for BYOK tool calls", async () => {
+    createMock
+      .mockResolvedValueOnce(assistantToolCall("c1", "anthropic-tool"))
+      .mockResolvedValueOnce(assistantFinal("Anthropic result"));
+    const apiKey = "sk-ant-api03-test-key-123456";
+    const execute = vi.fn(async (_name: string, args: Record<string, unknown>) => `done:${args.text}`);
+
+    const result = await runToolLoop(
+      { providerMode: "byoc", provider: "anthropic", modelName: "claude-sonnet-4-20250514", apiKey },
+      "sys", "user", tools, execute, { maxToolCalls: 1, deadlineMs: Date.now() + 60_000 },
+    );
+
+    expect(result.content).toBe("Anthropic result");
+    expect(execute).toHaveBeenCalledWith("echo", { text: "anthropic-tool" });
+    expect(constructorOptions).toHaveBeenCalledWith(expect.objectContaining({
+      baseURL: "https://api.anthropic.com/v1",
+      apiKey,
+      maxRetries: 0,
+    }));
+    expect(createMock.mock.calls[0][0]).toMatchObject({
+      model: "claude-sonnet-4-20250514",
+      tool_choice: "auto",
+      tools: [{ type: "function", function: { name: "echo" } }],
+    });
   });
 });

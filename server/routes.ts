@@ -18,7 +18,7 @@ import OpenAI from "openai";
 import { JSDOM } from "jsdom";
 import DOMPurify from "dompurify";
 import { requireAuth, optionalAuth, adminAuth, requireSession } from "./auth";
-import { createLLMClient, resolveModelName, generateWithConfig, getReadingBudget, READING_BUDGET, type ModelProviderConfig } from "./model-service";
+import { createLLMClient, resolveModelName, generateWithConfig, getReadingBudget, READING_BUDGET, validateApiKey, type ModelProviderConfig } from "./model-service";
 import { publishToFutureScience, submitLiteratureReviewToFutureScience, submitEthicsReportToFutureScience, submitPeerReviewToFutureScience, fetchAbstractsAndKeywords, fetchAbstractsAndKeywordsCached, extractTrendsAndGaps, scoreRelevance, FutureScienceFetchError, type FutureScienceAbstract, type FSContribution, type FSAuthor, type FSContributionsResponse } from "./future-science";
 import { submitReproductionToFutureScience } from "./future-science";
 import { buildConventionName, withMbSuffix, buildFsAgentDescription } from "./agent-naming";
@@ -26,7 +26,7 @@ import { INITIATIVE_DOC_IDS, JOURNAL_DISPLAY_NAMES, INITIATIVE_SLUGS, getJournal
 import { fetchJournalPaperCatalogue } from "./paper-catalogue";
 import { runReproduction } from "./reproduce";
 import { canRetryReproduction } from "./reproduction-retry";
-import { getManagedModels, resolveManagedSelection, ManagedModelError } from "./managed-models";
+import { BYOC_PROVIDERS, getManagedModels, resolveByocSelection, resolveManagedSelection, ManagedModelError } from "./managed-models";
 import { assertReproductionProviderCredit, ProviderCredentialPreflightError, ProviderCreditPreflightError } from "./provider-credit-preflight";
 import { isProviderPaymentFailure, ProviderPaymentError } from "./llm-context";
 import { createFallbackReproductionDiagnostics, getReproductionFailureDiagnostics, type ReproductionFailureDiagnostics } from "./reproduction-diagnostics";
@@ -38,15 +38,34 @@ import { provenancePage } from "./reproduction-provenance";
 function managedGeneration(task: string) {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
-      (req as any).managedModel = resolveManagedSelection({
-        providerMode: req.body.providerMode,
-        provider: req.body.modelProvider,
-        modelName: req.body.modelName,
-      }, task);
+      // "byok" is accepted as the UI label; persisted/server mode stays "byoc".
+      if (req.body.providerMode === "byok") req.body.providerMode = "byoc";
+      (req as any).managedModel = resolveRunModel(req.body, task);
+      if ((req as any).managedModel.providerMode === "byoc" && !(req as any).user) {
+        return res.status(401).json({ error: "Sign in before using your own provider key." });
+      }
       if (task === "reproduction") {
-        (req as any).managedJudge = resolveManagedSelection({
-          providerMode: "platform", modelName: req.body.judgeModelName,
-        }, "judge");
+        const model = (req as any).managedModel as ModelProviderConfig;
+        if (model.providerMode === "byoc") {
+          if (req.body.judgeProviderMode && !["byoc", "byok"].includes(req.body.judgeProviderMode)) {
+            throw new ManagedModelError("A BYOK reproduction cannot fall back to a Replit-managed judge. Select BYOK for both models.");
+          }
+          const judgeProvider = req.body.judgeModelProvider || model.provider;
+          const judgeKey = judgeProvider === model.provider ? model.apiKey : req.body.judgeByocApiKey;
+          (req as any).managedJudge = resolveByocSelection({
+            providerMode: "byoc",
+            provider: judgeProvider,
+            modelName: req.body.judgeModelName || model.modelName,
+            apiKey: judgeKey,
+          });
+        } else {
+          if (["byoc", "byok"].includes(req.body.judgeProviderMode)) {
+            throw new ManagedModelError("Select BYOK for both reproduction and judge, or use the managed judge.");
+          }
+          (req as any).managedJudge = resolveManagedSelection({
+            providerMode: "platform", modelName: req.body.judgeModelName,
+          }, "judge");
+        }
       }
       next();
     } catch (error) {
@@ -54,6 +73,28 @@ function managedGeneration(task: string) {
       throw error;
     }
   };
+}
+
+function resolveRunModel(body: Record<string, any>, task: string): ModelProviderConfig {
+  if (body.providerMode === "byoc" || body.providerMode === "byok") {
+    return resolveByocSelection({
+      providerMode: "byoc",
+      provider: body.modelProvider,
+      modelName: body.modelName,
+      apiKey: body.byocApiKey,
+    });
+  }
+  return resolveManagedSelection({
+    providerMode: body.providerMode,
+    provider: body.modelProvider,
+    modelName: body.modelName,
+  }, task);
+}
+
+function resolveRunConfig(config: ModelProviderConfig, task: string): ModelProviderConfig {
+  return config.providerMode === "byoc"
+    ? resolveByocSelection(config)
+    : resolveManagedSelection(config, task);
 }
 
 // Map publication-audit flags to Future Science revision arrays:
@@ -890,7 +931,9 @@ I will now provide the papers.`;
         ...m,
         maxFullTextPapers: getReadingBudget({ providerMode: "platform", provider: m.provider, modelName: m.model }).maxFullTextPapers,
       })),
-      byocProviders: [],
+      byocProviders: BYOC_PROVIDERS.map(({ id, label, defaultModel, defaultContextWindow }) => ({
+        id, label, defaultModel, defaultContextWindow,
+      })),
       defaultModel: defaultModel ? { provider: defaultModel.provider, model: defaultModel.model } : null,
       limits: {},
       defaultTopics: {
@@ -938,7 +981,12 @@ I will now provide the papers.`;
   });
 
   app.post("/api/generation/validate-key", requireAuth, async (req, res) => {
-    return res.status(410).json({ error: "BYOC key validation is retired. Select a Replit-managed model." });
+    const { provider, apiKey } = req.body || {};
+    if (typeof provider !== "string" || typeof apiKey !== "string") {
+      return res.status(400).json({ valid: false, error: "Provider and API key are required." });
+    }
+    const result = await validateApiKey(provider, apiKey);
+    return res.status(result.valid ? 200 : 400).json(result);
   });
 
   app.delete("/api/generation/history", adminAuth, async (req: Request, res: Response) => {
@@ -982,7 +1030,7 @@ I will now provide the papers.`;
       const effectiveIncludeArxiv = includeArxiv !== false;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google", "openrouter"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) {
         return res.status(400).json({ error: `Invalid providerMode. Must be one of: ${VALID_PROVIDER_MODES.join(", ")}` });
       }
@@ -1319,7 +1367,7 @@ I will now provide the papers.`;
       // Number of top-ranked papers Stage 5 will read in full text (rest stay abstract-only).
       // The cap scales with the selected model's context window (see getReadingBudget),
       // so bigger models read more papers in full and the input budget grows with them.
-      const readingBudget = getReadingBudget(resolveManagedSelection(modelConfig || {}, "literature-review"));
+      const readingBudget = getReadingBudget(resolveRunConfig(modelConfig || { providerMode: "platform", provider: "", modelName: "" }, "literature-review"));
       const FULL_TEXT_TARGET = Math.min(readingBudget.maxFullTextPapers, Math.max(1, data.fullTextCount ?? readingBudget.maxFullTextPapers));
       // Keep the shortlist at least 3× the full-text read target so the full-text stage
       // always has a healthy candidate pool (e.g. 45 papers when 15 are read in full).
@@ -1345,7 +1393,7 @@ I will now provide the papers.`;
       const corpusSource: "future-science" | "project-log-fallback" = fsHasPapers ? "future-science" : "project-log-fallback";
 
       // Resolve the model config up front — the selection stages below call the model too.
-      const config = resolveManagedSelection(modelConfig || {}, "literature-review");
+      const config = resolveRunConfig(modelConfig || { providerMode: "platform", provider: "", modelName: "" }, "literature-review");
       const model = resolveModelName(config);
 
       // Best-effort JSON extraction from a model response (handles code fences / stray prose).
@@ -2102,7 +2150,7 @@ I will now provide the papers.`;
       const effectivePriority = VALID_PRIORITIES.includes(prioritize) ? prioritize : "random";
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google", "openrouter"];
       const VALID_PERSONAS: PeerReviewPersona[] = ["bR", "iR", "aR", "rR"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
       if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
@@ -2269,7 +2317,7 @@ I will now provide the papers.`;
       } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google", "openrouter"];
       const VALID_PERSONAS: PeerReviewPersona[] = ["bR", "iR", "aR", "rR"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
       if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
@@ -2360,7 +2408,7 @@ I will now provide the papers.`;
     }
 
     try {
-      modelConfig = resolveManagedSelection(modelConfig, "peer-review");
+      modelConfig = resolveRunConfig(modelConfig, "peer-review");
       await storage.updatePeerReview(reviewId, { status: "generating" });
       await emit("peer-review-init", `${persona} peer review started for paper ${data.documentId} in ${data.journalId}.`);
 
@@ -2829,7 +2877,7 @@ I will now provide the papers.`;
       } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google", "openrouter"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) return res.status(400).json({ error: "Invalid providerMode." });
       if (modelProvider && !VALID_PROVIDERS.includes(modelProvider)) return res.status(400).json({ error: "Invalid modelProvider." });
       if (!documentId || typeof documentId !== "string") return res.status(400).json({ error: "documentId is required." });
@@ -2899,6 +2947,31 @@ I will now provide the papers.`;
       if (req.body.agentId !== undefined && req.body.agentId !== "P" && req.body.agentId !== "qP") {
         return res.status(400).json({ error: "Invalid agentId. Expected P or qP." });
       }
+      if (req.body.byocApiKey !== undefined && !["byoc", "byok"].includes(req.body.providerMode)) {
+        return res.status(400).json({ error: "Select BYOK mode explicitly when supplying a provider key." });
+      }
+      if (req.body.judgeByocApiKey !== undefined
+        && !["byoc", "byok"].includes(req.body.providerMode)
+        && !["byoc", "byok"].includes(req.body.judgeProviderMode)) {
+        return res.status(400).json({ error: "Select BYOK mode explicitly when supplying a judge key." });
+      }
+      // Validate a BYOK selection and both transient credentials before reading
+      // a saved run. Ownership is still checked before any new row/job is made.
+      let prevalidatedByocModel: ModelProviderConfig | undefined;
+      let prevalidatedByocJudge: ModelProviderConfig | undefined;
+      if (req.body.providerMode === "byoc" || req.body.providerMode === "byok") {
+        prevalidatedByocModel = resolveRunModel(req.body, "reproduction");
+        if (req.body.judgeProviderMode && !["byoc", "byok"].includes(req.body.judgeProviderMode)) {
+          return res.status(400).json({ error: "A BYOK reproduction cannot fall back to a Replit-managed judge. Select BYOK for both models." });
+        }
+        const judgeProvider = req.body.judgeModelProvider || prevalidatedByocModel.provider;
+        prevalidatedByocJudge = resolveByocSelection({
+          providerMode: "byoc",
+          provider: judgeProvider,
+          modelName: req.body.judgeModelName || prevalidatedByocModel.modelName,
+          apiKey: judgeProvider === prevalidatedByocModel.provider ? prevalidatedByocModel.apiKey : req.body.judgeByocApiKey,
+        });
+      }
       const source = await storage.getReproductionById(String(req.params.id));
       if (!source) return res.status(404).json({ error: "Reproduction not found." });
       if (!canRetryReproduction(source)) {
@@ -2917,23 +2990,28 @@ I will now provide the papers.`;
       }
 
       // Require explicit replacements, never reinterpret historical model IDs.
-      const modelConfig = resolveManagedSelection({
-        providerMode: req.body.providerMode,
-        provider: req.body.modelProvider,
-        modelName: req.body.modelName,
-      }, "reproduction");
+      const modelConfig = prevalidatedByocModel ?? resolveRunModel(req.body, "reproduction");
       const { providerMode, provider } = modelConfig;
       const resolvedModel = resolveModelName(modelConfig);
-      const judgeConfig = resolveManagedSelection({
-        providerMode: "platform", modelName: req.body.judgeModelName,
-      }, "judge");
-      try {
-        await assertReproductionProviderCredit(modelConfig, message => console.warn(message));
-      } catch (error) {
-        if (error instanceof ProviderCreditPreflightError || error instanceof ProviderCredentialPreflightError) {
-          return res.status(error instanceof ProviderCreditPreflightError ? 402 : 400).json({ error: error.message });
+      let judgeConfig: ModelProviderConfig;
+      if (modelConfig.providerMode === "byoc") {
+        // The BYOK branch above was prevalidated before looking up the source.
+        judgeConfig = prevalidatedByocJudge!;
+      } else {
+        if (["byoc", "byok"].includes(req.body.judgeProviderMode)) {
+          return res.status(400).json({ error: "Select BYOK for both reproduction and judge, or use the managed judge." });
         }
-        throw error;
+        judgeConfig = resolveManagedSelection({
+          providerMode: "platform", modelName: req.body.judgeModelName,
+        }, "judge");
+        try {
+          await assertReproductionProviderCredit(modelConfig, message => console.warn(message));
+        } catch (error) {
+          if (error instanceof ProviderCreditPreflightError || error instanceof ProviderCredentialPreflightError) {
+            return res.status(error instanceof ProviderCreditPreflightError ? 402 : 400).json({ error: error.message });
+          }
+          throw error;
+        }
       }
       const parsed = insertReproductionSchema.safeParse({
         projectId: source.projectId,
@@ -2991,8 +3069,8 @@ I will now provide the papers.`;
     }
 
     try {
-      modelConfig = resolveManagedSelection(modelConfig, "reproduction");
-      judgeConfig = resolveManagedSelection(judgeConfig, "judge");
+      modelConfig = resolveRunConfig(modelConfig, "reproduction");
+      judgeConfig = resolveRunConfig(judgeConfig, "judge");
       await storage.updateReproduction(reproductionId, { status: "generating" });
       const result = await runReproduction({
         reproductionId,
@@ -3118,9 +3196,15 @@ I will now provide the papers.`;
         const transient = err instanceof ProviderPaymentError
           && err.limitSource === "openrouter_in_flight_budget"
           && err.paymentReason === "in_flight_budget_exhausted";
-        await emit("failure", transient
-          ? "Reproduction stopped because Replit-managed OpenRouter temporarily reached its in-flight spending limit. No report was completed; retry after the temporary limit clears."
-          : "Reproduction stopped because Replit-managed OpenRouter could not fund the model request. No report was completed; ask the deployment administrator to check Replit credits and managed integration limits before retrying. Personal OpenRouter keys are not used for new Lab runs.");
+        if (modelConfig.providerMode === "byoc") {
+          await emit("failure", transient
+            ? "Reproduction stopped because the BYOK provider account temporarily reached a request limit. No report was completed; retry after the provider limit clears."
+            : "Reproduction stopped because the BYOK provider account could not fund the request. No report was completed; check the selected provider account's credits and key limits. This request was billed by the provider, not Replit.");
+        } else {
+          await emit("failure", transient
+            ? "Reproduction stopped because Replit-managed OpenRouter temporarily reached its in-flight spending limit. No report was completed; retry after the temporary limit clears."
+            : "Reproduction stopped because Replit-managed OpenRouter could not fund the model request. No report was completed; ask the deployment administrator to check Replit credits and managed integration limits before retrying. Personal OpenRouter keys are not used for new Lab runs.");
+        }
       } else {
         await emit("failure", "Reproduction failed. No report was completed; institute members can retry the run.");
       }
@@ -3352,7 +3436,7 @@ I will now provide the papers.`;
       } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google", "openrouter"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) {
         return res.status(400).json({ error: `Invalid providerMode.` });
       }
@@ -3456,7 +3540,7 @@ I will now provide the papers.`;
     }
 
     try {
-      modelConfig = resolveManagedSelection(modelConfig, "ethics-report");
+      modelConfig = resolveRunConfig(modelConfig, "ethics-report");
       await storage.updateEthicsReport(reportId, { status: "generating" });
       await emit("ethics-init", `Field ethics report started for journal ${data.journalId}.`);
 
@@ -3696,7 +3780,7 @@ List every cited paper in Chicago author-date bibliography format:
       const { topic, modelProvider, modelName, providerMode, byocApiKey, orchestratorName, agentDescription, userPrompt, prompt, journalId } = req.body;
 
       const VALID_PROVIDER_MODES = ["platform", "byoc"];
-      const VALID_PROVIDERS = ["openai", "anthropic", "google"];
+      const VALID_PROVIDERS = ["openai", "anthropic", "google", "openrouter"];
       if (providerMode && !VALID_PROVIDER_MODES.includes(providerMode)) {
         return res.status(400).json({ error: `Invalid providerMode. Must be one of: ${VALID_PROVIDER_MODES.join(", ")}` });
       }
@@ -4060,7 +4144,7 @@ List every cited paper in Chicago author-date bibliography format:
           }).join("\n\n---\n\n")
         : "";
 
-      const config = resolveManagedSelection(modelConfig || {}, "editorial");
+      const config = resolveRunConfig(modelConfig || { providerMode: "platform", provider: "", modelName: "" }, "editorial");
       const model = resolveModelName(config);
 
       const effectiveTopic = topic || "Recent developments in AI agent-driven scientific research, autonomous experimentation, and AI interpretability";

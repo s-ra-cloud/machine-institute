@@ -1,5 +1,5 @@
 import type { ModelProviderConfig } from "./model-service";
-import { resolveManagedSelection } from "./managed-models";
+import { resolveByocSelection, resolveManagedSelection } from "./managed-models";
 import { ProviderPaymentError } from "./llm-context";
 
 // Retained exports for historical diagnostics/API compatibility only.
@@ -17,6 +17,11 @@ export async function assertReproductionProviderCredit(
   config: ModelProviderConfig,
   onWarning?: (message: string) => void,
 ): Promise<ProviderCreditPreflightOutcome> {
+  if (config.providerMode === "byoc") {
+    resolveByocSelection(config);
+    try { onWarning?.("BYOK provider selected; requests are charged to the user's provider account, not Replit."); } catch { /* observability only */ }
+    return "unknown";
+  }
   resolveManagedSelection(config);
   try { onWarning?.("Replit-managed OpenRouter is configured; model and Replit credit availability are checked when the provider request executes."); } catch { /* observability only */ }
   return "unknown";

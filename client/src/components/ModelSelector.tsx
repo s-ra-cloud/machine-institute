@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, Check, Cpu, Loader2, Lock } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { AlertCircle, Check, Cpu, Key, Loader2, Lock } from "lucide-react";
 import {
   estimateTaskCost,
   type AvailableManagedModel,
@@ -9,9 +9,21 @@ import {
 } from "@shared/model-catalog";
 
 export interface ModelConfig {
-  providerMode: "platform";
+  providerMode: "platform" | "byok";
   provider: string;
   modelName: string;
+}
+
+const BYOK_PROVIDERS = ["openai", "anthropic", "openrouter"];
+
+export function areReproductionModelModesCompatible(reproducer: ModelConfig, judge: ModelConfig): boolean {
+  return reproducer.providerMode === judge.providerMode;
+}
+
+export function isByokModelSelectionReady(config: ModelConfig, apiKey: string): boolean {
+  return config.providerMode === "byok"
+    && BYOK_PROVIDERS.includes(config.provider)
+    && Boolean(config.modelName.trim() && apiKey.trim());
 }
 
 export type GenerationCostType = SharedGenerationCostType;
@@ -47,6 +59,8 @@ interface Props {
   setupMessage?: string;
   compact?: boolean;
   requireExplicitSelection?: boolean;
+  apiKey?: string;
+  onApiKeyChange?: (key: string) => void;
 }
 
 const taskSupported = (model: ManagedModel, type?: GenerationCostType): boolean =>
@@ -138,6 +152,8 @@ export function ModelSelector({
   setupMessage,
   compact = false,
   requireExplicitSelection = false,
+  apiKey = "",
+  onApiKeyChange,
 }: Props) {
   const ownConfig = useGenerationConfig(models === undefined);
   const availableModels = models ?? ownConfig.data?.platformModels ?? [];
@@ -158,7 +174,7 @@ export function ModelSelector({
   );
 
   useEffect(() => {
-    if (requireExplicitSelection || !hasPlatformAccess || loading || compatible.length === 0) return;
+    if (value.providerMode !== "platform" || requireExplicitSelection || !hasPlatformAccess || loading || compatible.length === 0) return;
     const next = chooseInitialManagedModel(compatible, value.modelName, activeType);
     if (next) {
       onChange({
@@ -167,7 +183,7 @@ export function ModelSelector({
         modelName: next.model,
       });
     }
-  }, [activeType, compatible, hasPlatformAccess, loading, onChange, requireExplicitSelection, value.modelName]);
+  }, [activeType, compatible, hasPlatformAccess, loading, onChange, requireExplicitSelection, value.modelName, value.providerMode]);
 
   const selectModel = (model: ManagedModel) => {
     if (!hasPlatformAccess || model.enabled === false) return;
@@ -182,17 +198,100 @@ export function ModelSelector({
     <div
       className="border border-border/50 bg-muted/5"
       data-testid="model-selector"
-      data-model-ready={selectedReady ? "true" : "false"}
+      data-model-ready={(value.providerMode === "byok" ? Boolean(value.provider && value.modelName.trim() && apiKey.trim()) : selectedReady) ? "true" : "false"}
     >
       <div className="flex items-center justify-between gap-3 border-b border-border/30 px-4 py-3">
         <div className="flex items-center gap-2">
-          {hasPlatformAccess ? <Cpu className="w-3.5 h-3.5 text-primary" /> : <Lock className="w-3.5 h-3.5" />}
+          {value.providerMode === "byok" ? <Key className="w-3.5 h-3.5 text-primary" /> : hasPlatformAccess ? <Cpu className="w-3.5 h-3.5 text-primary" /> : <Lock className="w-3.5 h-3.5" />}
           <span className="text-xs font-mono uppercase tracking-widest">{label}</span>
         </div>
-        <span className="text-[9px] font-mono text-muted-foreground/50">Replit-managed OpenRouter · funded by Replit credits</span>
+        <span className="text-[9px] font-mono text-muted-foreground/50">
+          {value.providerMode === "byok" ? "Your provider account · billed separately from Replit credits" : "Replit-managed OpenRouter · funded by Replit credits"}
+        </span>
       </div>
 
       <div className={compact ? "p-3" : "p-5"}>
+        <div className="mb-4 flex gap-2" role="tablist" aria-label="Model billing mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={value.providerMode === "platform"}
+            disabled={!hasPlatformAccess}
+            onClick={() => onChange({ providerMode: "platform", provider: "", modelName: "" })}
+            className={`border px-3 py-2 text-[10px] font-mono ${value.providerMode === "platform" ? "border-primary text-primary" : "border-border/40 text-muted-foreground"} disabled:cursor-not-allowed disabled:opacity-40`}
+            data-testid="tab-platform"
+          >
+            Replit-managed OpenRouter
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={value.providerMode === "byok"}
+            onClick={() => onChange({ providerMode: "byok", provider: value.provider || "openai", modelName: value.modelName || "gpt-4o" })}
+            className={`border px-3 py-2 text-[10px] font-mono ${value.providerMode === "byok" ? "border-primary text-primary" : "border-border/40 text-muted-foreground"}`}
+            data-testid="tab-byok"
+          >
+            Use your own provider key
+          </button>
+        </div>
+        {value.providerMode === "byok" && (
+          <div className="space-y-4" data-testid="byok-model-panel">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                Provider
+                <select
+                  value={value.provider}
+                  onChange={event => {
+                    onApiKeyChange?.("");
+                    const provider = event.target.value;
+                    onChange({
+                      providerMode: "byok",
+                      provider,
+                      modelName: provider === "openai" ? "gpt-4o" : provider === "anthropic" ? "claude-sonnet-4-20250514" : "",
+                    });
+                  }}
+                  className="mt-2 w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono normal-case tracking-normal"
+                  data-testid="select-byok-provider"
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="openrouter">OpenRouter</option>
+                </select>
+              </label>
+              <label className="block text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                Model identifier
+                <input
+                  type="text"
+                  value={value.modelName}
+                  onChange={event => onChange({ ...value, modelName: event.target.value })}
+                  placeholder={value.provider === "openrouter" ? "e.g. openai/gpt-4o" : value.provider === "anthropic" ? "e.g. claude-sonnet-4-20250514" : "e.g. gpt-4o"}
+                  autoComplete="off"
+                  className="mt-2 w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono normal-case tracking-normal"
+                  data-testid="input-byok-model"
+                />
+              </label>
+            </div>
+            <label className="block text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+              {value.provider === "anthropic" ? "Anthropic API key" : value.provider === "openrouter" ? "OpenRouter API key" : "OpenAI API key"}
+              <input
+                type="password"
+                value={apiKey}
+                onChange={event => onApiKeyChange?.(event.target.value)}
+                autoComplete="new-password"
+                spellCheck={false}
+                className="mt-2 w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono"
+                data-testid="input-byok-api-key"
+              />
+            </label>
+            <p className="text-[10px] font-mono text-muted-foreground/70" data-testid="text-byok-billing">
+              Your key stays in this page&apos;s temporary form state and is sent only with this task&apos;s POST. It is cleared when submission finishes. Provider usage is billed by your provider account, separately from Replit credits. Custom BYOK models have no managed-model estimate.
+            </p>
+            {(!value.modelName.trim() || !apiKey.trim()) && (
+              <p className="text-[10px] font-mono text-amber-200">Enter a model identifier and provider key to enable submission.</p>
+            )}
+          </div>
+        )}
+        {value.providerMode === "platform" && <>
         {!hasPlatformAccess ? (
           <div className="flex items-start gap-2 text-[10px] font-mono text-muted-foreground/60 border border-border/20 bg-muted/5 px-3 py-2.5" data-testid="platform-locked-notice">
             <Lock className="w-3 h-3 mt-0.5 shrink-0" />
@@ -271,6 +370,7 @@ export function ModelSelector({
             )}
           </>
         )}
+        </>}
       </div>
     </div>
   );
