@@ -85,7 +85,7 @@ export class ReproductionDiagnostics {
         "max_tokens", "max_num_tokens", "request_too_large",
         "payment_required", "provider_credit", "unknown"]);
     if (event.providerReason !== undefined) safe.providerReason = enumValue(event.providerReason,
-      ["provider-credit", "payment", "context", "unknown"]);
+      ["provider-credit", "payment", "context", "rate-limit", "unknown"]);
     if (event.providerLimitSource !== undefined) safe.providerLimitSource = enumValue(event.providerLimitSource,
       ["openrouter_in_flight_budget", "openrouter_key_limit", "openrouter_credits"]);
     if (event.providerPaymentReason !== undefined) safe.providerPaymentReason = enumValue(event.providerPaymentReason,
@@ -115,7 +115,7 @@ export class ReproductionDiagnostics {
   stop(reason: string): void {
     this.data.stopReason = enumValue(reason,
       ["model", "tool-budget", "deadline", "round-cap", "no-progress", "exception",
-        "context-budget", "provider-payment", "provider-credit",
+        "context-budget", "provider-payment", "provider-credit", "rate-limit",
         "completion-validation", "cleanup-failed"]);
   }
 

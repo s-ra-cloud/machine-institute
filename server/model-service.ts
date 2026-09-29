@@ -257,7 +257,7 @@ export interface ToolLoopOutcome {
   stopReason?: string;
   providerStatus?: number;
   providerCode?: string;
-  providerReason?: "provider-credit" | "payment" | "context" | "unknown";
+  providerReason?: "provider-credit" | "payment" | "context" | "rate-limit" | "unknown";
   providerLimitSource?: "openrouter_in_flight_budget" | "openrouter_key_limit" | "openrouter_credits";
   providerPaymentReason?: "in_flight_budget_exhausted" | "weight_exceeds_budget";
   providerRetryAfterMs?: number;
@@ -338,6 +338,7 @@ export function safeProviderErrorDiagnostic(error: unknown): Pick<ToolLoopOutcom
   const constraint = providerContextConstraint(error);
   const payment = providerPaymentReason(error);
   const context = !payment && isContextOverflow(error);
+  const rateLimit = !payment && statusValue === 429;
   const paymentMetadata = providerPaymentMetadata(error);
   const retryAfterMs = providerRetryAfterMs(error);
   const providerStatus = Number.isSafeInteger(statusValue) && statusValue >= 100 && statusValue <= 599
@@ -346,7 +347,7 @@ export function safeProviderErrorDiagnostic(error: unknown): Pick<ToolLoopOutcom
     providerStatus,
     providerCode: payment ?? (PROVIDER_CODES.has(rawCode) ? rawCode : "unknown"),
     providerReason: payment === "provider_credit" ? "provider-credit"
-      : payment ? "payment" : context ? "context" : "unknown",
+      : payment ? "payment" : rateLimit ? "rate-limit" : context ? "context" : "unknown",
     providerLimitSource: paymentMetadata.limitSource,
     providerPaymentReason: paymentMetadata.reason,
     providerRetryAfterMs: retryAfterMs || undefined,
@@ -489,6 +490,36 @@ function activeRequestTimeout(deadlineMs: number, protectedRequest: boolean): nu
   return Math.max(1, Math.min(600_000, deadlineMs - Date.now()));
 }
 
+const MAX_RATE_LIMIT_RETRIES = 2;
+const MAX_RATE_LIMIT_RETRY_DELAY_MS = 1_000;
+const MAX_RATE_LIMIT_TOTAL_WAIT_MS = 2_000;
+
+function isRateLimit429(error: unknown): boolean {
+  if (!error || typeof error !== "object" || isProviderPaymentFailure(error)) return false;
+  const value = error as Record<string, unknown>;
+  return Number(value.status ?? value.statusCode) === 429;
+}
+
+async function waitForRateLimitRetry(
+  error: unknown,
+  retries: number,
+  waitedMs: number,
+  deadlineMs: number,
+): Promise<number | null> {
+  if (retries >= MAX_RATE_LIMIT_RETRIES || !isRateLimit429(error)) return null;
+  const retryAfterMs = providerRetryAfterMs(error);
+  const delayMs = retryAfterMs > 0
+    ? retryAfterMs
+    : Math.min(500, 100 * (2 ** retries));
+  if (
+    delayMs > MAX_RATE_LIMIT_RETRY_DELAY_MS
+    || waitedMs + delayMs > MAX_RATE_LIMIT_TOTAL_WAIT_MS
+    || Date.now() + delayMs >= deadlineMs
+  ) return null;
+  if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+  return Date.now() < deadlineMs ? waitedMs + delayMs : null;
+}
+
 async function waitForTransientProviderPayment(error: unknown, deadlineMs: number): Promise<boolean> {
   if (!isTransientProviderPaymentFailure(error)) return false;
   const delayMs = providerRetryAfterMs(error);
@@ -578,17 +609,25 @@ export async function runToolLoop(
     let completion: any;
     let contextReductions = 0;
     let paymentRetries = 0;
+    let rateLimitRetries = 0;
+    let rateLimitWaitedMs = 0;
+    let exactRateLimitRetryRequest: Record<string, unknown> | undefined;
     while (true) {
       let request: Record<string, unknown>;
       try {
-        request = requestBudget
-          ? fitToolContext(baseRequest, {
-            budget: requestBudget,
-            protection: options.contextProtection!,
-            elidedToolOutputMessage,
-            numberToolResults: options.numberToolResults,
-          })
-          : baseRequest;
+        if (exactRateLimitRetryRequest) {
+          request = exactRateLimitRetryRequest;
+          exactRateLimitRetryRequest = undefined;
+        } else {
+          request = requestBudget
+            ? fitToolContext(baseRequest, {
+              budget: requestBudget,
+              protection: options.contextProtection!,
+              elidedToolOutputMessage,
+              numberToolResults: options.numberToolResults,
+            })
+            : baseRequest;
+        }
       } catch (error) {
         if (error instanceof ContextBudgetError) {
           console.warn(`[ToolLoop] ${error.message}`);
@@ -619,6 +658,17 @@ export async function runToolLoop(
             ...safeProviderErrorDiagnostic(err) });
           continue;
         }
+        const rateLimitWait = await waitForRateLimitRetry(
+          err, rateLimitRetries, rateLimitWaitedMs, options.deadlineMs,
+        );
+        if (rateLimitWait !== null) {
+          rateLimitWaitedMs = rateLimitWait;
+          rateLimitRetries++;
+          exactRateLimitRetryRequest = request;
+          await observe({ kind: "provider-error", round, callCount: toolCalls.length,
+            ...safeProviderErrorDiagnostic(err) });
+          continue;
+        }
         if (
           requestBudget
           && isContextOverflow(err)
@@ -638,7 +688,8 @@ export async function runToolLoop(
           await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
         }
          await observe({ kind: "provider-error", round, callCount: toolCalls.length,
-           stopReason: "provider-request-failed", ...safeProviderErrorDiagnostic(err) });
+           stopReason: isRateLimit429(err) ? "rate-limit" : "provider-request-failed",
+           ...safeProviderErrorDiagnostic(err) });
         const sanitizedError = sanitizeContextRequestError(err, model, config);
         if (isProviderPaymentFailure(sanitizedError)) throw sanitizedError;
         if (options.allowResourceStopFallback) {
@@ -657,6 +708,17 @@ export async function runToolLoop(
           && await waitForTransientProviderPayment(completionError, options.deadlineMs)
         ) {
           paymentRetries++;
+          await observe({ kind: "provider-error", round, callCount: toolCalls.length,
+            ...safeProviderErrorDiagnostic(completionError) });
+          continue;
+        }
+        const rateLimitWait = await waitForRateLimitRetry(
+          completionError, rateLimitRetries, rateLimitWaitedMs, options.deadlineMs,
+        );
+        if (rateLimitWait !== null) {
+          rateLimitWaitedMs = rateLimitWait;
+          rateLimitRetries++;
+          exactRateLimitRetryRequest = request;
           await observe({ kind: "provider-error", round, callCount: toolCalls.length,
             ...safeProviderErrorDiagnostic(completionError) });
           continue;
@@ -680,7 +742,8 @@ export async function runToolLoop(
           await reportContextDiagnostic(requestBudget, request, model, options.contextProtection);
         }
          await observe({ kind: "provider-error", round, callCount: toolCalls.length,
-           stopReason: "provider-error-response", ...safeProviderErrorDiagnostic(completionError) });
+           stopReason: isRateLimit429(completionError) ? "rate-limit" : "provider-error-response",
+           ...safeProviderErrorDiagnostic(completionError) });
         const sanitizedError = sanitizeContextRequestError(completionError, model, config);
         if (isProviderPaymentFailure(sanitizedError)) throw sanitizedError;
         if (options.allowResourceStopFallback) {
@@ -865,17 +928,25 @@ export async function runToolLoop(
   let finalCompletion: any;
   let finalReductions = 0;
   let finalPaymentRetries = 0;
+  let finalRateLimitRetries = 0;
+  let finalRateLimitWaitedMs = 0;
+  let finalExactRateLimitRetryRequest: Record<string, unknown> | undefined;
   while (true) {
     let request: Record<string, unknown>;
     try {
-      request = requestBudget
-        ? fitToolContext(finalRequest, {
-          budget: requestBudget,
-          protection: options.contextProtection!,
-          elidedToolOutputMessage,
-          numberToolResults: options.numberToolResults,
-        })
-        : finalRequest;
+      if (finalExactRateLimitRetryRequest) {
+        request = finalExactRateLimitRetryRequest;
+        finalExactRateLimitRetryRequest = undefined;
+      } else {
+        request = requestBudget
+          ? fitToolContext(finalRequest, {
+            budget: requestBudget,
+            protection: options.contextProtection!,
+            elidedToolOutputMessage,
+            numberToolResults: options.numberToolResults,
+          })
+          : finalRequest;
+      }
     } catch (error) {
       if (error instanceof ContextBudgetError) {
         console.warn(`[ToolLoop] ${error.message}`);
@@ -901,6 +972,17 @@ export async function runToolLoop(
           ...safeProviderErrorDiagnostic(err) });
         continue;
       }
+      const rateLimitWait = await waitForRateLimitRetry(
+        err, finalRateLimitRetries, finalRateLimitWaitedMs, options.deadlineMs,
+      );
+      if (rateLimitWait !== null) {
+        finalRateLimitWaitedMs = rateLimitWait;
+        finalRateLimitRetries++;
+        finalExactRateLimitRetryRequest = request;
+        await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
+          ...safeProviderErrorDiagnostic(err) });
+        continue;
+      }
       if (
         requestBudget
         && isContextOverflow(err)
@@ -921,7 +1003,8 @@ export async function runToolLoop(
         throw terminalContextError(requestBudget, request, model);
       }
        await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
-         stopReason: "provider-request-failed", ...safeProviderErrorDiagnostic(err) });
+         stopReason: isRateLimit429(err) ? "rate-limit" : "provider-request-failed",
+         ...safeProviderErrorDiagnostic(err) });
        throw sanitizeContextRequestError(err, model, config);
     }
     if (finalCompletion?.error) {
@@ -931,6 +1014,17 @@ export async function runToolLoop(
         && await waitForTransientProviderPayment(completionError, options.deadlineMs)
       ) {
         finalPaymentRetries++;
+        await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
+          ...safeProviderErrorDiagnostic(completionError) });
+        continue;
+      }
+      const rateLimitWait = await waitForRateLimitRetry(
+        completionError, finalRateLimitRetries, finalRateLimitWaitedMs, options.deadlineMs,
+      );
+      if (rateLimitWait !== null) {
+        finalRateLimitWaitedMs = rateLimitWait;
+        finalRateLimitRetries++;
+        finalExactRateLimitRetryRequest = request;
         await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
           ...safeProviderErrorDiagnostic(completionError) });
         continue;
@@ -955,7 +1049,8 @@ export async function runToolLoop(
         throw terminalContextError(requestBudget, request, model);
       }
        await observe({ kind: "provider-error", round: maxRounds + 1, callCount: toolCalls.length,
-         stopReason: "provider-error-response", ...safeProviderErrorDiagnostic(completionError) });
+         stopReason: isRateLimit429(completionError) ? "rate-limit" : "provider-error-response",
+         ...safeProviderErrorDiagnostic(completionError) });
       throw sanitizeContextRequestError(completionError, model, config);
     }
     break;

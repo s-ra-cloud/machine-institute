@@ -101,6 +101,20 @@ describe("private reproduction diagnostics", () => {
     expect(JSON.stringify(snapshot)).not.toContain("PRIVATE_PROVIDER_BILLING_BODY");
   });
 
+  it("propagates allowlisted terminal rate-limit classifications", () => {
+    const diagnostics = new ReproductionDiagnostics();
+    diagnostics.observe({
+      kind: "provider-error", stopReason: "rate-limit",
+      providerStatus: 429, providerReason: "rate-limit",
+    });
+    diagnostics.stop("rate-limit");
+    const snapshot = diagnostics.snapshot();
+    expect(snapshot.stopReason).toBe("rate-limit");
+    expect(snapshot.events[0]).toMatchObject({
+      providerStatus: 429, providerReason: "rate-limit",
+    });
+  });
+
   it("capture failure never throws or replaces the original failure", () => {
     const diagnostics = new ReproductionDiagnostics();
     const original = new Error("original");

@@ -419,6 +419,7 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
   } catch (error) {
     try {
       if (isProviderPaymentFailure(error)) diagnostics.stop("provider-payment");
+      else if (Number((error as any)?.status ?? (error as any)?.statusCode) === 429) diagnostics.stop("rate-limit");
       else if (error instanceof ContextBudgetError) diagnostics.stop("context-budget");
     } catch { /* Capture failure must not replace the original error. */ }
     attachReproductionFailureDiagnostics(error, diagnostics);

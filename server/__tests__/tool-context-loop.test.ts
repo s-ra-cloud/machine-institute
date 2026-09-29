@@ -446,4 +446,100 @@ describe("tool-loop context protection", () => {
     expect(createMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
+
+  it("retries a thrown 429 twice at most on the same model request", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    createMock
+      .mockRejectedValueOnce({ status: 429, headers: { "retry-after": "0.01" }, message: "PRIVATE provider body" })
+      .mockResolvedValueOnce({ choices: [{ message: { content: "done", tool_calls: [] }, finish_reason: "stop" }] });
+    const execute = vi.fn(async () => "must not execute");
+    const outcomes: any[] = [];
+    const pending = runToolLoop(config, "system", "paper", [], execute, {
+      maxToolCalls: 1, deadlineMs: 60_000, onOutcome: event => outcomes.push(event),
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(pending).resolves.toMatchObject({ content: "done" });
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(createMock.mock.calls[0][0]).toEqual(createMock.mock.calls[1][0]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(JSON.stringify(outcomes)).not.toContain("PRIVATE");
+    vi.useRealTimers();
+  });
+
+  it("stops after two additional 429 attempts with sanitized rate-limit diagnostics", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    createMock.mockRejectedValue({ status: 429, message: "PRIVATE provider body" });
+    const outcomes: any[] = [];
+    const pending = runToolLoop(config, "system", "paper", [], async () => "must not execute", {
+      maxToolCalls: 1, deadlineMs: 60_000, onOutcome: event => outcomes.push(event),
+    });
+    const rejected = expect(pending).rejects.toThrow("Managed model rate limit reached");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejected;
+    expect(createMock).toHaveBeenCalledTimes(3);
+    expect(outcomes.at(-1)).toMatchObject({
+      stopReason: "rate-limit", providerStatus: 429, providerReason: "rate-limit",
+    });
+    expect(JSON.stringify(outcomes)).not.toContain("PRIVATE");
+    vi.useRealTimers();
+  });
+
+  it("does not retry a 429 when Retry-After would cross the deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    createMock.mockRejectedValueOnce({
+      status: 429, headers: { "retry-after": "0.05" }, message: "PRIVATE provider body",
+    });
+    const outcomes: any[] = [];
+    const pending = runToolLoop(config, "system", "paper", [], async () => "must not execute", {
+      maxToolCalls: 1, deadlineMs: 1_020, onOutcome: event => outcomes.push(event),
+    });
+    await expect(pending).rejects.toThrow("Managed model rate limit reached");
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(outcomes.at(-1)).toMatchObject({ stopReason: "rate-limit", providerStatus: 429 });
+    vi.useRealTimers();
+  });
+
+  it("does not retry non-429 provider errors", async () => {
+    createMock.mockRejectedValueOnce({ status: 503, message: "PRIVATE provider body" });
+    const outcomes: any[] = [];
+    await expect(runToolLoop(config, "system", "paper", [], async () => "must not execute", {
+      maxToolCalls: 1, deadlineMs: Date.now() + 60_000, onOutcome: event => outcomes.push(event),
+    })).rejects.toThrow(/LLM request failed \(503\)/);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(outcomes.at(-1)).not.toMatchObject({ stopReason: "rate-limit" });
+  });
+
+  it("does not retry HTTP 429 insufficient-quota payment failures", async () => {
+    createMock.mockRejectedValueOnce({
+      status: 429, code: "insufficient_quota", message: "PRIVATE payment detail",
+    });
+    await expect(runToolLoop(config, "system", "paper", [], async () => "must not execute", {
+      maxToolCalls: 1, deadlineMs: Date.now() + 60_000,
+    })).rejects.toMatchObject({ code: "PROVIDER_PAYMENT_REQUIRED", providerCode: "provider_credit" });
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries completion.error 429 in the forced-final request", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    createMock
+      .mockResolvedValueOnce({
+        error: { status: 429, headers: { "retry-after": "0.01" }, message: "PRIVATE provider body" },
+      })
+      .mockResolvedValueOnce({
+        choices: [{ message: { content: "final answer", tool_calls: [] }, finish_reason: "stop" }],
+      });
+    const pending = runToolLoop(config, "system", "paper", [], async () => "must not execute", {
+      maxToolCalls: 0, deadlineMs: 60_000,
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(pending).resolves.toMatchObject({ content: "final answer", stoppedBy: "tool-budget" });
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(createMock.mock.calls[0][0]).toEqual(createMock.mock.calls[1][0]);
+    expect(createMock.mock.calls[0][0]).not.toHaveProperty("tools");
+    vi.useRealTimers();
+  });
 });
