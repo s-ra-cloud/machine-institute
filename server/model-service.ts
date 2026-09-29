@@ -290,6 +290,8 @@ export interface ToolLoopOptions {
   /** Prefix tool messages shown to the model with their stable numeric call ID. */
   numberToolResults?: boolean;
   onToolCall?: (record: ToolCallRecord) => Promise<void> | void;
+  /** Task-specific guard applied to the model-visible (already truncated) tool result. */
+  transformToolResult?: (name: string, result: string) => string;
   onRound?: (round: number, assistantText: string | null) => Promise<void> | void;
   /**
    * Return a user message when a tool-free response is not yet a valid finish.
@@ -305,6 +307,8 @@ export interface ToolLoopOptions {
    * continuations from repeated premature stops.
    */
   getRecoveryProgress?: () => number;
+  /** Opt-in early stop when a task-specific guard detects repeated nonprogress. */
+  getStallReason?: () => string | null;
   /** Replacement text used when older tool output is compacted. */
   elidedToolOutputMessage?: string;
   /** Return an empty result instead of throwing when a forced resource stop's
@@ -585,14 +589,17 @@ export async function runToolLoop(
   for (let round = 1; round <= maxRounds; round++) {
     const budgetExhausted = toolCalls.length >= options.maxToolCalls;
     const pastDeadline = Date.now() >= options.deadlineMs;
-    if (!forceFinal && (budgetExhausted || pastDeadline)) {
+    const stallReason = !budgetExhausted && !pastDeadline ? options.getStallReason?.() : null;
+    if (!forceFinal && (budgetExhausted || pastDeadline || stallReason)) {
       forceFinal = true;
-      stoppedBy = budgetExhausted ? "tool-budget" : "deadline";
+      stoppedBy = budgetExhausted ? "tool-budget" : pastDeadline ? "deadline" : "no-progress";
       messages.push({
         role: "user",
         content: budgetExhausted
           ? "STOP: your tool-call budget is exhausted. Do not call any more tools. Write your final logbook now, based strictly on the tool outputs you have already seen. Any claim you could not finish testing must be recorded as inconclusive in the logbook."
-          : "STOP: the time budget is exhausted. Do not call any more tools. Write your final logbook now, based strictly on the tool outputs you have already seen. Any claim you could not finish testing must be recorded as inconclusive in the logbook.",
+          : pastDeadline
+            ? "STOP: the time budget is exhausted. Do not call any more tools. Write your final logbook now, based strictly on the tool outputs you have already seen. Any claim you could not finish testing must be recorded as inconclusive in the logbook."
+            : `STOP: ${stallReason}. No more tools are available. Write an honest final logbook using only accepted claims and actual evidence; do not claim that rereading a source is an experiment.`,
       });
     }
     if (!requestBudget) compactMessages(messages, contextBudget, elidedToolOutputMessage);
@@ -601,7 +608,7 @@ export async function runToolLoop(
     const fallbackAfterResourceStop = (): ToolLoopResult | null => {
       if (
         requestWasForcedFinal
-        && (stoppedBy === "deadline" || stoppedBy === "tool-budget")
+          && (stoppedBy === "deadline" || stoppedBy === "tool-budget" || stoppedBy === "no-progress")
       ) {
         return { content: "", toolCalls, rounds: round, stoppedBy };
       }
@@ -832,6 +839,10 @@ export async function runToolLoop(
     }
 
     for (const call of calls) {
+      if (!forceFinal && options.getStallReason?.()) {
+        forceFinal = true;
+        stoppedBy = "no-progress";
+      }
       let args: Record<string, unknown> = {};
       let argumentParse: ToolLoopOutcome["argumentParse"] = "valid";
       let validationErrors: string[] = [];
@@ -862,7 +873,9 @@ export async function runToolLoop(
       if (forceFinal) {
         result = stoppedBy === "deadline"
           ? "Deadline exhausted — this call was not executed. Write your final logbook."
-          : "Tool budget exhausted — this call was not executed. Write your final logbook.";
+          : stoppedBy === "no-progress"
+            ? "Repeated source inspection stopped this run — this call was not executed. Write an honest final logbook."
+            : "Tool budget exhausted — this call was not executed. Write your final logbook.";
         error = true;
       } else if (toolCalls.length >= options.maxToolCalls) {
         result = "Tool budget exhausted — this call was not executed. Write your final logbook.";
@@ -890,6 +903,9 @@ export async function runToolLoop(
         }
       }
       result = truncateToolResult(result ?? "", maxToolResultChars);
+      if (dispatched && !error && options.transformToolResult) {
+        result = options.transformToolResult(call.function.name, result);
+      }
       await observe({ kind: "tool", round, callCount: toolCalls.length + (dispatched ? 1 : 0),
         toolName: call.function.name, argumentParse, validationErrors, toolExcerpt: result.slice(0, 2000) });
       let resultContent = result;

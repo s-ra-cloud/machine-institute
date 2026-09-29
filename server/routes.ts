@@ -3173,6 +3173,7 @@ I will now provide the papers.`;
     } catch (err: any) {
       console.error(`[Reproduction ${reproductionId}] Generation failed.`);
       const paymentFailure = isProviderPaymentFailure(err);
+      const readStall = getReproductionFailureDiagnostics(err)?.events.some(event => event.kind === "retrieval-stall") ?? false;
       // Release the active-run lock before any best-effort diagnostic/event I/O.
       // A snapshot storage outage must not strand a run in "generating".
       await storage.updateReproduction(reproductionId, {
@@ -3205,6 +3206,8 @@ I will now provide the papers.`;
             ? "Reproduction stopped because Replit-managed OpenRouter temporarily reached its in-flight spending limit. No report was completed; retry after the temporary limit clears."
             : "Reproduction stopped because Replit-managed OpenRouter could not fund the model request. No report was completed; ask the deployment administrator to check Replit credits and managed integration limits before retrying. Personal OpenRouter keys are not used for new Lab runs.");
         }
+      } else if (readStall) {
+        await emit("failure", "Reproduction stopped early because the agent repeatedly inspected material it had already read without advancing its work. No report was completed. Institute members can retry the run; an administrator can inspect the private diagnostics.");
       } else {
         await emit("failure", "Reproduction failed. No report was completed; institute members can retry the run.");
       }

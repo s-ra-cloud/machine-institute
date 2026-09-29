@@ -50,3 +50,9 @@ Distinguish provider-reported context constraints from local retry targets and o
 **Why:** Repeated fractional reductions created a local target below the immutable instructions even though diagnostics still displayed a larger context window. Treating an ambiguous output-cap field as an input limit can produce the same failure.
 
 **How to apply:** Use explicit total/input limits and provider token counts when available, keep unknown-limit retries bounded, and account for the protected request floor without overriding genuine provider limits. Preserve only numeric/allowlisted error metadata, never raw provider bodies. Keep source-grounding/schema additions within default-prompt preflight headroom.
+
+Source-reading progress must be measured against the page actually visible to the model, not the full underlying file response.
+
+**Why:** The tool loop can shorten a large response in the middle before the model sees it. Counting the declared original range as delivered falsely directs the agent past unread text, while the original full result can remain separately available for evidence validation.
+
+**How to apply:** When adding browsing-loop detection or retrieval guidance, track the contiguous displayed prefix and preserve original source/evidence IDs independently. Compare visible content as well as paths/ranges: experiment outputs and directory listings can change at the same path. Let changed content, fresh offsets, and accepted claim changes reset browsing-stall detection, but not identical listings or cached-output retrievals.

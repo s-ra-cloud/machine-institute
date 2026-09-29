@@ -13,6 +13,7 @@ vi.mock("openai", () => ({
 }));
 
 import { runToolLoop, type ToolSpec } from "../model-service";
+import { ReproductionReadGuard } from "../reproduction-read-guard";
 
 const tools: ToolSpec[] = [
   { name: "echo", description: "echo", parameters: { type: "object", properties: { text: { type: "string" } } } },
@@ -78,6 +79,42 @@ describe("runToolLoop", () => {
     expect(lastRequest.tools).toBeUndefined();
     const stopMsg = lastRequest.messages.filter((m: any) => m.role === "user").pop();
     expect(stopMsg.content).toMatch(/budget is exhausted/);
+  });
+
+  it("stops repetitive reproduction reads before the budget, preserving honest finalization", async () => {
+    const guard = new ReproductionReadGuard();
+    const readTools: ToolSpec[] = [{
+      name: "read_file", description: "read paper",
+      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    }];
+    let calls = 0;
+    createMock.mockImplementation(async (request: any) => {
+      if (!request.tools) return assistantFinal("## Claims\nNo claims registered.");
+      calls++;
+      return { choices: [{
+        finish_reason: "tool_calls",
+        message: { content: null, tool_calls: [{
+          id: `r${calls}`, type: "function",
+          function: { name: "read_file", arguments: JSON.stringify({ path: "/work/paper.md" }) },
+        }] },
+      }] };
+    });
+    const execute = vi.fn(async () =>
+      "Verified file: /work/paper.md\nReturned characters: 0-100 of 1000\n---\nA real paper section");
+    const result = await runToolLoop(platform, "sys", "user", readTools, execute, {
+      maxToolCalls: 100, deadlineMs: Date.now() + 60_000,
+      getStallReason: () => guard.stopReason,
+      transformToolResult: (name, text) => guard.observe(name, text, { acceptedClaims: 0, assessed: false }),
+    });
+    expect(result.stoppedBy).toBe("no-progress");
+    expect(result.toolCalls.length).toBeLessThan(20);
+    expect(result.toolCalls[0].result).toContain("A real paper section");
+    expect(result.toolCalls.at(-1)?.result).toContain("Repeated inspection");
+    expect(createMock.mock.calls.at(-1)?.[0].tools).toBeUndefined();
+    expect(createMock.mock.calls.at(-1)?.[0].messages.some(
+      (message: any) => message.role === "user" && String(message.content).startsWith("STOP:"),
+    )).toBe(true);
+    expect(execute).toHaveBeenCalledTimes(result.toolCalls.length);
   });
 
   it("records tool errors without aborting the loop", async () => {

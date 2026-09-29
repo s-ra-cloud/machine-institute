@@ -21,6 +21,7 @@ import {
 } from "./prompts/reproduce";
 import { deriveContributionKeywords } from "./prompts/peer-review";
 import { ReproductionSession } from "./reproduction-session";
+import { ReproductionReadGuard } from "./reproduction-read-guard";
 import { QuestioningState, QUESTIONING_TOOL, QUESTIONING_SETUP_TOOL, questioningSetupCommand } from "./reproduction-questioning";
 import { cleanQuestioningEnvironment, isolatedQuestioningCommand, QUESTIONING_MANIFEST_SCRIPT, QUESTIONING_LINK_SNAPSHOT_SCRIPT } from "./reproduction-isolation";
 import { QuestioningProvenanceLimitError } from "./reproduction-provenance-store";
@@ -511,6 +512,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     },
   );
   const recorded = session.recorded;
+  const readGuard = new ReproductionReadGuard();
   session.questioning = questioning;
   let toolLoopResult: Awaited<ReturnType<typeof runToolLoop>> | null = null;
   let logbook = "";
@@ -762,6 +764,11 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       },
       elidedToolOutputMessage: "[Earlier output elided. Use read_tool_result with the original tool call ID; do not rerun the experiment to retrieve it.]",
       getRecoveryProgress: () => session.progress,
+      transformToolResult: (name, result) => readGuard.observe(name, result, {
+        acceptedClaims: recorded.size + Array.from(recorded.values()).filter(claim => claim.status !== "pending").length,
+        assessed: Boolean(questioning?.assessment),
+      }),
+      getStallReason: () => readGuard.stopReason,
       onToolCall: async (rec: ToolCallRecord) => {
         session.observeToolCall(rec);
         if (rec.name === "run_command") {
@@ -791,6 +798,9 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       },
       maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
     });
+    if (toolLoopResult.stoppedBy === "no-progress" && readGuard.stopReason) {
+      try { diagnostics.observe({ kind: "retrieval-stall", validationErrors: [readGuard.stopReason] }); } catch { /* best effort */ }
+    }
     diagnostics.stop(toolLoopResult.stoppedBy);
     diagnostics.stage("completion");
     await emitEvent("reproduction-agent", `Agent finished after ${toolLoopResult.toolCalls.length} tool call(s) (${toolLoopResult.stoppedBy}); logbook ${toolLoopResult.content.length} chars.`);
@@ -813,6 +823,9 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     const completionIssues = getReproductionCompletionIssues({
       recordedResults, toolCalls: session.toolCalls, logbook, budgetExhausted,
     }).filter(issue => !suitabilityBlocked || issue.startsWith("the final logbook is missing"));
+    if (readGuard.stopReason && toolLoopResult.stoppedBy === "no-progress") {
+      completionIssues.push(readGuard.stopReason);
+    }
     if (completionIssues.length) {
       try { diagnostics.observe({ kind: "completion-validation", validationErrors: completionIssues }); } catch { /* best effort */ }
       throw new Error(`The reproduction agent stopped before completing required work (${toolLoopResult.stoppedBy}): ${completionIssues.join("; ")}.`);
