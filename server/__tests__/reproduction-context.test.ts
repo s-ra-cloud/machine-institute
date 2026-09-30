@@ -32,6 +32,7 @@ vi.mock("../modal-sandbox", () => ({
 vi.mock("../provider-credit-preflight", () => ({ assertReproductionRuntimeProviderCredits }));
 
 import { runReproduction, REPRODUCTION_BUDGET } from "../reproduce";
+import { renderSourcePage } from "../reproduction-source-page";
 import type { ModelProviderConfig } from "../model-service";
 import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt } from "../prompts/reproduce";
 
@@ -71,13 +72,22 @@ const call = (id: string, name: string, args: Record<string, unknown>) => ({
 const sourceQuote = (claim: string, originalValue?: string) =>
   `The paper states that ${claim} is a core quantitative result${originalValue ? ` with reported value ${originalValue}` : ""}.`;
 let currentPaper = "";
-const sourceRead = () => call("paper-source", "read_file", { path: "/work/paper.md", max_chars: 40000 });
-const groundedPending = (id: string, claim: string, sourceToolCallId = 1, originalValue?: string) =>
-  call(`pending-${id}`, "record_result", {
+const sourceRead = (offset = 0, maxChars = 40_000, id = "paper-source") =>
+  call(id, "read_file", { path: "/work/paper.md", offset, max_chars: maxChars });
+const groundedPending = (
+  id: string, claim: string, sourceToolCallId = 1, originalValue?: string,
+  offset = 0, maxChars = 40_000,
+) => {
+  const quote = sourceQuote(claim, originalValue);
+  const page = renderSourcePage("/work/paper.md", currentPaper, offset, maxChars);
+  const range = page.match(/^Returned characters: (\d+)-(\d+) of \d+$/m);
+  if (!range || !page.includes(quote)) throw new Error(`Fixture quote for ${id} is not on source page`);
+  return call(`pending-${id}`, "record_result", {
     id, claim, status: "pending", ...(originalValue ? { original_value: originalValue } : {}),
-    source_quote: sourceQuote(claim, originalValue), source_location: `characters 0-${Math.min(40000, currentPaper.length)}`,
+    source_quote: quote, source_location: `characters ${range[1]}-${range[2]}`,
     source_tool_call_id: sourceToolCallId,
   });
+};
 
 const judgeCompletion = (ids = ["R1"], values: Record<string, string> = {}) => completion(JSON.stringify({
   summary: "The bounded judge checked the accepted claims.",
@@ -220,6 +230,118 @@ afterEach(() => {
 });
 
 describe("runReproduction bounded context orchestration", () => {
+  it("paginates a long paper from the default 12000-character request to later Results and rejects invented provenance", async () => {
+    const sandbox = makeSandbox();
+    createSandbox.mockResolvedValue(sandbox);
+    const claim = "R-late claim";
+    const quote = sourceQuote(claim, "0.91");
+    setupContext(`\n# Background\n${"Unrelated historical discussion of the apparatus.\n".repeat(550)}\n# Results\n### detail\n${quote}\n`);
+    const requests: any[] = [];
+    const pages: Array<{ start: number; end: number; id: number }> = [];
+    let nextOffset = 0;
+    let toolIndex = 0;
+    let commandCallId = 0;
+    let stage: "reading" | "bad-provenance" | "pending" | "command" | "finalize" | "done" = "reading";
+    createCompletion.mockImplementation(async (request: any) => {
+      requests.push(JSON.parse(JSON.stringify(request)));
+      if (!request.tools) return judgeCompletion(["R-late"]);
+      const last = [...request.messages].reverse().find((message: any) => message.role === "tool");
+      if (stage === "reading") {
+        if (last) {
+          const text = String(last.content);
+          const match = text.match(/Returned characters: (\d+)-(\d+) of (\d+)/);
+          expect(match).not.toBeNull();
+          const [, start, end, total] = match!.map(Number);
+          expect(start).toBe(nextOffset);
+          expect(end).toBeGreaterThan(start);
+          expect(end).toBeLessThanOrEqual(start + 12_000);
+          expect(Buffer.byteLength(JSON.stringify(renderSourcePage("/work/paper.md", currentPaper, start)))).toBeLessThanOrEqual(9_000);
+          pages.push({ start, end, id: toolIndex });
+          if (text.includes(quote)) {
+            expect(start).toBeGreaterThan(0);
+            expect(requestText(request)).toContain(`source_tool_call_id=${toolIndex}`);
+            stage = "bad-provenance";
+          } else {
+            expect(end).toBeLessThan(total);
+            expect(text).toContain(`Use offset=${end} to continue`);
+            nextOffset = end;
+          }
+        } else {
+          // The default max_chars, rather than an artificially small test request.
+          return completion(null, [call("first-page", "read_file", { path: "/work/paper.md" })]);
+        }
+        if (stage === "reading") return completion(null, [call(`next-${pages.length}`, "read_file", { path: "/work/paper.md", offset: nextOffset })]);
+      }
+      const lastPage = pages.at(-1)!;
+      if (stage === "bad-provenance") {
+        stage = "pending";
+        return completion(null, [call("invented-location", "record_result", {
+          id: "R-late", claim, status: "pending", source_quote: quote,
+          source_location: "characters 0-12000", source_tool_call_id: lastPage.id,
+          original_value: "0.91",
+        })]);
+      }
+      if (stage === "pending") {
+        expect(String(last?.content)).toMatch(/source_location|source_quote|Refused/i);
+        stage = "command";
+        return completion(null, [groundedPending("R-late", claim, lastPage.id, "0.91", lastPage.start)]);
+      }
+      if (stage === "command") {
+        expect(String(last?.content)).toMatch(/pending/i);
+        stage = "finalize";
+        commandCallId = toolIndex + 1;
+        return completion(null, [call("run-late", "run_command", { command: "python /work/materials/expensive.py" })]);
+      }
+      if (stage === "finalize") {
+        expect(String(last?.content)).toContain("EXPENSIVE_METRIC=0.91");
+        stage = "done";
+        return completion(null, [call("accepted-late", "record_result", {
+          id: "R-late", status: "verified", method: "rerun", reproduced_value: "0.91",
+          evidence_tool_call_ids: [commandCallId], evidence_excerpt: "EXPENSIVE_METRIC=0.91",
+        })]);
+      }
+      return completion(logbook);
+    });
+    // One tool per reading turn; tool indices are stable even after history compaction.
+    const originalCompletion = createCompletion.getMockImplementation()!;
+    createCompletion.mockImplementation(async (request: any) => {
+      const result = await originalCompletion(request);
+      if (request.tools && result.choices[0].message.tool_calls) {
+        toolIndex += result.choices[0].message.tool_calls.length;
+      }
+      return result;
+    });
+
+    const result = await runReproduction(options());
+    expect(pages.length).toBeGreaterThan(2);
+    expect(result.results).toEqual([expect.objectContaining({ id: "R-late", verdict: "verified" })]);
+    expect(sandbox.exec.mock.calls.filter(args => String(args[0]).includes("expensive.py"))).toHaveLength(1);
+    expect(requests.some(request => requestText(request).includes("characters 0-12000"))).toBe(true);
+    expectBoundedRequests(requests);
+  });
+
+  it("stops repeated source prefixes without a claim instead of calling the judge", async () => {
+    const sandbox = makeSandbox();
+    createSandbox.mockResolvedValue(sandbox);
+    setupContext(`\n# Results\n${sourceQuote("R-loop claim", "0.91")}\n${"Supplementary discussion.\n".repeat(1000)}`);
+    let reads = 0;
+    let forcedFinals = 0;
+    createCompletion.mockImplementation(async (request: any) => {
+      if (!request.tools) {
+        expect(String(request.messages.at(-1)?.content)).toContain("Repeated already-delivered source reads");
+        forcedFinals++;
+        return completion(logbook);
+      }
+      reads++;
+      return completion(null, [sourceRead(0, 12_000, `repeat-${reads}`)]);
+    });
+    await expect(runReproduction(options())).rejects.toThrow(/Repeated already-delivered source reads|no-progress/i);
+    expect(reads).toBeLessThan(20);
+    expect(forcedFinals).toBe(1);
+    expect(sandbox.terminate).toHaveBeenCalledTimes(1);
+    expect(createCompletion.mock.calls.filter(([request]) => !request.tools)).toHaveLength(1);
+  });
+
   it("repairs a long latest draft and verbose multi-claim state through real paged retrieval, without repeating execution", async () => {
     const sandbox = makeSandbox();
     createSandbox.mockResolvedValue(sandbox);
@@ -227,6 +349,16 @@ describe("runReproduction bounded context orchestration", () => {
     const claims = Object.fromEntries(ids.map(id => [id, `${id} scientific claim ${"detailed claim ".repeat(70)}`.trim()]));
     const originals = Object.fromEntries(ids.map(id => [id, `${id} original observations ${"reported value ".repeat(65)}`]));
     setupContext(`\n${ids.map(id => sourceQuote(claims[id], originals[id])).join("\n")}`);
+    const sourceCalls = ids.flatMap((id, index) => {
+      const quote = sourceQuote(claims[id], originals[id]);
+      const offset = currentPaper.indexOf(quote);
+      expect(offset).toBeGreaterThanOrEqual(0);
+      return [
+        sourceRead(offset, quote.length, `paper-source-${id}`),
+        groundedPending(id, claims[id], index * 2 + 1, originals[id], offset, quote.length),
+      ];
+    });
+    const expensiveCallIndex = sourceCalls.length + 1;
     const notes = `Full scientific notes: ${"important detail ".repeat(130)} END_NOTES`;
     const draft = `${logbook}\n${'Long proposed logbook "測定🧪"\n'.repeat(1800)}END_DRAFT`;
     const evidence = `${"noise".repeat(1400)}\nEXPENSIVE_METRIC=0.91`;
@@ -248,13 +380,13 @@ describe("runReproduction bounded context orchestration", () => {
         const input = request.messages[1].content as string;
         const batch = JSON.parse(input.split("# AGENT'S RECORDED RESULTS (proposals, not verdicts)\n")[1].split("\n\n# AGENT'S LOGBOOK")[0]);
         judgeClaims.push(...batch);
-        expect(input).toContain("Original tool #10");
+         expect(input).toContain(`Original tool #${expensiveCallIndex}`);
         expect(input).toContain("EXPENSIVE_METRIC=0.91");
         return judgeCompletion(batch.map((claim: any) => claim.id));
       }
       expect(request.messages[0].content).toBe(buildEffectiveReproducerPrompt(REPRODUCER_PROMPT));
       turn++;
-      if (turn === 1) return completion(null, [sourceRead(), ...ids.map(id => groundedPending(id, claims[id], 1, originals[id]))]);
+       if (turn === 1) return completion(null, sourceCalls);
       if (turn === 2) return completion(null, [call("expensive", "run_command", { command: "python /work/materials/expensive.py" })]);
       if (turn === 3) return completion(null, ids.map(id => call(`rejected-${id}`, "record_result", {
         id, status: "verified", reproduced_value: "0.91", method: "rerun",
@@ -302,20 +434,20 @@ describe("runReproduction bounded context orchestration", () => {
         const page = JSON.parse(toolMessage(request).content.replace(/^\[Tool call #\d+\]\n/, ""));
         expect(page.notice).toMatch(/not scientifically valid evidence/);
         expect(page.text).toContain('"accepted"');
-        return completion(null, [call("evidence-page-1", "read_tool_result", { tool_call_id: 10, max_chars: 4000 })]);
+         return completion(null, [call("evidence-page-1", "read_tool_result", { tool_call_id: expensiveCallIndex, max_chars: 4000 })]);
       }
       if (turn === 9) {
         evidenceText = toolMessage(request).content;
-        expect(evidenceText).toContain("Original evidence tool call #10");
+         expect(evidenceText).toContain(`Original evidence tool call #${expensiveCallIndex}`);
         evidenceOffset = Number(evidenceText.match(/\[Use offset=(\d+) to continue/)[1]);
-        return completion(null, [call("evidence-page-2", "read_tool_result", { tool_call_id: 10, offset: evidenceOffset })]);
+         return completion(null, [call("evidence-page-2", "read_tool_result", { tool_call_id: expensiveCallIndex, offset: evidenceOffset })]);
       }
       if (turn === 10) {
         const page = toolMessage(request).content;
         expect(page).toContain(`characters ${evidenceOffset}-`);
         expect(page).toContain("EXPENSIVE_METRIC=0.91");
-        return completion(null, ids.map(id => call(`accepted-${id}`, "record_result", {
-          id, status: "verified", method: "rerun", evidence_tool_call_ids: [10],
+         return completion(null, ids.map(id => call(`accepted-${id}`, "record_result", {
+           id, status: "verified", method: "rerun", evidence_tool_call_ids: [expensiveCallIndex],
           evidence_excerpt: "EXPENSIVE_METRIC=0.91", reproduced_value: "0.91",
         })));
       }
@@ -330,7 +462,7 @@ describe("runReproduction bounded context orchestration", () => {
       expect(claim.claim).toBe(claims[claim.id]);
       expect(claim.originalValue).toBe(originals[claim.id]);
       expect(claim.notes).toBe(notes);
-      expect(claim.evidenceToolCallIds).toEqual([10]);
+       expect(claim.evidenceToolCallIds).toEqual([expensiveCallIndex]);
     }
     expect(sandbox.exec.mock.calls.filter(args => String(args[0]).includes("expensive.py"))).toHaveLength(1);
     expect(sandbox.terminate).toHaveBeenCalledTimes(1);

@@ -5,6 +5,27 @@ import {
 } from "../reproduction-diagnostics";
 
 describe("private reproduction diagnostics", () => {
+  it("allows only bounded numeric and enum paging state into the private snapshot", () => {
+    const diagnostics = new ReproductionDiagnostics();
+    diagnostics.paging({
+      sourceReadCount: 3, sourceRepeatCount: 2, outputRepeatCount: 5, outputNewRangeCount: 1,
+      paperFirstGap: 8124, paperTotal: 31000, outputNextOffset: 6000,
+      originalOutputCallId: 4, navigation: "source", stalled: false,
+      paperPath: "/work/paper.md?secret=do-not-store",
+    } as any);
+    expect(diagnostics.snapshot().paging).toMatchObject({
+      sourceRepeatCount: 2, outputRepeatCount: 5, paperFirstGap: 8124, navigation: "source",
+    });
+    expect(JSON.stringify(diagnostics.snapshot())).not.toContain("do-not-store");
+    diagnostics.paging({
+      sourceReadCount: -1, sourceRepeatCount: Infinity, outputRepeatCount: 0, outputNewRangeCount: 0,
+      paperFirstGap: 0, paperTotal: 0, outputNextOffset: 0, originalOutputCallId: 0,
+      navigation: "secret" as any, stalled: false,
+    });
+    expect(diagnostics.snapshot().paging).toMatchObject({
+      sourceReadCount: 0, sourceRepeatCount: 0, navigation: "unknown",
+    });
+  });
   it("redacts credential shapes before truncation without reading runtime secrets", () => {
     const values = [
       'HF_TOKEN="synthetic-secret-value"', "Authorization: Bearer synthetic-auth-value",

@@ -1,4 +1,5 @@
 import type { RecordedResult } from "./prompts/reproduce";
+import type { ReproductionPagingDiagnostics } from "./reproduction-read-guard";
 
 const MAX_BYTES = 24_000;
 const MAX_EVENTS = 32;
@@ -36,6 +37,7 @@ export interface ReproductionFailureDiagnostics {
   droppedEvents: number;
   events: Array<Record<string, string | number | string[]>>;
   claims: Array<{ id: string; claim: string; status: string }>;
+  paging?: ReproductionPagingDiagnostics;
 }
 
 const safeNumber = (value: unknown): number =>
@@ -52,6 +54,22 @@ export class ReproductionDiagnostics {
 
   stage(stage: "preflight" | "materials" | "sandbox" | "tool-loop" | "completion" | "judge" | "report" | "background"): void {
     this.data.stage = stage;
+  }
+
+  /** Numeric and enum-only snapshot; no source text, paths, quotes or prompts. */
+  paging(value: ReproductionPagingDiagnostics): void {
+    this.data.paging = {
+      sourceReadCount: safeNumber(value.sourceReadCount),
+      sourceRepeatCount: safeNumber(value.sourceRepeatCount),
+      outputRepeatCount: safeNumber(value.outputRepeatCount),
+      outputNewRangeCount: safeNumber(value.outputNewRangeCount),
+      paperFirstGap: safeNumber(value.paperFirstGap),
+      paperTotal: safeNumber(value.paperTotal),
+      outputNextOffset: safeNumber(value.outputNextOffset),
+      originalOutputCallId: safeNumber(value.originalOutputCallId),
+      navigation: enumValue(value.navigation, ["extract", "source", "output", "none"]) as ReproductionPagingDiagnostics["navigation"],
+      stalled: value.stalled === true,
+    };
   }
 
   observe(event: {

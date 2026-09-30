@@ -22,6 +22,7 @@ import {
 import { deriveContributionKeywords } from "./prompts/peer-review";
 import { ReproductionSession } from "./reproduction-session";
 import { ReproductionReadGuard } from "./reproduction-read-guard";
+import { renderSourcePage } from "./reproduction-source-page";
 import { QuestioningState, QUESTIONING_TOOL, QUESTIONING_SETUP_TOOL, questioningSetupCommand } from "./reproduction-questioning";
 import { cleanQuestioningEnvironment, isolatedQuestioningCommand, QUESTIONING_MANIFEST_SCRIPT, QUESTIONING_LINK_SNAPSHOT_SCRIPT } from "./reproduction-isolation";
 import { QuestioningProvenanceLimitError } from "./reproduction-provenance-store";
@@ -345,13 +346,13 @@ const TOOLS: ToolSpec[] = [
   },
   {
     name: "read_file",
-    description: "Read a text file from the sandbox. Returns verified path and canonical character-range metadata. Large files are truncated; use offset to page through them.",
+    description: "Read a text file from the sandbox. Returns verified path and canonical character-range metadata. Pages fit a 9000-byte serialized budget; use the continuation offset printed after the page to read the next contiguous page.",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string" },
-        max_chars: { type: "integer", description: "Maximum characters to return (default 12000)." },
-        offset: { type: "integer", description: "Character offset to start from (default 0)." },
+        max_chars: { type: "integer", description: "Upper bound on characters returned (default 12000); byte budget may yield fewer." },
+        offset: { type: "integer", description: "Canonical character offset to start from (default 0). Use the continuation offset for the next page; invalid or beyond-end offsets are refused." },
       },
       required: ["path"],
     },
@@ -589,13 +590,13 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         }
         case "read_file": {
           const path = String(args.path || "");
-          const max = Math.min(Math.max(Number(args.max_chars) || 12_000, 200), 40_000);
-          const offset = Math.max(Number(args.offset) || 0, 0);
+          const max = args.max_chars === undefined ? 12_000 : Number(args.max_chars);
+          const offset = args.offset === undefined ? 0 : Number(args.offset);
+          if (!Number.isSafeInteger(offset) || offset < 0) return "Refused: offset must be a non-negative integer.";
+          if (!Number.isSafeInteger(max) || max < 1) return "Refused: max_chars must be a positive integer.";
           const text = questioning ? questioning.readKnownSource(path) : await sandbox.readText(path);
           if (text === undefined) return "Refused: qP inspection can read only uploaded originals, working source and recorded immutable snapshots. Host paths, symlinks, proc/environment and mutable execution results are not exposed. Retrieve captured execution output with read_tool_result.";
-          const slice = text.slice(offset, offset + max);
-          const more = offset + max < text.length ? `\n\n[... ${text.length - offset - max} more chars; total ${text.length}. Use offset=${offset + max} to continue ...]` : "";
-          return `Verified file: ${path}\nReturned characters: ${offset}-${offset + slice.length} of ${text.length}\n---\n${slice}${more}`;
+          return renderSourcePage(path, text, offset, max);
         }
         case "write_file": {
           const path = String(args.path || "");
@@ -756,7 +757,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       allowResourceStopFallback: true,
       contextProtection: {
         getState: maxBytes => session.contextState(maxBytes),
-        getActiveInstruction: () => [session.activeInstruction(), readGuard.extractionInstruction]
+        getActiveInstruction: () => [readGuard.navigationInstruction, session.activeInstruction()]
           .filter(Boolean).join("\n"),
         archiveContext: (key, text) => session.archiveContext(key, text),
         resizeRetrieval: (name, args, result, maxBytes) => session.resizeRetrieval(name, args, result, maxBytes),
@@ -765,10 +766,14 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       },
       elidedToolOutputMessage: "[Earlier output elided. Use read_tool_result with the original tool call ID; do not rerun the experiment to retrieve it.]",
       getRecoveryProgress: () => session.progress,
-      transformToolResult: (name, result, callIndex) => readGuard.observe(name, result, {
-        acceptedClaims: recorded.size + Array.from(recorded.values()).filter(claim => claim.status !== "pending").length,
-        assessed: Boolean(questioning?.assessment),
-      }, callIndex),
+      transformToolResult: (name, result, callIndex) => {
+        const visible = readGuard.observe(name, result, {
+          acceptedClaims: recorded.size + Array.from(recorded.values()).filter(claim => claim.status !== "pending").length,
+          assessed: Boolean(questioning?.assessment),
+        }, callIndex);
+        diagnostics.paging(readGuard.pagingDiagnostics);
+        return visible;
+      },
       // A claim/assessment already batched with the seventh repeated read can
       // still establish real progress. Refuse further browsing, not that repair.
       getStallReason: nextToolName =>
@@ -787,7 +792,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         }
       },
       onPrematureStop: (assistantText) => {
-        if (questioning && !questioning.assessment) return [session.activeInstruction(), readGuard.extractionInstruction].filter(Boolean).join("\n");
+        if (questioning && !questioning.assessment) return [readGuard.navigationInstruction, session.activeInstruction()].filter(Boolean).join("\n");
         if (questioning?.finalizeBlockedClaims(Array.from(recorded.values()))) {
           const logbookIssues = getReproductionCompletionIssues({ recordedResults: [], toolCalls: [], logbook: assistantText, budgetExhausted: false })
             .filter(issue => issue.startsWith("the final logbook is missing"));
@@ -799,7 +804,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           logbook: assistantText,
           budgetExhausted: false,
         });
-        return continuation ? `${session.activeInstruction()}\n${readGuard.extractionInstruction ?? ""}\n${continuation}\n${session.repairContext()}` : null;
+        return continuation ? `${readGuard.navigationInstruction ?? ""}\n${session.activeInstruction()}\n${continuation}\n${session.repairContext()}` : null;
       },
       maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
     });

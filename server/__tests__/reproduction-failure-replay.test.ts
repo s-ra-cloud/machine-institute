@@ -32,6 +32,7 @@ vi.mock("../modal-sandbox", () => ({
 vi.mock("../provider-credit-preflight", () => ({ assertReproductionRuntimeProviderCredits }));
 
 import { runReproduction, REPRODUCTION_BUDGET } from "../reproduce";
+import { renderSourcePage } from "../reproduction-source-page";
 import { ReproductionDiagnostics, getReproductionFailureDiagnostics } from "../reproduction-diagnostics";
 import { REPRODUCER_PROMPT, JUDGE_PROMPT, buildEffectiveReproducerPrompt } from "../prompts/reproduce";
 
@@ -44,11 +45,16 @@ const logbook = [
 const claim = "測定🧪: the supplied experiment reports 0.91.";
 const evidence = "EXPENSIVE_METRIC=0.91";
 const PAPER = `# Paper\n${claim}\n${"測定 paper history ".repeat(800)}`;
-const sourceArgs = (sourceToolCallId: number, end = PAPER.length) => ({
-  source_quote: claim,
-  source_location: `characters 0-${end}`,
-  source_tool_call_id: sourceToolCallId,
-});
+const sourceArgs = (sourceToolCallId: number, paper = PAPER) => {
+  const page = renderSourcePage("/work/paper.md", paper, 0, 6_000);
+  const range = page.match(/^Returned characters: (\d+)-(\d+) of \d+$/m);
+  if (!range || !page.includes(claim)) throw new Error("The fixture claim is not on the cited paper page");
+  return {
+    source_quote: claim,
+    source_location: `characters ${range[1]}-${range[2]}`,
+    source_tool_call_id: sourceToolCallId,
+  };
+};
 const completion = (content: string | null, calls?: unknown[], finishReason = calls ? "tool_calls" : "stop") => ({
   choices: [{ message: { content, ...(calls ? { tool_calls: calls } : {}) }, finish_reason: finishReason }],
 });
@@ -133,7 +139,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
       if (turn === 1) {
         expect(JSON.stringify(request)).toContain("LATEST ACTION — EXTRACT");
         return completion(null, [
-          call("paper-source", "read_file", { path: "/work/paper.md", max_chars: 40000 }),
+          call("paper-source", "read_file", { path: "/work/paper.md", max_chars: 6000 }),
           call("register", "record_result", { id: "R1", claim, status: "pending", ...sourceArgs(1) }),
         ]);
       }
@@ -202,8 +208,9 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
 
   it("recovers the production browsing/archive loop through a real command, valid record, and judge after compaction", async () => {
     const sb = sandbox();
+    const browsingPaper = `${PAPER}\n${"paper search page with reported values\n".repeat(1000)}PAPER_SEARCH_TAIL`;
     sb.readText.mockImplementation(async (path: string) => path === "/work/paper.md"
-      ? `${PAPER}\n${"paper search page with reported values\n".repeat(1000)}PAPER_SEARCH_TAIL`
+      ? browsingPaper
       : "");
     createSandbox.mockResolvedValue(sb);
     const requests: any[] = [];
@@ -227,20 +234,20 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
       }
       turn++;
       if (turn === 1) return completion(null, [
-        call("paper-first", "read_file", { path: "/work/paper.md", max_chars: 40000 }),
+         call("paper-first", "read_file", { path: "/work/paper.md", max_chars: 6000 }),
         call("inventory", "list_files", { path: "/work" }),
       ]);
       if (turn === 2) return completion(null, [call("archive-index", "read_reproduction_context", {})]);
       if (turn === 3) return completion('{"notice":"Archived unchanged; not scientific evidence."}');
       if (turn === 4) return completion(null, [
-        call("paper-targeted", "read_file", { path: "/work/paper.md", offset: 12000, max_chars: 20000 }),
+         call("paper-targeted", "read_file", { path: "/work/paper.md", offset: 12000, max_chars: 5000 }),
       ]);
       if (turn === 5) return completion('{"notice":"Retrieval only; this is not scientifically valid evidence."}');
       if (turn === 6) {
         expect(JSON.stringify(request)).toContain("LATEST ACTION — EXTRACT");
         return completion(null, [call("register-actual", "record_result", {
           id: "R1", claim, status: "pending", original_value: "0.91",
-          ...sourceArgs(1, 40000),
+          ...sourceArgs(1, browsingPaper),
         })]);
       }
       if (turn === 7) return completion('{"notice":"Archived unchanged; not scientific evidence."}');
@@ -280,11 +287,11 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
       expect(request.tools).toBeDefined();
       turn++;
       if (turn === 1) return completion(null, [
-        call("read-a", "read_file", { path: "/work/paper.md", offset: 0 }),
+        call("read-a", "read_file", { path: "/work/paper.md", offset: 0, max_chars: 5000 }),
         call("list-a", "list_files", { path: "/work" }),
       ]);
       if (turn === 2) return completion(null, [
-        call("read-b", "read_file", { path: "/work/paper.md", offset: 12000 }),
+        call("read-b", "read_file", { path: "/work/paper.md", offset: 12000, max_chars: 5000 }),
         call("context-a", "read_reproduction_context", {}),
       ]);
       expect(JSON.stringify(request)).toContain("LATEST ACTION — EXTRACT");
@@ -309,7 +316,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
       expect(request.tools).toBeDefined();
       turn++;
       if (turn === 1) return completion(null, [
-        call("paper-source", "read_file", { path: "/work/paper.md", max_chars: 40000 }),
+        call("paper-source", "read_file", { path: "/work/paper.md", max_chars: 6000 }),
         call("register", "record_result", { id: "R1", claim, status: "pending", ...sourceArgs(1) }),
       ]);
       if (turn === 2) return completion(null, [

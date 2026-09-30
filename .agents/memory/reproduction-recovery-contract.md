@@ -62,3 +62,9 @@ Source-reading progress must be measured against the page actually visible to th
 **Why:** The tool loop can shorten a large response in the middle before the model sees it. Counting the declared original range as delivered falsely directs the agent past unread text, while the original full result can remain separately available for evidence validation.
 
 **How to apply:** When adding browsing-loop detection or retrieval guidance, track the contiguous displayed prefix and preserve original source/evidence IDs independently. Compare visible content as well as paths/ranges: experiment outputs and directory listings can change at the same path. Let changed content, fresh offsets, and accepted claim changes reset browsing-stall detection, but not identical listings or cached-output retrievals.
+
+Continuation instructions must distinguish source-file coordinates from stored-output coordinates and defer to the displayed retrieval page after context resizing.
+
+**Why:** Stored-output wrappers shift offsets relative to the source, and request fitting may shorten a retrieved page again. Repeating the pre-fit end in active guidance can skip unseen text. Protecting all source pages as irreducible retrievals also exhausted the smaller serving window during mocked recovery.
+
+**How to apply:** Bound complete source envelopes including metadata, keep original evidence separate, and retain compact navigation rather than making source history immutable. Leave structured retrieval envelopes intact for resizing; follow the displayed page's continuation offset.
