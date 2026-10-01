@@ -12,6 +12,47 @@ function splitsSurrogate(text: string, index: number): boolean {
     && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff;
 }
 
+/**
+ * Navigation only: search the immutable canonical paper, never a sandbox path.
+ * Match offsets are UTF-16 source coordinates, not claims or read evidence.
+ * Limit both scanning work and output; overlap the scan boundary so a literal
+ * spanning it is found on this page without losing its starting offset.
+ */
+export function searchPaperSource(text: string, args: Record<string, unknown>): string {
+  const query = args.query;
+  const offset = args.offset === undefined ? 0 : args.offset;
+  if (Object.keys(args).some(key => key !== "query" && key !== "offset")) {
+    return "Refused: search_paper accepts only query and offset; it cannot inspect other paths.";
+  }
+  if (typeof query !== "string" || !query.trim() || query.length > 128) {
+    return "Refused: query must be a nonblank literal string of at most 128 characters.";
+  }
+  if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0
+    || offset > text.length || splitsSurrogate(text, offset)) {
+    return "Refused: offset must be a valid canonical character offset at a Unicode character boundary.";
+  }
+  let scanEnd = Math.min(text.length, offset + 250_000);
+  if (splitsSurrogate(text, scanEnd)) scanEnd--;
+  const window = text.slice(offset, Math.min(text.length, scanEnd + query.length));
+  const literal = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu");
+  const matches: Array<{ start: number; end: number }> = [];
+  let match: RegExpExecArray | null;
+  let next = scanEnd;
+  while ((match = literal.exec(window)) !== null) {
+    const start = offset + match.index;
+    if (start >= scanEnd) break;
+    const end = start + match[0].length;
+    if (splitsSurrogate(text, start) || splitsSurrogate(text, end)) continue;
+    matches.push({ start, end });
+    if (matches.length === 12) { next = end; break; }
+  }
+  return JSON.stringify({
+    path: "/work/paper.md", query, matches, total: text.length,
+    next_offset: next < text.length ? next : null,
+    instruction: "Navigation only, not evidence. Matches are literal occurrences, not verified Results or claims. Use read_file path=/work/paper.md offset=MATCH_START, then follow its continuation to read surrounding results/tables. Register only an exact quote and page range from that actual read_file and its ORIGINAL read ID, never this search ID. Use next_offset with search_paper for more matches; no matches in a scan does not imply no result in the paper.",
+  });
+}
+
 export function renderSourcePage(path: string, text: string, offset = 0, requested = 12_000): string {
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > text.length || splitsSurrogate(text, offset)) {
     return `Refused: invalid source offset; use a character offset from 0 to ${text.length} at a Unicode character boundary.`;

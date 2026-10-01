@@ -49,7 +49,7 @@ export class ReproductionReadGuard {
       return `NEXT: Extract only an explicit Results claim from original read_file #${callIndex}, source_location="characters ${start}-${end}". Use record_result with new id, status="pending", verbatim claim, substantial exact source_quote, source_tool_call_id=${callIndex}; original_value only if quoted. If compacted, read_tool_result tool_call_id=${callIndex}; continue at its displayed output-page end, NOT source offset. Cite #${callIndex}, never retrieval ID. Never infer claims.`;
     }
     if (this.acceptedClaims === 0 && this.paper && this.paper.firstGap < this.paper.total) {
-      return `NEXT: Read unread paper source: read_file path="/work/paper.md", offset=${this.paper.firstGap}. This is a source character offset, not a read_tool_result output offset. Quote only an original read_file ID.`;
+      return `NEXT: Read unread paper source: read_file path="/work/paper.md", offset=${this.paper.firstGap}, or search_paper query="Results" / query="Table" to target a later passage. Search offsets are navigation, not evidence. This is a source character offset, not a read_tool_result output offset. Quote only an original read_file ID.`;
     }
     if (this.output && this.output.end < this.output.total) {
       const { id, index } = this.output;

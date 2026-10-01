@@ -230,6 +230,148 @@ afterEach(() => {
 });
 
 describe("runReproduction bounded context orchestration", () => {
+  it("searches distant Results offsets without exposing source text, then reads the canonical quote before recording and verifying it", async () => {
+    const sandbox = makeSandbox();
+    createSandbox.mockResolvedValue(sandbox);
+    const claim = "R-search claim";
+    const quote = sourceQuote(claim, "0.91");
+    setupContext(`\n${"Background unrelated to the reported finding.\n".repeat(360)}\n# Results\n${"Methods and context separate heading from the actual table.\n".repeat(240)}\n| Measure | Value |\n| --- | --- |\n${quote}\n`);
+    const headingOffset = currentPaper.indexOf("# Results");
+    const quoteOffset = currentPaper.indexOf(quote);
+    expect(headingOffset).toBeGreaterThan(12_000);
+    expect(quoteOffset - headingOffset).toBeGreaterThan(12_000);
+    const requests: any[] = [];
+    let turn = 0;
+    createCompletion.mockImplementation(async (request: any) => {
+      requests.push(JSON.parse(JSON.stringify(request)));
+      if (!request.tools) return judgeCompletion(["R-search"]);
+      turn++;
+      const last = [...request.messages].reverse().find((message: any) => message.role === "tool");
+      if (turn === 1) {
+        expect(request.tools.map((tool: any) => tool.function.name)).toContain("search_paper");
+        // The sandbox copy is mutable; searches must use the immutable loaded source.
+        await sandbox.writeText("/work/paper.md", "A replaced sandbox copy with no Results or numeric result.");
+        return completion(null, [call("find-heading", "search_paper", { query: "rEsUlTs" })]);
+      }
+      if (turn === 2) {
+        const found = JSON.parse(String(last.content).replace(/^\[Tool call #\d+\]\n/, ""));
+        expect(found).toMatchObject({ path: "/work/paper.md", query: "rEsUlTs", matches: [{ start: headingOffset + 2, end: headingOffset + 9 }], next_offset: null });
+        expect(found.matches[0]).toEqual({ start: headingOffset + 2, end: headingOffset + 9 });
+        expect(String(last.content)).not.toContain("Methods and context");
+        expect(String(last.content)).not.toContain(quote);
+        return completion(null, [call("find-number", "search_paper", { query: "0.91" })]);
+      }
+      if (turn === 3) {
+        const found = JSON.parse(String(last.content).replace(/^\[Tool call #\d+\]\n/, ""));
+        const numericOffset = currentPaper.indexOf("0.91", quoteOffset);
+        expect(found).toMatchObject({ path: "/work/paper.md", query: "0.91", matches: [{ start: numericOffset, end: numericOffset + 4 }], next_offset: null });
+        expect(String(last.content)).not.toContain(quote);
+        await sandbox.writeText("/work/paper.md", currentPaper);
+        return completion(null, [sourceRead(quoteOffset, quote.length, "read-found-quote")]);
+      }
+      if (turn === 4) {
+        expect(String(last.content)).toContain(quote);
+        expect(String(last.content)).toContain(`Returned characters: ${quoteOffset}-${quoteOffset + quote.length}`);
+        // Search call #2 locates the number, but is NOT provenance for the quote.
+        return completion(null, [groundedPending("R-search", claim, 2, "0.91", quoteOffset, quote.length)]);
+      }
+      if (turn === 5) {
+        expect(String(last.content)).toMatch(/source_tool_call_id|read_file|Refused/i);
+        return completion(null, [groundedPending("R-search", claim, 3, "0.91", quoteOffset, quote.length)]);
+      }
+      if (turn === 6) {
+        expect(String(last.content)).toMatch(/pending/i);
+        return completion(null, [call("run-found", "run_command", { command: "python /work/materials/expensive.py" })]);
+      }
+      if (turn === 7) {
+        expect(String(last.content)).toContain("EXPENSIVE_METRIC=0.91");
+        return completion(null, [call("verify-found", "record_result", {
+          id: "R-search", status: "verified", method: "rerun", reproduced_value: "0.91",
+          evidence_tool_call_ids: [6], evidence_excerpt: "EXPENSIVE_METRIC=0.91",
+        })]);
+      }
+      expect(String(last.content)).toMatch(/verified|accepted/i);
+      return completion(logbook);
+    });
+
+    const result = await runReproduction(options());
+    expect(result.results).toEqual([expect.objectContaining({ id: "R-search", verdict: "verified", reproducedValue: "0.91" })]);
+    expect(sandbox.exec.mock.calls.filter(args => String(args[0]).includes("expensive.py"))).toHaveLength(1);
+    expect(requests.filter(request => request.tools)).toHaveLength(8);
+    expectBoundedRequests(requests);
+  });
+
+  it("validates literal bounded search queries and paginates at twelve offsets without excerpts", async () => {
+    const sandbox = makeSandbox();
+    createSandbox.mockResolvedValue(sandbox);
+    setupContext(`\n${Array.from({ length: 20 }, (_, index) => `needle-${index}\n`).join("")}`);
+    const starts = [...currentPaper.matchAll(/needle/gi)].map(match => match.index);
+    const invalid = [
+      call("missing-query", "search_paper", {}),
+      call("empty-query", "search_paper", { query: "" }),
+      call("long-query", "search_paper", { query: "x".repeat(129) }),
+      call("negative-offset", "search_paper", { query: "needle", offset: -1 }),
+      call("fractional-offset", "search_paper", { query: "needle", offset: 1.5 }),
+    ];
+    let turn = 0;
+    let continuation = -1;
+    createCompletion.mockImplementation(async (request: any) => {
+      if (!request.tools) return judgeCompletion(["R1"]);
+      turn++;
+      const responses = request.messages.filter((message: any) => message.role === "tool");
+      if (turn === 1) return completion(null, invalid);
+      if (turn === 2) {
+        for (const item of invalid) {
+          const response = responses.find((message: any) => message.tool_call_id === item.id);
+          expect(String(response?.content)).toMatch(/refused|invalid|query|offset|error/i);
+          expect(String(response?.content)).not.toContain("needle-0");
+        }
+        return completion(null, [
+          call("literal-query", "search_paper", { query: "needle[" }),
+          call("first-twelve", "search_paper", { query: "NeEdLe" }),
+        ]);
+      }
+      if (turn === 3) {
+        const parse = (id: string) => JSON.parse(String(responses.find((message: any) => message.tool_call_id === id)?.content).replace(/^\[Tool call #\d+\]\n/, ""));
+        const literal = parse("literal-query");
+        expect(literal).toMatchObject({ path: "/work/paper.md", query: "needle[", matches: [], next_offset: null });
+        const page = parse("first-twelve");
+        expect(page).toMatchObject({ path: "/work/paper.md", query: "NeEdLe" });
+        expect(page.matches).toEqual(starts.slice(0, 12).map((start: number) => ({ start, end: start + 6 })));
+        expect(page.matches.every((match: any) => Object.keys(match).sort().join(",") === "end,start")).toBe(true);
+        expect(JSON.stringify(page)).not.toContain("needle-");
+        expect(page.next_offset).toBeGreaterThan(starts[11]);
+        expect(page.next_offset).toBeLessThanOrEqual(starts[12]);
+        continuation = page.next_offset;
+        return completion(null, [call("remaining", "search_paper", { query: "needle", offset: continuation })]);
+      }
+      const remaining = JSON.parse(String(responses.find((message: any) => message.tool_call_id === "remaining")?.content).replace(/^\[Tool call #\d+\]\n/, ""));
+      expect(remaining).toMatchObject({
+        path: "/work/paper.md", query: "needle",
+        matches: starts.slice(12).map((start: number) => ({ start, end: start + 6 })),
+        next_offset: null,
+      });
+      if (turn === 4) {
+        return completion(null, [
+          sourceRead(), groundedPending("R1", "R1 claim", 9),
+          call("run-needle", "run_command", { command: "python /work/materials/expensive.py" }),
+          call("verify-needle", "record_result", {
+            id: "R1", status: "verified", method: "rerun", reproduced_value: "0.91",
+            evidence_tool_call_ids: [11], evidence_excerpt: "EXPENSIVE_METRIC=0.91",
+          }),
+        ]);
+      }
+      if (turn === 5) {
+        expect(String(responses.find((message: any) => message.tool_call_id === "pending-R1")?.content)).toMatch(/pending/i);
+        expect(String(responses.find((message: any) => message.tool_call_id === "verify-needle")?.content)).toMatch(/verified/i);
+      }
+      return completion(logbook);
+    });
+    const result = await runReproduction(options());
+    expect(result.results).toEqual([expect.objectContaining({ id: "R1", verdict: "verified" })]);
+    expect(turn).toBe(5);
+  });
+
   it("paginates a long paper from the default 12000-character request to later Results and rejects invented provenance", async () => {
     const sandbox = makeSandbox();
     createSandbox.mockResolvedValue(sandbox);

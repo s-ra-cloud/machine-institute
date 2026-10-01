@@ -87,6 +87,7 @@ Rules:
 export const REPRODUCTION_TOOL_CONTRACT = `# Mandatory runtime evidence and completion contract
 These requirements govern tool use and completion even when older saved instructions above differ. Preserve the supplied scientific goals and custom instructions.
 - Register every core claim pending. A NEW claim requires a verbatim claim and original value contained in substantial source_quote from a prior canonical /work/paper.md read, its source_tool_call_id, and source_location copied from that page's verified "characters START-END" range. Unsupported or guessed claims are refused. Update the same id; never replace its grounded claim.
+- Use search_paper for Results/Table offsets, then read_file and its continuation for actual quotes. Search IDs are not evidence.
 - Calls must match schemas. "Refused" means not accepted: repair named fields, using archived accepted state when needed. Never guess missing values or re-register a pending claim.
 - Each finalized claim requires method and evidence_tool_call_ids naming PRIOR numbered command/file checks. evidence_excerpt must be an exact distinctive quote from the original output, not an exit status or a paraphrase.
 - rerun, raw-data-rederived, and toy require a cited successful run_command output. For ALL executed methods (even inconclusive), reproduced_value must occur verbatim INSIDE evidence_excerpt. Keep the value in its original output format; explain conversions in notes. toy method and toy status must be used together.

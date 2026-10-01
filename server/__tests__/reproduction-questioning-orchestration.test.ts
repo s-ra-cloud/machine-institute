@@ -39,6 +39,28 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ files: [{ name: "analyze.py", source: "additional", kind: "text", text: source }], paperMarkdown: paper, textFileCount: 1, binaryFileCount: 0 });
 });
 describe("qP mocked end-to-end orchestration", () => {
+  it("allows canonical search for navigation during assessment, but refuses host-path inspection", async () => {
+    const sb = sandbox(); mock.create.mockResolvedValue(sb);
+    mock.complete.mockResolvedValueOnce(complete(null, [
+      tool("search_paper", { query: "mEaSuReD" }),
+      tool("search_paper", { query: "measured", path: "/proc/1/environ" }),
+      tool("read_file", { path: "/proc/1/environ" }),
+    ]));
+    mock.complete.mockImplementationOnce(async (request: any) => {
+      const responses = request.messages.filter((message: any) => message.role === "tool");
+      const search = JSON.parse(String(responses[0].content).replace(/^\[Tool call #\d+\]\n/, ""));
+      const start = paper.indexOf("measured");
+      expect(search).toMatchObject({ path: "/work/paper.md", query: "mEaSuReD", matches: [{ start, end: start + 8 }], next_offset: null });
+      expect(String(responses[0].content)).not.toContain("The measured score");
+      expect(String(responses[1].content)).toMatch(/Refused|unknown|invalid/i);
+      expect(String(responses[2].content)).toMatch(/Refused/i);
+      throw new Error("test stop after qP search inspection");
+    });
+    await expect(runReproduction(options())).rejects.toThrow("LLM request failed");
+    expect(sb.readText).not.toHaveBeenCalledWith("/proc/1/environ");
+    expect(sb.terminate).toHaveBeenCalledOnce();
+  });
+
   for (const scenario of ["suitable", "adapt", "blocked", "indefensible", "judge-unavailable"] as const) it(`${scenario}: gates execution, retains provenance, judges independently and composes report`, async () => {
     const decision = scenario === "indefensible" ? "blocked" : scenario === "judge-unavailable" ? "suitable" : scenario;
     const sb = sandbox(); mock.create.mockResolvedValue(sb);

@@ -22,7 +22,7 @@ import {
 import { deriveContributionKeywords } from "./prompts/peer-review";
 import { ReproductionSession } from "./reproduction-session";
 import { ReproductionReadGuard } from "./reproduction-read-guard";
-import { renderSourcePage } from "./reproduction-source-page";
+import { renderSourcePage, searchPaperSource } from "./reproduction-source-page";
 import { QuestioningState, QUESTIONING_TOOL, QUESTIONING_SETUP_TOOL, questioningSetupCommand } from "./reproduction-questioning";
 import { cleanQuestioningEnvironment, isolatedQuestioningCommand, QUESTIONING_MANIFEST_SCRIPT, QUESTIONING_LINK_SNAPSHOT_SCRIPT } from "./reproduction-isolation";
 import { QuestioningProvenanceLimitError } from "./reproduction-provenance-store";
@@ -316,6 +316,19 @@ export function finalizeBudgetExhaustedResults(input: {
 
 const TOOLS: ToolSpec[] = [
   {
+    name: "search_paper",
+    description: "Search canonical paper: literal, case-insensitive query (1-128 chars). Returns up to 12 offsets; follow next_offset. Navigation only, not evidence.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        offset: { type: "integer" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "read_reproduction_context",
     description: "Read archived claim state, rejected submissions, drafts, or repair instructions. Omit ref for the paged index. These are context, NOT scientific evidence; cite original command/file IDs via read_tool_result.",
     parameters: {
@@ -346,13 +359,13 @@ const TOOLS: ToolSpec[] = [
   },
   {
     name: "read_file",
-    description: "Read a text file from the sandbox. Returns verified path and canonical character-range metadata. Pages fit a 9000-byte serialized budget; use the continuation offset printed after the page to read the next contiguous page.",
+    description: "Read sandbox text with verified path/range. Pages fit 9000 serialized bytes; follow the returned continuation offset.",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string" },
-        max_chars: { type: "integer", description: "Upper bound on characters returned (default 12000); byte budget may yield fewer." },
-        offset: { type: "integer", description: "Canonical character offset to start from (default 0). Use the continuation offset for the next page; invalid or beyond-end offsets are refused." },
+        max_chars: { type: "integer", description: "Character cap (default 12000); byte limit may return fewer." },
+        offset: { type: "integer", description: "Source character offset (default 0); invalid offsets refused." },
       },
       required: ["path"],
     },
@@ -564,6 +577,8 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       const phaseRefusal = questioning?.gate(name);
       if (phaseRefusal) return phaseRefusal;
       switch (name) {
+        case "search_paper":
+          return searchPaperSource(paperText, args);
         case "setup_environment": {
           const command = questioningSetupCommand(args.packages);
           if (!questioning || !command) return "Refused: select only approved scientific package names; no shell, URLs, versions or extra arguments are accepted.";
