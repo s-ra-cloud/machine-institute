@@ -470,7 +470,7 @@ describe("runReproduction bounded context orchestration", () => {
     let forcedFinals = 0;
     createCompletion.mockImplementation(async (request: any) => {
       if (!request.tools) {
-        expect(String(request.messages.at(-1)?.content)).toContain("Repeated already-delivered source reads");
+        expect(String(request.messages.at(-1)?.content)).toContain("Repeated already-delivered source or archived pages");
         forcedFinals++;
         return completion(logbook);
       }

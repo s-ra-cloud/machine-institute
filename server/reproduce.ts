@@ -527,6 +527,34 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   );
   const recorded = session.recorded;
   const readGuard = new ReproductionReadGuard();
+  // One run-local grace window, charged to the existing tool budget. A command
+  // alone cannot clear it: only validated claim completion ends this handoff.
+  let handoffStart: number | undefined;
+  let handoffClaimId: string | undefined;
+  const handoffActive = () => handoffClaimId !== undefined && recorded.get(handoffClaimId)?.status === "pending";
+  const stallReason = (nextToolName?: string): string | null => {
+    if (handoffClaimId === undefined && readGuard.stopReason) {
+      handoffClaimId = Array.from(recorded.values()).find(c => c.status === "pending")?.id;
+    }
+    // A threshold-crossing batch was generated before recovery guidance.
+    // Charge grace only at the next request boundary; global limits still apply.
+    if (handoffActive() && handoffStart === undefined && nextToolName === undefined) {
+      handoffStart = session.toolCalls.length;
+      try { diagnostics.observe({ kind: "claim-handoff-start", callCount: session.toolCalls.length }); } catch { /* best effort */ }
+    }
+    if (handoffActive()) {
+      return handoffStart !== undefined && session.toolCalls.length - handoffStart >= 4
+        ? "Repeated browsing recovery exhausted without completing a pending claim"
+        : null;
+    }
+    return nextToolName === "record_result" || nextToolName === "assess_suitability" ? null : readGuard.stopReason;
+  };
+  const activeInstruction = () => {
+    const recovery = handoffActive() && handoffStart !== undefined
+      ? `RECOVERY: ${Math.max(0, 4 - (session.toolCalls.length - handoffStart))} tool calls left: ${questioning ? "follow the qP phase below; never bypass suitability or edit gates" : "inspect relevant code, test the pending claim or evidence a real blocker, then record it"}. Browsing is not progress.\n`
+      : "";
+    return recovery + session.activeInstruction(readGuard.navigationInstruction ?? undefined);
+  };
   session.questioning = questioning;
   let toolLoopResult: Awaited<ReturnType<typeof runToolLoop>> | null = null;
   let logbook = "";
@@ -772,8 +800,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       allowResourceStopFallback: true,
       contextProtection: {
         getState: maxBytes => session.contextState(maxBytes),
-        getActiveInstruction: () => [readGuard.navigationInstruction, session.activeInstruction()]
-          .filter(Boolean).join("\n"),
+        getActiveInstruction: activeInstruction,
         archiveContext: (key, text) => session.archiveContext(key, text),
         resizeRetrieval: (name, args, result, maxBytes) => session.resizeRetrieval(name, args, result, maxBytes),
         compactUserMessage,
@@ -791,9 +818,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       },
       // A claim/assessment already batched with the seventh repeated read can
       // still establish real progress. Refuse further browsing, not that repair.
-      getStallReason: nextToolName =>
-        nextToolName === "record_result" || nextToolName === "assess_suitability"
-          ? null : readGuard.stopReason,
+      getStallReason: stallReason,
       onToolCall: async (rec: ToolCallRecord) => {
         session.observeToolCall(rec);
         if (rec.name === "run_command") {
@@ -807,7 +832,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         }
       },
       onPrematureStop: (assistantText) => {
-        if (questioning && !questioning.assessment) return [readGuard.navigationInstruction, session.activeInstruction()].filter(Boolean).join("\n");
+        if (questioning && !questioning.assessment) return activeInstruction();
         if (questioning?.finalizeBlockedClaims(Array.from(recorded.values()))) {
           const logbookIssues = getReproductionCompletionIssues({ recordedResults: [], toolCalls: [], logbook: assistantText, budgetExhausted: false })
             .filter(issue => issue.startsWith("the final logbook is missing"));
@@ -819,7 +844,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           logbook: assistantText,
           budgetExhausted: false,
         });
-        return continuation ? `${readGuard.navigationInstruction ?? ""}\n${session.activeInstruction()}\n${continuation}\n${session.repairContext()}` : null;
+        return continuation ? `${activeInstruction()}\n${continuation}\n${session.repairContext()}` : null;
       },
       maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
     });

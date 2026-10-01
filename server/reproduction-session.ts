@@ -8,6 +8,14 @@ import type { QuestioningState } from "./reproduction-questioning";
 type ClaimValidator = (results: RecordedResult[], calls: readonly ToolCallRecord[]) => string[];
 const evidenceTools = new Set(["run_command", "read_file", "list_files"]);
 const serializedBytes = (value: string) => Buffer.byteLength(JSON.stringify(value), "utf8");
+// Leave 200 serialized bytes for the caller's separate recovery instruction.
+const ACTIVE_INSTRUCTION_BYTES = 800;
+const unicodePrefix = (text: string, length: number): string => {
+  const prefix = text.slice(0, length);
+  // Never split a supplementary Unicode character at an excerpt boundary.
+  return /[\uD800-\uDBFF]$/.test(prefix) && /[\uDC00-\uDFFF]/.test(text.charAt(length))
+    ? prefix.slice(0, -1) : prefix;
+};
 const finiteInteger = (value: unknown, fallback: number): number => {
   const number = Number(value);
   return Number.isFinite(number) ? Math.floor(number) : fallback;
@@ -346,28 +354,81 @@ export class ReproductionSession {
    * Small, authoritative next action that survives transcript compaction.
    * It intentionally describes only accepted state and never invents claim
    * identities, values, evidence, or missing record_result fields.
+   * Navigation is subordinate and included whole only if the composed string
+   * fits 800 JSON-serialized UTF-8 bytes (reserving caller recovery space).
    */
-  activeInstruction(): string {
-    if (this.questioning) {
-      return `qP phase: ${this.questioning.assessment?.decision ?? "assessment (inspection only; write/execute disabled)"}. ${this.questioning.limitation ?? ""} Full authoritative metadata: read_reproduction_context(ref="qp:metadata"). Page referenced source/output with ref="qp:blob:SHA256". ${this.questioning.assessment ? "Continue claim-specific work, or report the recorded limitation, then return all four logbook sections." : "Inspect paper, inventory and materials; register claims; call assess_suitability before execution."}`;
-    }
+  activeInstruction(navigation?: string): string {
     const results = Array.from(this.recorded.values());
     const pending = results.filter(result => result.status === "pending");
-    const commands = this.toolCalls.filter(call =>
-      call.name === "run_command"
-      && !call.error
-      && !/^(?:Refused:|Tool budget exhausted|Deadline exhausted)/.test(call.result),
-    );
-    if (results.length === 0) {
-      return "LATEST ACTION — EXTRACT: no claims are accepted. Search targeted sections of /work/paper.md for actual core quantitative claims, then register them pending. Do not repeat the first page, invent claims, return a plan, or return an archive notice.";
+    let action: string;
+    if (this.questioning) {
+      const q = this.questioning;
+      const decision = q.assessment?.decision;
+      const next = !decision
+        ? "Inspect paper, inventory and materials; register claims; call assess_suitability before execution."
+        : decision === "blocked"
+          ? "Assessment records no defensible analysis; write/execute disabled. Report the recorded limitation, then return all four logbook sections."
+          : decision === "adapt"
+            ? "Only planned working-copy edits are allowed; apply every planned adaptation before execution. Adapted results are separate from original reproduction; return all four logbook sections."
+            : "Use suitable code unchanged (scientific edits disabled). Continue claim-specific work, then return all four logbook sections.";
+      // Never inline an unbounded limitation; qp:metadata retains it exactly.
+      action = `qP phase: ${decision ?? "assessment (inspection only; write/execute disabled)"}. Full authoritative metadata: read_reproduction_context(ref="qp:metadata"). Page referenced source/output with ref="qp:blob:SHA256". ${q.limitation ? "Limitation recorded: write/execute/setup disabled; report it without inventing inputs. " : ""}${q.limitation && decision ? "Report the recorded limitation, then return all four logbook sections." : next}`;
+    } else {
+      const commands = this.toolCalls.filter(call =>
+        call.name === "run_command"
+        && !call.error
+        && !/^(?:Refused:|Tool budget exhausted|Deadline exhausted)/.test(call.result),
+      );
+      if (results.length === 0) {
+        action = "LATEST ACTION — EXTRACT: no claims are accepted. Search targeted sections of /work/paper.md for actual core quantitative claims, then register them pending. Do not repeat the first page, invent claims, return a plan, or return an archive notice.";
+      } else if (pending.length > 0 && commands.length === 0) {
+        action = `LATEST ACTION — PREPARE/EXECUTE: ${pending.length} accepted claim(s) remain pending and no command has run. Inspect the relevant script/data, then run the claim-specific experiment; if genuinely impossible, inspect the real blocker. Do not re-register claims, return a plan, or return an archive notice.`;
+      } else if (pending.length > 0) {
+        action = `LATEST ACTION — ASSESS/RECORD: command output exists and ${pending.length} accepted claim(s) remain pending. First assess whether output supports the relevant claim or a real blocker. Record only supported outcomes with exact original evidence; otherwise prepare/run the missing claim experiment. Reuse completed outputs; do not fabricate fields, return a plan, or return an archive notice.`;
+      } else {
+        action = "LATEST ACTION — REPORT: every accepted claim is finalized. Retrieve archived claim details or evidence if needed, then return the required final logbook from accepted state and cited evidence. Do not rerun experiments, invent values, return a plan, or return an archive/retrieval notice.";
+      }
     }
-    if (pending.length > 0 && commands.length === 0) {
-      return `LATEST ACTION — PREPARE/EXECUTE: ${pending.length} accepted claim(s) remain pending and no command has run. Inspect the relevant script/data, then run the claim-specific experiment; if genuinely impossible, inspect the real blocker. Do not re-register claims, return a plan, or return an archive notice.`;
+    if (pending.length) action = this.withPendingGuidance(action, pending);
+    const withNavigation = `${action}\nSubordinate navigation (after the action above): ${navigation}`;
+    return navigation && serializedBytes(withNavigation) <= ACTIVE_INSTRUCTION_BYTES ? withNavigation : action;
+  }
+
+  private withPendingGuidance(action: string, pending: RecordedResult[]): string {
+    const claim = pending[0];
+    const ref = this.snapshotClaim(claim.id, "accepted").ref;
+    // An identity is either exact or explicitly omitted, never an excerpt.
+    const id = serializedBytes(JSON.stringify(claim.id)) <= 100
+      ? `id=${JSON.stringify(claim.id)}` : "id omitted; recover exact id from ref";
+    const source = claim.sourceToolCallId === undefined
+      ? "source_tool_call_id not recorded; recover provenance, do not guess"
+      : `source_tool_call_id=${claim.sourceToolCallId} (original paper read)`;
+    const retrieval = `Full accepted state: read_reproduction_context(ref="${ref}").`;
+    const other = pending.length > 1 ? " Other pending claims: read_reproduction_context (paged index)." : "";
+    const render = (text: string, excerpt: boolean) =>
+      `${action}\nPending ${id}; ${source}; claim${excerpt ? " excerpt" : ""}=${JSON.stringify(text)}${excerpt ? " [excerpt; omitted text in ref]" : ""}. ${retrieval}${other} Never guess values.`;
+    const full = render(claim.claim, false);
+    if (serializedBytes(full) <= ACTIVE_INSTRUCTION_BYTES) return full;
+    // Binary search only works when the empty envelope itself fits. Preserve
+    // phase gates and exact identity/provenance (or their immutable ref), not
+    // optional index hints or an empty excerpt, when fixed overhead is large.
+    if (serializedBytes(render("", true)) > ACTIVE_INSTRUCTION_BYTES) {
+      const compact = `${action}\nPending ${id}; ${source}; claim omitted; ${retrieval} Never guess values.`;
+      if (serializedBytes(compact) <= ACTIVE_INSTRUCTION_BYTES) return compact;
+      const referenced = `${action}\nPending id/claim/source omitted; recover exact accepted state: read_reproduction_context(ref="${ref}"). Never guess values.`;
+      if (serializedBytes(referenced) <= ACTIVE_INSTRUCTION_BYTES) return referenced;
+      // Never silently truncate authoritative gates or return an oversized
+      // instruction if a future action template outgrows the hard envelope.
+      throw new Error("Authoritative reproduction action and claim reference exceed the active instruction byte limit.");
     }
-    if (pending.length > 0) {
-      return `LATEST ACTION — ASSESS/RECORD: command output exists and ${pending.length} accepted claim(s) remain pending. First assess whether output supports the relevant claim or a real blocker. Record only supported outcomes with exact original evidence; otherwise prepare/run the missing claim experiment. Reuse completed outputs; do not fabricate fields, return a plan, or return an archive notice.`;
+    let low = 0;
+    let high = claim.claim.length;
+    while (low < high) {
+      const length = Math.ceil((low + high) / 2);
+      if (serializedBytes(render(unicodePrefix(claim.claim, length), true)) <= ACTIVE_INSTRUCTION_BYTES) low = length;
+      else high = length - 1;
     }
-    return "LATEST ACTION — REPORT: every accepted claim is finalized. Retrieve archived claim details or evidence if needed, then return the required final logbook from accepted state and cited evidence. Do not rerun experiments, invent values, return a plan, or return an archive/retrieval notice.";
+    return render(unicodePrefix(claim.claim, low), true);
   }
 
   contextState(maxBytes = 2500): string {

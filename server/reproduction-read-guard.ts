@@ -5,6 +5,7 @@
 export interface ReproductionPagingDiagnostics {
   sourceReadCount: number;
   sourceRepeatCount: number;
+  // Archived output and reproduction-context pages are retrieval, not evidence.
   outputRepeatCount: number;
   outputNewRangeCount: number;
   paperFirstGap: number;
@@ -33,7 +34,15 @@ export class ReproductionReadGuard {
 
   get stopReason(): string | null {
     return this.stalled
-      ? "Repeated already-delivered source reads without registering a claim or advancing the assessment"
+      ? this.acceptedClaims > 0
+        ? "Repeated already-delivered source or archived pages without advancing a pending claim or the assessment"
+        : "Repeated already-delivered source or archived pages without registering a claim or advancing the assessment"
+      : null;
+  }
+
+  private get pendingClaimInstruction(): string | null {
+    return this.acceptedClaims > 0
+      ? "For an existing pending claim, inspect the relevant shipped script/data, then perform the claim-specific experiment or demonstrate a real blocker and update record_result using the same id. Retrieve prior evidence/state only if needed; do not register the claim again."
       : null;
   }
 
@@ -76,6 +85,27 @@ export class ReproductionReadGuard {
     };
   }
 
+  private observeRetrievedRange(key: string, start: number, end: number, text: string, exactPageOnly = false): void {
+    const old = this.outputRanges.get(key) ?? [];
+    // Retrieval never changes scientific progress; new pages do not reset
+    // repetitions. Preserve legacy output containment matching, but context
+    // accounting runs before the fitter can shrink the generated page. Its
+    // subranges may therefore contain text the model has never actually seen.
+    const duplicate = text.length > 0 && old.some(r => exactPageOnly
+      ? r.start === start && r.start + r.text.length === end && r.text === text
+      : r.start <= start && r.start + r.text.length >= end
+        && r.text.slice(start - r.start, end - r.start) === text);
+    if (duplicate) {
+      this.outputRepeatCount++;
+      this.repeats++;
+      if (this.repeats >= 7) this.stalled = true;
+    } else if (text.length) {
+      this.outputNewRangeCount++;
+      old.push({ start, text });
+      this.outputRanges.set(key, old);
+    }
+  }
+
   observe(
     name: string,
     result: string,
@@ -91,6 +121,32 @@ export class ReproductionReadGuard {
         this.sourcePage = undefined;
         this.output = undefined;
       }
+    }
+    if (name === "read_reproduction_context") {
+      let context: unknown;
+      try {
+        context = JSON.parse(result);
+      } catch {
+        return result;
+      }
+      if (context && typeof context === "object" && !Array.isArray(context)) {
+        const page = context as Record<string, unknown>;
+        const { ref, key, offset, end, total_chars: total, text, next_offset: next } = page;
+        // Only a genuine, contiguous archived-page envelope counts. Refused
+        // reads and arbitrary/malformed JSON must not invent repetition.
+        if (!("error" in page) && typeof ref === "string" && ref.trim().length > 0
+          && typeof key === "string" && typeof text === "string"
+          && typeof offset === "number" && Number.isSafeInteger(offset)
+          && typeof end === "number" && Number.isSafeInteger(end)
+          && typeof total === "number" && Number.isSafeInteger(total)
+          && offset >= 0 && end >= offset && end <= total && text.length === end - offset
+          && next === (end < total ? end : null)) {
+          this.observeRetrievedRange(`context:${ref}`, offset, end, text, true);
+        }
+      }
+      // Preserve JSON exactly so byte-aware resizing can still recover its
+      // actual displayed continuation offset; never append warning prose.
+      return result;
     }
     if (name === "read_tool_result") {
       const evidence = /^Original evidence tool call #(\d+) \((?:run_command|read_file|list_files)\); characters (\d+)-(\d+) of (\d+)\. Cite #\1, not this retrieval call\.[^\n]*\n/.exec(result);
@@ -108,21 +164,7 @@ export class ReproductionReadGuard {
         if (end < total && text.endsWith(footer)) text = text.slice(0, -footer.length);
         if (Number.isSafeInteger(start) && Number.isSafeInteger(end) && Number.isSafeInteger(total)
           && start >= 0 && end >= start && end <= total && text.length === end - start) {
-          const old = this.outputRanges.get(key) ?? [];
-          // Retrieval does not change scientific progress. Count only complete
-          // repeated output pages; never promote a retrieval to a source read.
-          const duplicate = text.length > 0 && old.some(r =>
-            r.start <= start && r.start + r.text.length >= end
-            && r.text.slice(start - r.start, end - r.start) === text);
-          if (duplicate) {
-            this.outputRepeatCount++;
-            this.repeats++;
-            if (this.repeats >= 7) this.stalled = true;
-          } else if (text.length) {
-            this.outputNewRangeCount++;
-            old.push({ start, text });
-            this.outputRanges.set(key, old);
-          }
+          this.observeRetrievedRange(key, start, end, text);
           this.output = { id, end, total, index: !evidence };
           // Keep the structured retrieval envelope intact for byte-aware
           // resizing. The active instruction carries paging guidance.
@@ -221,6 +263,10 @@ export class ReproductionReadGuard {
     this.repeats++;
     if (this.repeats >= 7) this.stalled = true;
     if (this.repeats < 2) return result;
-    return `${result}\n\n[Repeated inspection ${this.repeats}/7: ${this.extractionInstruction ?? next} If earlier tool output was compacted, retrieve its original ID with read_tool_result rather than rereading the source. Repeated browsing is not a reproduced result.]`;
+    const instruction = this.pendingClaimInstruction ?? this.extractionInstruction ?? next;
+    const retrieval = this.acceptedClaims > 0
+      ? ""
+      : " If earlier tool output was compacted, retrieve its original ID with read_tool_result rather than rereading the source.";
+    return `${result}\n\n[Repeated inspection ${this.repeats}/7: ${instruction}${retrieval} Repeated browsing is not a reproduced result.]`;
   }
 }

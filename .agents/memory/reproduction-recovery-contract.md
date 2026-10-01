@@ -68,3 +68,9 @@ Continuation instructions must distinguish source-file coordinates from stored-o
 **Why:** Stored-output wrappers shift offsets relative to the source, and request fitting may shorten a retrieved page again. Repeating the pre-fit end in active guidance can skip unseen text. Protecting all source pages as irreducible retrievals also exhausted the smaller serving window during mocked recovery.
 
 **How to apply:** Bound complete source envelopes including metadata, keep original evidence separate, and retain compact navigation rather than making source history immutable. Leave structured retrieval envelopes intact for resizing; follow the displayed page's continuation offset.
+
+After claim acceptance, preparation/execution guidance must dominate paging hints and carry bounded authoritative claim context.
+
+**Why:** A later diagnostic showed accepted pending state but no execution: the agent repeatedly retrieved its claim and inventory. Paging advice still competed with execution advice; the truncated trace establishes the failure pattern, not a sole provider root cause.
+
+**How to apply:** Keep evidence retrieval available without making it the primary task. Bind browsing recovery to the original pending identity, not aggregate completion counts; charge a bounded recovery allowance only after an outgoing request can deliver its instructions. Test multi-call batches, unrelated claim completion, strict expiry, and qP gates with mocked orchestration.
