@@ -17,6 +17,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import type { Reproduction } from "@shared/schema";
 import { reproductionPersonaName } from "@/lib/reproduction-personas";
+import { ReproductionJudgeSelector, useReproductionJudge, reproductionModelPayload, postReproduction } from "@/components/ReproductionJudgeSelector";
 
 interface ClaimVerdict {
   id: string;
@@ -210,11 +211,10 @@ export default function ReproductionDetail() {
   const [retryModelConfig, setRetryModelConfig] = useState<ModelConfig>({
     providerMode: "platform", provider: "", modelName: "",
   });
-  const [retryJudgeConfig, setRetryJudgeConfig] = useState<ModelConfig>({
-    providerMode: "platform", provider: "", modelName: "",
-  });
   const [retryByocApiKey, setRetryByocApiKey] = useState("");
-  const [retryJudgeByocApiKey, setRetryJudgeByocApiKey] = useState("");
+  const retryJudgeSelection = useReproductionJudge(retryModelConfig, retryByocApiKey);
+  const retryJudgeConfig = retryJudgeSelection.config;
+  const retryJudgeByocApiKey = retryJudgeSelection.apiKey;
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -237,36 +237,16 @@ export default function ReproductionDetail() {
   const retryMutation = useMutation({
     mutationFn: async () => {
       const submittedByocKey = retryModelConfig.providerMode === "byok" ? retryByocApiKey : undefined;
-      const submittedJudgeByocKey = retryJudgeConfig.providerMode === "byok" ? retryJudgeByocApiKey : undefined;
-      const res = await fetch(`/api/reproductions/${id}/retry`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          providerMode: retryModelConfig.providerMode,
-          modelProvider: retryModelConfig.provider,
-          modelName: retryModelConfig.modelName,
-          judgeModelName: retryJudgeConfig.modelName,
-          ...(submittedByocKey ? { byocApiKey: submittedByocKey } : {}),
-          judgeProviderMode: retryJudgeConfig.providerMode,
-          judgeModelProvider: retryJudgeConfig.provider,
-          ...(submittedJudgeByocKey ? { judgeByocApiKey: submittedJudgeByocKey } : {}),
-        }),
+      const submittedJudgeByocKey = retryJudgeSelection.needsSeparateKey ? retryJudgeByocApiKey : undefined;
+      return postReproduction(`/api/reproductions/${id}/retry`, {
+          ...reproductionModelPayload(retryModelConfig, retryJudgeConfig, submittedByocKey ?? "", submittedJudgeByocKey ?? ""),
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const message = String(body?.error || "Retry failed");
-        throw new Error([submittedByocKey, submittedJudgeByocKey].filter((key): key is string => Boolean(key)).reduce(
-          (safe, key) => safe.replaceAll(key, "[redacted]"),
-          message,
-        ));
-      }
-      return body as Reproduction;
     },
     onSuccess: (retry) => navigate(`/reproductions/${retry.id}`),
     onError: (err: any) => setRetryMessage(err?.message || "Retry failed"),
     onSettled: () => {
       setRetryByocApiKey("");
-      setRetryJudgeByocApiKey("");
+      retryJudgeSelection.clearKey();
     },
   });
 
@@ -490,11 +470,8 @@ export default function ReproductionDetail() {
                   compact
                   requireExplicitSelection
                 />
-                <ModelSelector
-                  value={retryJudgeConfig}
-                  onChange={setRetryJudgeConfig}
-                  apiKey={retryJudgeByocApiKey}
-                  onApiKeyChange={setRetryJudgeByocApiKey}
+                <ReproductionJudgeSelector
+                  selection={retryJudgeSelection}
                   activeType="judge"
                   label="Replacement judge"
                   models={managedConfig.data?.platformModels ?? []}

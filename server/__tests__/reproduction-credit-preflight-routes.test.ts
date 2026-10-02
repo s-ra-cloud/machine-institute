@@ -4,6 +4,7 @@ import type { Server } from "http";
 
 const state = vi.hoisted(() => ({
   create: vi.fn(),
+  updates: vi.fn(async () => {}),
   run: vi.fn(),
   completion: vi.fn(),
   getSource: vi.fn(async () => state.source),
@@ -48,6 +49,7 @@ vi.mock("../storage", () => ({
     getReproductionById: (...args: any[]) => state.getSource(...args),
     getReproducedPapersForJournal: vi.fn(async () => []),
     createReproduction: (...args: any[]) => state.create(...args),
+    updateReproduction: (...args: any[]) => state.updates(...args),
     createEditorial: async (data: any) => ({ ...data, id: "editorial-test", status: "pending" }),
     getEditorialById: async () => ({ id: "editorial-test", agentId: "G4O" }),
     updateEditorial: (...args: any[]) => state.editorialUpdates(...args),
@@ -111,6 +113,7 @@ async function post(path: string, body: Record<string, unknown>, id = "failed-ru
 
 beforeEach(() => {
   state.create.mockReset();
+  state.updates.mockClear();
   state.run.mockReset();
   state.completion.mockReset();
   state.getSource.mockClear();
@@ -130,6 +133,65 @@ beforeEach(() => {
 });
 
 describe("managed generation route guards (no provider calls)", () => {
+  for (const path of ["/api/reproductions", "/api/reproductions/:id/retry"]) {
+    it.each(["platform", "byok"])("executes matching %s reproducer and judge on " + path, async mode => {
+      vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+      vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-only");
+      const modelName = mode === "byok" ? "gpt-4o" : "openai/gpt-5-mini";
+      const key = "sk-project-ephemeral-key-123456";
+      state.create.mockImplementation(async data => ({ ...data, id: "new-run", status: "pending" }));
+      // Hold the scientific runner at its boundary; no paid calls or sandbox.
+      state.run.mockImplementation(() => new Promise(() => {}));
+      const result = await post(path, {
+        documentId: "paper", providerMode: mode, modelProvider: "openai", modelName,
+        judgeProviderMode: mode, judgeModelProvider: "openai", judgeModelName: modelName,
+        ...(mode === "byok" ? { byocApiKey: key } : {}),
+      });
+      expect(result.status).toBe(201);
+      await vi.waitFor(() => expect(state.run).toHaveBeenCalledTimes(1));
+      const execution = state.run.mock.calls[0][0];
+      expect(execution.judgeModelConfig).toEqual(execution.modelConfig);
+      expect(execution.judgeModelConfig).toMatchObject({ modelName, provider: "openai", providerMode: mode === "byok" ? "byoc" : "platform" });
+      if (mode === "byok") expect(execution.judgeModelConfig.apiKey).toBe(key);
+      expect(state.create).toHaveBeenCalledWith(expect.objectContaining({ modelName, judgeModelName: modelName, judgeModelProvider: "openai" }));
+      expect(JSON.stringify(state.create.mock.calls)).not.toContain(key);
+      expect(JSON.stringify(result.body)).not.toContain(key);
+      expect(execution.judgePrompt).not.toBe(execution.reproducerPrompt);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("preserves independent cross-provider BYOK judging on " + path, async () => {
+      state.create.mockImplementation(async data => ({ ...data, id: "new-run", status: "pending" }));
+      state.run.mockImplementation(() => new Promise(() => {}));
+      const result = await post(path, {
+        documentId: "paper", providerMode: "byok", modelProvider: "openai", modelName: "gpt-4o",
+        byocApiKey: "sk-project-ephemeral-key-123456",
+        judgeProviderMode: "byok", judgeModelProvider: "anthropic", judgeModelName: "claude-sonnet-4-20250514",
+        judgeByocApiKey: "sk-ant-ephemeral-judge-key-123456",
+      });
+      expect(result.status).toBe(201);
+      await vi.waitFor(() => expect(state.run).toHaveBeenCalledTimes(1));
+      expect(state.run.mock.calls[0][0].judgeModelConfig).toMatchObject({
+        provider: "anthropic", modelName: "claude-sonnet-4-20250514", apiKey: "sk-ant-ephemeral-judge-key-123456",
+      });
+      expect(JSON.stringify(state.create.mock.calls)).not.toContain("ephemeral");
+      expect(JSON.stringify(result.body)).not.toContain("ephemeral");
+    });
+
+    it.each([["platform", "byok"], ["byok", "platform"]])("rejects mixed modes %s/%s on " + path, async (mode, judgeMode) => {
+      vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_BASE_URL", "https://managed.example.test");
+      vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "test-only");
+      const result = await post(path, {
+        documentId: "paper", providerMode: mode, modelProvider: "openai",
+        modelName: mode === "byok" ? "gpt-4o" : "openai/gpt-5-mini",
+        ...(mode === "byok" ? { byocApiKey: "sk-project-ephemeral-key-123456" } : {}),
+        judgeProviderMode: judgeMode, judgeModelName: "openai/gpt-5-mini",
+      });
+      expect(result.status).toBe(400);
+      expect(state.create).not.toHaveBeenCalled();
+      expect(state.run).not.toHaveBeenCalled();
+    });
+  }
   it.each([undefined, "qP"])("returns catalogue locks scoped to %s", async agentId => {
     const { storage } = await import("../storage");
     vi.mocked(storage.getReproducedPapersForJournal).mockResolvedValueOnce([

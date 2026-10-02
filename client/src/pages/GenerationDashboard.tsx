@@ -14,6 +14,7 @@ import {
   type GenerationCostType,
 } from "@/components/ModelSelector";
 import { PaperPicker } from "@/components/PaperPicker";
+import { ReproductionJudgeSelector, useReproductionJudge, reproductionModelPayload, postReproduction } from "@/components/ReproductionJudgeSelector";
 import { REPRODUCTION_PERSONAS, reproductionPersonaName, useReproductionPrompts, type ReproductionPersona } from "@/lib/reproduction-personas";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -328,12 +329,9 @@ export default function GenerationDashboard() {
   const [reproSelectedTitle, setReproSelectedTitle] = useState<string>("");
   const [reproPickerQuery, setReproPickerQuery] = useState<string>("");
   const [reproGpu, setReproGpu] = useState<string>("A10G");
-  const [reproJudgeConfig, setReproJudgeConfig] = useState<ModelConfig>({
-    providerMode: "platform",
-    provider: "",
-    modelName: "",
-  });
-  const [reproJudgeByocKey, setReproJudgeByocKey] = useState("");
+  const reproJudgeSelection = useReproductionJudge(modelConfig, getByocKey("reproduce"));
+  const reproJudgeConfig = reproJudgeSelection.config;
+  const reproJudgeByocKey = reproJudgeSelection.apiKey;
   const [reproPersona, setReproPersona] = useState<ReproductionPersona>("P");
   const [reproPromptsExpanded, setReproPromptsExpanded] = useState(false);
   // Persist the active batch id so the progress panel survives page reloads
@@ -683,11 +681,8 @@ export default function GenerationDashboard() {
   const generateReproductionMutation = useMutation({
     mutationFn: async () => {
       const submittedByocKey = modelConfig.providerMode === "byok" ? getByocKey("reproduce") : undefined;
-      const submittedJudgeByocKey = reproJudgeConfig.providerMode === "byok" ? reproJudgeByocKey : undefined;
-      const res = await fetch("/api/reproductions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const submittedJudgeByocKey = reproJudgeSelection.needsSeparateKey ? reproJudgeByocKey : undefined;
+      return postReproduction("/api/reproductions", {
           projectId: selectedJournal,
           journalId: selectedJournal,
           documentId: reproSelectedDocId,
@@ -696,23 +691,10 @@ export default function GenerationDashboard() {
           gpu: reproGpu,
           reproducerPrompt: reproPrompt || undefined,
           judgePrompt: reproJudgePrompt || undefined,
-          judgeModelName: reproJudgeConfig.modelName,
           orchestratorName: orchestratorName || undefined,
           agentDescription: agentDescription || undefined,
-          providerMode: modelConfig.providerMode,
-          modelProvider: modelConfig.provider,
-          modelName: modelConfig.modelName,
-          ...(submittedByocKey ? { byocApiKey: submittedByocKey } : {}),
-          judgeProviderMode: reproJudgeConfig.providerMode,
-          judgeModelProvider: reproJudgeConfig.provider,
-          ...(submittedJudgeByocKey ? { judgeByocApiKey: submittedJudgeByocKey } : {}),
-        }),
+          ...reproductionModelPayload(modelConfig, reproJudgeConfig, submittedByocKey ?? "", submittedJudgeByocKey ?? ""),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(redactSubmittedKeys(err.error || "Failed to start reproduction", submittedByocKey, submittedJudgeByocKey));
-      }
-      return res.json();
     },
     onSuccess: (data: { id?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/reproductions-all"] });
@@ -722,7 +704,7 @@ export default function GenerationDashboard() {
     },
     onSettled: () => {
       clearByocKey("reproduce");
-      setReproJudgeByocKey("");
+      reproJudgeSelection.clearKey();
     },
   });
 
@@ -1733,11 +1715,8 @@ export default function GenerationDashboard() {
                           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 block">
                             Judge model
                           </label>
-                          <ModelSelector
-                            value={reproJudgeConfig}
-                            onChange={setReproJudgeConfig}
-                            apiKey={reproJudgeByocKey}
-                            onApiKeyChange={setReproJudgeByocKey}
+                          <ReproductionJudgeSelector
+                            selection={reproJudgeSelection}
                             hasPlatformAccess={hasPlatformAccess}
                             activeType="judge"
                             label="Judge model"
@@ -1753,7 +1732,7 @@ export default function GenerationDashboard() {
                             </p>
                           )}
                           <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
-                            A separately selected model reads the agent&apos;s logbook and every command output, then issues verified / falsified / toy / inconclusive per result. For BYOK, enter a key for the judge provider too, including when it differs from the reproducer&apos;s provider. Managed estimates apply only to managed models; own-provider charges are billed separately. Modal GPU usage is separate.
+                            The judge reads the agent&apos;s logbook and every command output, then issues verified / falsified / toy / inconclusive per result. For BYOK, another temporary key is required only for a different judge provider. Managed estimates apply only to managed models; own-provider charges are billed separately. Modal GPU usage is separate.
                           </p>
                         </div>
                       </div>

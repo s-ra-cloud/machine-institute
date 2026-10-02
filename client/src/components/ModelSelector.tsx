@@ -61,6 +61,7 @@ interface Props {
   requireExplicitSelection?: boolean;
   apiKey?: string;
   onApiKeyChange?: (key: string) => void;
+  hideApiKey?: boolean;
 }
 
 const taskSupported = (model: ManagedModel, type?: GenerationCostType): boolean =>
@@ -154,6 +155,7 @@ export function ModelSelector({
   requireExplicitSelection = false,
   apiKey = "",
   onApiKeyChange,
+  hideApiKey = false,
 }: Props) {
   const ownConfig = useGenerationConfig(models === undefined);
   const availableModels = models ?? ownConfig.data?.platformModels ?? [];
@@ -271,7 +273,7 @@ export function ModelSelector({
                 />
               </label>
             </div>
-            <label className="block text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+            {!hideApiKey && <label className="block text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
               {value.provider === "anthropic" ? "Anthropic API key" : value.provider === "openrouter" ? "OpenRouter API key" : "OpenAI API key"}
               <input
                 type="password"
@@ -282,7 +284,8 @@ export function ModelSelector({
                 className="mt-2 w-full bg-background border border-border/50 px-3 py-2.5 text-sm font-mono"
                 data-testid="input-byok-api-key"
               />
-            </label>
+            </label>}
+            {hideApiKey && <p className="text-[10px] font-mono text-muted-foreground">The judge reuses the reproducer&apos;s temporary key for this provider.</p>}
             <p className="text-[10px] font-mono text-muted-foreground/70" data-testid="text-byok-billing">
               Your key stays in this page&apos;s temporary form state and is sent only with this task&apos;s POST. It is cleared when submission finishes. Provider usage is billed by your provider account, separately from Replit credits. Custom BYOK models have no managed-model estimate.
             </p>
