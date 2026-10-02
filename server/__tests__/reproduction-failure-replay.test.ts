@@ -88,7 +88,7 @@ function activeGuidance(request: any): string {
 function expectPendingR4Guidance(request: any, recoveryCalls?: number) {
   const guidance = activeGuidance(request);
   const phase = recoveryCalls === undefined ? guidance : guidance.slice(guidance.indexOf("\n") + 1);
-  expect(phase).toMatch(/^LATEST ACTION — PREPARE\/EXECUTE:/);
+  expect(phase).toMatch(/^LATEST ACTION — (PREPARE\/EXECUTE|FINALIZE):/);
   expect(phase).toContain("R4");
   expect(phase).toContain(claim);
   expect(Buffer.byteLength(JSON.stringify(phase), "utf8")).toBeLessThanOrEqual(800);
@@ -201,6 +201,49 @@ afterEach(() => {
 });
 
 describe("mocked full-flow reproduction failure and recovery replay", () => {
+  it("allows a second analysis command after the old cutoff and repairs a result during reserved finalization", async () => {
+    const sb = sandbox();
+    await sb.writeText("/work/predictions.csv", "correct\nTrue\n");
+    createSandbox.mockResolvedValue(sb);
+    let turn = 0;
+    let judged = 0;
+    createCompletion.mockImplementation(async (request: any) => {
+      if (!request.tools) {
+        judged++;
+        expect(request.messages[1].content).toContain("Original tool #16");
+        return completion(JSON.stringify({
+          summary: "Independently checked the second execution.",
+          results: [{ id: "R4", claim, verdict: "verified", reproduced_value: "0.91", evidence }],
+        }));
+      }
+      turn++;
+      const browsing = pendingR4BrowsingTurn(turn, request);
+      if (browsing) return browsing;
+      if (turn === 11) return completion(null, [call("recover-state", "read_reproduction_context", { ref: acceptedState(request).claims[0].ref })]);
+      if (turn === 12) return completion(null, [call("first-analysis", "run_command", { command: "python /work/materials/expensive.py" })]);
+      if (turn === 13) return completion(null, [call("first-output", "read_tool_result", { tool_call_id: 13 })]);
+      if (turn === 14) return completion(null, [call("predictions", "read_file", { path: "/work/predictions.csv" })]);
+      if (turn === 15) {
+        expect(activeGuidance(request)).toContain("(analysis)");
+        return completion(null, [call("second-analysis", "run_command", { command: "python /work/materials/expensive.py --check" })]);
+      }
+      if (turn <= 18) return completion(null, [call(`evidence-${turn}`, "read_tool_result", { tool_call_id: 16 })]);
+      expect(activeGuidance(request)).toContain(turn < 22 ? "(finalization)" : "REPORT");
+      if (turn === 19) return completion(null, [call("rejected-final", "record_result", { id: "R4", status: "verified" })]);
+      if (turn === 20) return completion(null, [call("recover-evidence", "read_tool_result", { tool_call_id: 16 })]);
+      if (turn === 21) return completion(null, [call("supported-final", "record_result", {
+        id: "R4", status: "verified", method: "rerun", reproduced_value: "0.91",
+        evidence_tool_call_ids: [16], evidence_excerpt: evidence,
+      })]);
+      expect(turn).toBe(22);
+      return completion(logbook.replaceAll("R1", "R4").replace("tool #7", "tool #16"));
+    });
+    const result = await runSuccessfulReplay();
+    expect(result.overall).toBe("verified");
+    expect(result.toolCallCount).toBe(22);
+    expect(judged).toBe(1);
+    expect(sb.exec.mock.calls.filter(([argv]) => argv.join(" ").includes("expensive.py"))).toHaveLength(2);
+  });
   it.each([false, true])("moves accepted R4 from repeated browsing through script inspection, write, execution and validated judging (provider context rejection: %s)", async rejectContext => {
     const sb = sandbox();
     createSandbox.mockResolvedValue(sb);
@@ -262,7 +305,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
         return completion(null, [call("execute-r4", "run_command", { command: "python /work/recover-r4.py" })]);
       }
       if (turn === 14) {
-        expect(activeGuidance(request)).toMatch(/^RECOVERY: 1 tool calls left/);
+        expect(activeGuidance(request)).toMatch(/^RECOVERY: 6 tool calls left \(analysis\)/);
         expect(activeGuidance(request)).toContain("LATEST ACTION — ASSESS/RECORD");
         expect(activeGuidance(request)).toContain("R4");
         expect(acceptedState(request).claims[0]).toMatchObject({ id: "R4", status: "pending" });
@@ -410,8 +453,8 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
           }),
         ]);
       }
-      expect(turn).toBe(12);
-      expect(activeGuidance(request)).toMatch(/^RECOVERY: 1 tool calls left/);
+      expect(turn).toBeLessThanOrEqual(19);
+      expect(activeGuidance(request)).toContain("RECOVERY:");
       expect(activeGuidance(request)).toContain('Pending id="R4"');
       expect(acceptedState(request).claims).toEqual(expect.arrayContaining([
         expect.objectContaining({ id: "R4", status: "pending" }),
@@ -427,9 +470,9 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/stopped before completing required work \(no-progress\)/);
     expect(forcedStops).toBe(1); // A judge request has no STOP instruction and cannot pass the mock.
-    expect(turn).toBe(12);
+    expect(turn).toBe(19);
     expect(getReproductionFailureDiagnostics(error)).toMatchObject({
-      stopReason: "no-progress", callCount: 15,
+      stopReason: "no-progress", callCount: 22,
       claims: expect.arrayContaining([
         expect.objectContaining({ id: "R4", status: "pending" }),
         expect.objectContaining({ id: "R5", status: "verified" }),
@@ -440,7 +483,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     expectBoundedReplayRequests(requests);
   });
 
-  it("refuses a fifth same-batch record_result and assessment after four invalid finalizations consume R4's handoff", async () => {
+  it("refuses late same-batch finalizations after preparation and reserved repairs are exhausted", async () => {
     const sb = sandbox();
     createSandbox.mockResolvedValue(sb);
     const requests: any[] = [];
@@ -449,7 +492,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     createCompletion.mockImplementation(async (request: any) => {
       requests.push(JSON.parse(JSON.stringify(request)));
       if (!request.tools) {
-        const refusedRecord = request.messages.find((message: any) => message.tool_call_id === "fifth-would-be-valid");
+        const refusedRecord = request.messages.find((message: any) => message.tool_call_id === "eighth-would-be-valid");
         const refusedAssessment = request.messages.find((message: any) => message.tool_call_id === "sixth-assessment");
         expect(refusedRecord?.content).toContain("this call was not executed");
         expect(refusedAssessment?.content).toContain("this call was not executed");
@@ -482,7 +525,8 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
           evidence_tool_call_ids: [999], evidence_excerpt: evidence,
         }),
         call("invalid-finalization-four", "record_result", { id: "R4", status: ["verified"] }),
-        call("fifth-would-be-valid", "record_result", {
+        ...Array.from({ length: 3 }, (_, i) => call(`final-repair-${i}`, "record_result", { id: "R4", status: "verified" })),
+        call("eighth-would-be-valid", "record_result", {
           id: "R4", status: "verified", method: "rerun", reproduced_value: "0.91",
           evidence_tool_call_ids: [12], evidence_excerpt: evidence,
         }),
@@ -497,10 +541,10 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     expect(turn).toBe(11);
     expect(forcedStops).toBe(1);
     expect(getReproductionFailureDiagnostics(error)).toMatchObject({
-      stopReason: "no-progress", callCount: 16,
+      stopReason: "no-progress", callCount: 19,
       claims: [expect.objectContaining({ id: "R4", status: "pending" })],
     });
-    expect(opts.emitEvent.mock.calls.filter(([phase]) => phase === "reproduction-record")).toHaveLength(5); // Registration plus exactly four attempts.
+    expect(opts.emitEvent.mock.calls.filter(([phase]) => phase === "reproduction-record")).toHaveLength(8); // Registration, preparation attempts and reserved repairs.
     expect(opts.emitEvent.mock.calls.some(([phase, message]) =>
       phase === "reproduction-record" && message.includes("evidence validated"))).toBe(false);
     expect(sb.exec.mock.calls.filter(([argv]) => argv.join(" ").includes("python /work/materials/expensive.py"))).toHaveLength(1);
@@ -546,6 +590,10 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
         expect(activeGuidance(request)).toContain("qP phase: assessment");
         return completion(null, [call(`qp-directory-${turn}`, "list_files", { path: "/work/materials" })]);
       }
+      if (turn > 10) {
+        expect(activeGuidance(request)).toContain("(finalization)");
+        return completion(null, [call(`qp-final-${turn}`, "record_result", { id: "R4", status: "verified" })]);
+      }
       expect(turn).toBe(10);
       const guidance = activeGuidance(request);
       expect(guidance).toMatch(/^RECOVERY: 4 tool calls left/);
@@ -573,14 +621,14 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     expect(sb.exec).toHaveBeenCalledTimes(startupCommands); // Only sealed setup/isolation and environment probes.
     expect(sb.writeText.mock.calls.some(([, content]) => content === "print('unauthorized')")).toBe(false);
     expect(getReproductionFailureDiagnostics(error)).toMatchObject({
-      stopReason: "no-progress", callCount: 14,
+      stopReason: "no-progress", callCount: 17,
       claims: [expect.objectContaining({ id: "R4", status: "pending" })],
     });
     expect(sb.terminate).toHaveBeenCalledTimes(1);
     expectBoundedReplayRequests(requests, 40960);
   });
 
-  it("exhausts one four-tool handoff when accepted R4 keeps browsing directories and archived context, without judging or inventing a blocker", async () => {
+  it("exhausts preparation and finalization when R4 keeps browsing, without judging or inventing a blocker", async () => {
     const sb = sandbox();
     createSandbox.mockResolvedValue(sb);
     const requests: any[] = [];
@@ -606,7 +654,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
       turn++;
       const browsing = pendingR4BrowsingTurn(turn, request, "read_reproduction_context");
       if (browsing) return browsing;
-      const left = 15 - turn;
+      const left = turn < 15 ? 15 - turn : 18 - turn;
       expectPendingR4Guidance(request, left);
       remaining.push(left);
       return completion(null, [turn % 2 === 0
@@ -619,11 +667,11 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     const error = await runReproduction(options()).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/stopped before completing required work \(no-progress\)/);
-    expect(remaining).toEqual([4, 3, 2, 1]);
-    expect(turn).toBe(14);
+    expect(remaining).toEqual([4, 3, 2, 1, 3, 2, 1]);
+    expect(turn).toBe(17);
     expect(forcedStops).toBe(1);
     const diagnostics = getReproductionFailureDiagnostics(error)!;
-    expect(diagnostics).toMatchObject({ stopReason: "no-progress", stage: "completion", callCount: 15 });
+    expect(diagnostics).toMatchObject({ stopReason: "no-progress", stage: "completion", callCount: 18 });
     expect(diagnostics.claims).toEqual([expect.objectContaining({ id: "R4", status: "pending" })]);
     expect(JSON.stringify(diagnostics.claims)).not.toContain("blocker");
     expect(sb.exec).toHaveBeenCalledTimes(1); // Environment probe only, never a fabricated experiment.
@@ -666,7 +714,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
       turn++;
       const browsing = pendingR4BrowsingTurn(turn, request, "read_reproduction_context");
       if (browsing) return browsing;
-      expectPendingR4Guidance(request, 15 - turn);
+      expectPendingR4Guidance(request, turn < 15 ? 15 - turn : 18 - turn);
       return completion(null, [turn % 2 === 0
         ? call(`dsml-loop-directory-${turn}`, "list_files", { path: "/work/materials" })
         : call(`dsml-loop-context-${turn}`, "read_reproduction_context", {
@@ -681,10 +729,10 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     expect((error as Error).message).toMatch(/still pending \(R4\)/);
     expect((error as Error).message).toMatch(/final logbook is missing/);
     expect(getReproductionFailureDiagnostics(error)).toMatchObject({
-      stopReason: "no-progress", stage: "completion", callCount: 15,
+      stopReason: "no-progress", stage: "completion", callCount: 18,
       claims: [expect.objectContaining({ id: "R4", status: "pending" })],
     });
-    expect(turn).toBe(14);
+    expect(turn).toBe(17);
     expect(forcedStops).toBe(1);
     expect(judgeCalls).toBe(0);
     expect(opts.emitEvent.mock.calls.some(([phase]) => phase === "reproduction-judge")).toBe(false);
@@ -697,7 +745,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     expectBoundedReplayRequests(requests);
   });
 
-  it("does not renew the four-tool handoff for fresh script reads, writes or successful command output without a validated claim", async () => {
+  it("does not renew analysis or finalization for fresh reads and writes without a validated claim", async () => {
     const sb = sandbox();
     createSandbox.mockResolvedValue(sb);
     let turn = 0;
@@ -711,12 +759,13 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
       turn++;
       const browsing = pendingR4BrowsingTurn(turn, request);
       if (browsing) return browsing;
-      expect(activeGuidance(request)).toMatch(new RegExp(`^RECOVERY: ${15 - turn} tool calls left`));
+      const left = turn <= 12 ? 15 - turn : turn < 19 ? 19 - turn : 22 - turn;
+      expect(activeGuidance(request)).toMatch(new RegExp(`^RECOVERY: ${left} tool calls left`));
       expect(acceptedState(request).claims[0]).toMatchObject({ id: "R4", status: "pending" });
       if (turn === 11) return completion(null, [call("fresh-script", "read_file", { path: "/work/materials/expensive.py" })]);
       if (turn === 12) return completion(null, [call("unrecorded-run", "run_command", { command: "python /work/materials/expensive.py" })]);
       if (turn === 13) return completion(null, [call("fresh-note", "write_file", { path: "/work/results/notes.md", content: evidence })]);
-      expect(turn).toBe(14);
+      expect(turn).toBeLessThanOrEqual(21);
       return completion(null, [call("fresh-note-read", "read_file", { path: "/work/results/notes.md" })]);
     });
 
@@ -724,10 +773,10 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/no-progress/);
     expect(getReproductionFailureDiagnostics(error)).toMatchObject({
-      stopReason: "no-progress", callCount: 15,
+      stopReason: "no-progress", callCount: 22,
       claims: [expect.objectContaining({ id: "R4", status: "pending" })],
     });
-    expect(turn).toBe(14);
+    expect(turn).toBe(21);
     expect(forcedStops).toBe(1);
     expect(sb.exec.mock.calls.filter(([argv]) => argv.join(" ").includes("/work/materials/expensive.py"))).toHaveLength(1);
     expect(sb.terminate).toHaveBeenCalledTimes(1);
@@ -771,7 +820,7 @@ describe("mocked full-flow reproduction failure and recovery replay", () => {
         return completion(null, [call("actual-command-error", "run_command", { command: "python /work/materials/expensive.py" })]);
       }
       if (turn === 13) {
-        expect(activeGuidance(request)).toMatch(/^RECOVERY: 2 tool calls left/);
+        expect(activeGuidance(request)).toMatch(/^RECOVERY: 6 tool calls left \(analysis\)/);
         const output = request.messages.find((message: any) => message.tool_call_id === "actual-command-error");
         expect(output?.content).toContain("exit code 1");
         expect(output?.content).toContain(dependencyError);

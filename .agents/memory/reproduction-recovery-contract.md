@@ -74,3 +74,9 @@ After claim acceptance, preparation/execution guidance must dominate paging hint
 **Why:** A later diagnostic showed accepted pending state but no execution: the agent repeatedly retrieved its claim and inventory. Paging advice still competed with execution advice; the truncated trace establishes the failure pattern, not a sole provider root cause.
 
 **How to apply:** Keep evidence retrieval available without making it the primary task. Bind browsing recovery to the original pending identity, not aggregate completion counts; charge a bounded recovery allowance only after an outgoing request can deliver its instructions. Test multi-call batches, unrelated claim completion, strict expiry, and qP gates with mocked orchestration.
+
+Separate recovery preparation, bounded analysis, and reserved finalization rather than requiring a complete scientific outcome within a single short allowance.
+
+**Why:** A subsequent real trace reached command execution and prediction-data inspection, but the short allowance blocked its next command before recording. Execution is an opportunity to analyze, not proof of independent reproduction: a command can merely print shipped CSVs.
+
+**How to apply:** Never renew analysis for each command or retrieval. Preserve time for evidence retrieval and record repair after experiments close, keep overall budgets authoritative, and leave unsupported claims unresolved rather than inventing a blocker or verdict.

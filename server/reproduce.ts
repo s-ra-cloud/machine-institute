@@ -1,5 +1,6 @@
 import { getContextWindow, runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolCallRecord } from "./model-service";
 import { loadPaperContext } from "./ethics-review";
+import { ReproductionRecovery } from "./reproduction-recovery";
 import { assertReproductionRuntimeProviderCredits } from "./provider-credit-preflight";
 import { fetchContributionMaterials, materialSandboxPath, formatMaterialsInventory } from "./fs-materials";
 import { ReproductionSandbox, isModalConfigured, type GpuType } from "./modal-sandbox";
@@ -527,8 +528,8 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   );
   const recorded = session.recorded;
   const readGuard = new ReproductionReadGuard();
-  // One run-local grace window, charged to the existing tool budget. A command
-  // alone cannot clear it: only validated claim completion ends this handoff.
+  // A single, identity-bound recovery with non-renewable stage allowances.
+  const recovery = new ReproductionRecovery();
   let handoffStart: number | undefined;
   let handoffClaimId: string | undefined;
   const handoffActive = () => handoffClaimId !== undefined && recorded.get(handoffClaimId)?.status === "pending";
@@ -540,20 +541,30 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     // Charge grace only at the next request boundary; global limits still apply.
     if (handoffActive() && handoffStart === undefined && nextToolName === undefined) {
       handoffStart = session.toolCalls.length;
+      recovery.begin(handoffStart);
       try { diagnostics.observe({ kind: "claim-handoff-start", callCount: session.toolCalls.length }); } catch { /* best effort */ }
     }
     if (handoffActive()) {
-      return handoffStart !== undefined && session.toolCalls.length - handoffStart >= 4
-        ? "Repeated browsing recovery exhausted without completing a pending claim"
+      const previous = recovery.stage;
+      recovery.advance(session.toolCalls.length);
+      if (previous !== recovery.stage) {
+        try { diagnostics.observe({ kind: `claim-recovery-${recovery.stage}`, callCount: session.toolCalls.length }); } catch { /* best effort */ }
+      }
+      return handoffStart !== undefined && recovery.remaining(session.toolCalls.length) === 0
+        ? `Repeated browsing recovery exhausted in ${recovery.stage} without completing the pending claim`
         : null;
     }
     return nextToolName === "record_result" || nextToolName === "assess_suitability" ? null : readGuard.stopReason;
   };
   const activeInstruction = () => {
-    const recovery = handoffActive() && handoffStart !== undefined
-      ? `RECOVERY: ${Math.max(0, 4 - (session.toolCalls.length - handoffStart))} tool calls left: ${questioning ? "follow the qP phase below; never bypass suitability or edit gates" : "inspect relevant code, test the pending claim or evidence a real blocker, then record it"}. Browsing is not progress.\n`
+    const recoveryText = handoffActive() && handoffStart !== undefined
+      ? `RECOVERY: ${recovery.remaining(session.toolCalls.length)} tool calls left (${recovery.stage}). ${recovery.stage === "finalization" ? "Retrieve evidence and record supported outcomes only; no new experiments." : questioning ? "Follow the qP phase below; never bypass gates." : "Inspect code, test this claim, then record. Supplied CSVs are not a rerun."}\n`
       : "";
-    return recovery + session.activeInstruction(readGuard.navigationInstruction ?? undefined);
+    let action = session.activeInstruction(readGuard.navigationInstruction ?? undefined);
+    if (recoveryText && recovery.stage === "finalization" && !questioning) {
+      action = action.replace(/^LATEST ACTION[^\n]*/, "LATEST ACTION — FINALIZE: Use existing evidence to record only supported outcomes. Unsupported claims remain pending; write an honest logbook.");
+    }
+    return recoveryText + action;
   };
   session.questioning = questioning;
   let toolLoopResult: Awaited<ReturnType<typeof runToolLoop>> | null = null;
@@ -723,6 +734,9 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       }
     };
     const execute = async (name: string, args: Record<string, unknown>): Promise<string> => {
+      if (handoffActive() && handoffStart !== undefined && !recovery.allows(name)) {
+        return "Refused: recovery finalization permits evidence retrieval, suitability assessment and record_result only. No new experiments or source browsing. Record only supported outcomes; unsupported claims remain unresolved.";
+      }
       let output: string;
       try { output = await executeTool(name, args); }
       catch (error) {
@@ -821,6 +835,13 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       getStallReason: stallReason,
       onToolCall: async (rec: ToolCallRecord) => {
         session.observeToolCall(rec);
+        if (handoffActive() && handoffStart !== undefined) {
+          const previous = recovery.stage;
+          recovery.observe(session.toolCalls.length, rec.name, rec.result, rec.error);
+          if (previous !== recovery.stage) {
+            try { diagnostics.observe({ kind: `claim-recovery-${recovery.stage}`, callCount: session.toolCalls.length }); } catch { /* best effort */ }
+          }
+        }
         if (rec.name === "run_command") {
           const cmd = String(rec.args.command || "").replace(/\s+/g, " ").slice(0, 140);
           const firstLine = rec.result.split("\n")[0];
