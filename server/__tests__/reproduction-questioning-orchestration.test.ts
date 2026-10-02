@@ -10,7 +10,7 @@ vi.mock("../fs-materials", () => ({
 }));
 vi.mock("../modal-sandbox", () => ({ isModalConfigured: () => true, ReproductionSandbox: { create: mock.create } }));
 vi.mock("../provider-credit-preflight", () => ({ assertReproductionRuntimeProviderCredits: vi.fn(async () => {}) }));
-import { runReproduction } from "../reproduce";
+import { runLegacyBaseline as runReproduction } from "./legacy-reproduction-baseline";
 import { getReproducerPrompt, getJudgePrompt } from "../prompts/reproduce";
 const paper = "The paper asks whether averaging recovers the mean. The measured score is 0.91. The analysis requires data.csv for this quantitative result.";
 const inventory = "The analysis requires data.csv; shipped analyze.py is available.";

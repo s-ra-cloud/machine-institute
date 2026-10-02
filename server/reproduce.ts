@@ -1,6 +1,10 @@
 import { getContextWindow, runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolCallRecord } from "./model-service";
 import { loadPaperContext } from "./ethics-review";
 import { ReproductionRecovery } from "./reproduction-recovery";
+import { extractReproductionClaims } from "./reproduction-extraction";
+import { runControlledReproduction, type PipelineCheckpoint } from "./reproduction-pipeline";
+import { ReproductionController, renderAcceptedLogbook } from "./reproduction-controller";
+import { createHash } from "node:crypto";
 import { assertReproductionRuntimeProviderCredits } from "./provider-credit-preflight";
 import { fetchContributionMaterials, materialSandboxPath, formatMaterialsInventory } from "./fs-materials";
 import { ReproductionSandbox, isModalConfigured, type GpuType } from "./modal-sandbox";
@@ -89,6 +93,9 @@ export interface RunReproductionOptions {
   emitEvent: (phase: string, message: string) => Promise<void>;
   /** Run-local handoff for subsequent background-handler failures; never public. */
   onDiagnostics?: (snapshot: ReproductionFailureDiagnostics) => void;
+  onCheckpoint?: (checkpoint: PipelineCheckpoint) => Promise<void>;
+  /** Offline historical comparisons only; never accepted by HTTP routes. */
+  legacyControllerForComparison?: boolean;
 }
 
 export const NO_USABLE_REPRODUCTION_EVIDENCE =
@@ -420,6 +427,7 @@ const TOOLS: ToolSpec[] = [
     },
   },
 ];
+export const REPRODUCTION_TOOLS = TOOLS;
 
 function fmtExec(r: { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number }): string {
   const status = r.timedOut ? "TIMED OUT" : `exit code ${r.exitCode ?? "unknown"}`;
@@ -428,6 +436,9 @@ function fmtExec(r: { exitCode: number | null; stdout: string; stderr: string; t
 
 export async function runReproduction(opts: RunReproductionOptions): Promise<ReproductionOutput> {
   const diagnostics = new ReproductionDiagnostics();
+  diagnostics.identity(opts.modelConfig.modelName, opts.modelConfig.provider, opts.modelConfig.providerMode,
+    createHash("sha256").update(runControlledReproduction.toString()).update(extractReproductionClaims.toString())
+      .update(ReproductionController.toString()).digest("hex"));
   try {
     const result = await runReproductionWithDiagnostics(opts, diagnostics);
     try { opts.onDiagnostics?.(diagnostics.snapshot()); } catch { /* best effort */ }
@@ -498,6 +509,32 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   await emitEvent("reproduction-materials", `Materials found: ${materials.textFileCount} text file(s), ${materials.binaryFileCount} binary file(s)${materials.readme ? ", README present" : ", no README"}.`);
   const paperText = materials.paperMarkdown || fullText || `# ${title}\n\n${abstract}`;
   const inventory = formatMaterialsInventory(materials);
+  const session = new ReproductionSession(
+    (recordedResults, toolCalls) => getReproductionClaimIssues({ recordedResults, toolCalls, budgetExhausted: false }),
+    issues => diagnostics.observe({ kind: "claim-validation", toolName: "record_result", validationErrors: issues }),
+  );
+  session.configureSourceGrounding({ paperPath: "/work/paper.md", paperText });
+  const extractionState = new ReproductionController(startTime + REPRODUCTION_BUDGET.wallClockMs);
+  extractionState.startExtraction();
+  await emitEvent("reproduction-extraction", "Extracting grounded claims before GPU allocation.");
+  diagnostics.stage("extraction");
+  const extracted = opts.legacyControllerForComparison ? { claims: [], calls: 0, inspectedPackets: 0, totalPackets: 0 } : await extractReproductionClaims({
+    paper: paperText, instructions: opts.reproducerPrompt, config: modelConfig,
+    deadline: startTime + REPRODUCTION_BUDGET.wallClockMs,
+    onOutcome: event => diagnostics.observe(event),
+    onAccepted: async claim => {
+      session.registerExtractedClaim(claim);
+      diagnostics.claims(session.recorded.values());
+      await opts.onCheckpoint?.({
+        controller: extractionState.snapshot(),
+        claims: Array.from(session.recorded.values()).map(c => ({ id: c.id, claim: c.claim, status: c.status, evidenceIds: [] })),
+        outputs: [],
+        logbook: renderAcceptedLogbook(Array.from(session.recorded.values()), session.toolCalls,
+          "Extraction is still in progress; no experiments have run and no scientific verdict exists."),
+      });
+    },
+  });
+  await emitEvent("reproduction-extraction", `Accepted ${extracted.claims.length} grounded claims from ${extracted.inspectedPackets}/${extracted.totalPackets} source packets. Uninspected packets are outside this run's extraction coverage.`);
   if (questioning) {
     // Enforce capacity before booting/uploading to a paid sandbox.
     questioning.addOriginal("/work/paper.md", paperText);
@@ -520,12 +557,6 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   diagnostics.stage("sandbox");
   const sandbox = await ReproductionSandbox.create({ gpu, timeoutMs: REPRODUCTION_BUDGET.sandboxTimeoutMs, ...(questioning ? { questioning: true } : { env }) });
 
-  const session = new ReproductionSession(
-    (recordedResults, toolCalls) => getReproductionClaimIssues({ recordedResults, toolCalls, budgetExhausted: false }),
-    issues => {
-      try { diagnostics.observe({ kind: "claim-validation", toolName: "record_result", validationErrors: issues }); } catch { /* best effort */ }
-    },
-  );
   const recorded = session.recorded;
   const readGuard = new ReproductionReadGuard();
   // A single, identity-bound recovery with non-renewable stage allowances.
@@ -798,7 +829,14 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         { role: "user", content: "x".repeat(ACTIVE_INSTRUCTION_MAX_BYTES) },
       ],
     });
-    toolLoopResult = await runToolLoop(modelConfig, effectivePrompt, userMessage, tools, execute, {
+    const runPipeline = opts.legacyControllerForComparison
+      ? (input: Parameters<typeof runControlledReproduction>[0]) => runToolLoop(modelConfig, effectivePrompt, userMessage, tools, execute, input.options)
+      : runControlledReproduction;
+    toolLoopResult = await runPipeline({
+      config: modelConfig, instructions: effectivePrompt, tools, execute, session,
+      shippedPaths: new Set(shippedPaths), extractionCalls: extracted.calls,
+      checkpoint: opts.onCheckpoint,
+      options: {
       onOutcome: event => { try { diagnostics.observe(event); } catch { /* best effort */ } },
       getArgumentRepair: () => [
         "Current accepted claim state (not an inferred correction):",
@@ -868,7 +906,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         return continuation ? `${activeInstruction()}\n${continuation}\n${session.repairContext()}` : null;
       },
       maxPrematureStopRecoveries: MAX_PREMATURE_STOP_RECOVERIES,
-    });
+    } });
     if (toolLoopResult.stoppedBy === "no-progress" && readGuard.stopReason) {
       try { diagnostics.observe({ kind: "retrieval-stall", validationErrors: [readGuard.stopReason] }); } catch { /* best effort */ }
     }
@@ -878,7 +916,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     const recordedResults = Array.from(recorded.values());
     const budgetExhausted = toolLoopResult.stoppedBy === "deadline" || toolLoopResult.stoppedBy === "tool-budget";
     finalizeBudgetExhaustedResults({ recordedResults, toolCalls: session.toolCalls, stoppedBy: toolLoopResult.stoppedBy });
-    logbook = toolLoopResult.content;
+    logbook = toolLoopResult.content + (opts.legacyControllerForComparison ? "" : `\n\nExtraction coverage: ${extracted.inspectedPackets}/${extracted.totalPackets} source packets inspected. No claims about uninspected passages are implied.`);
     if (budgetExhausted) {
       const states = recordedResults.map(r => `${r.id}: ${r.status} — ${r.evidence || r.reproducedValue || "No result obtained."}`).join("\n");
       // Tools are unavailable at a hard stop. Never depend on one more model call
@@ -942,8 +980,8 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     await emitEvent("reproduction-judge", `Judge call failed (${err instanceof Error ? err.message : String(err)}); falling back to the agent's own statuses.`);
   }
   if (results.length === 0) {
-    results = verdictsFromRecordedResults(recordedList);
-    if (!judgeSummary) judgeSummary = "The judge did not return a parseable grading; verdicts below are the agent's own recorded statuses (pending → inconclusive).";
+    results = verdictsFromRecordedResults(recordedList).map(r => ({ ...r, verdict: "inconclusive" as const }));
+    if (!judgeSummary) judgeSummary = "Independent grading unavailable. Reproducer proposals are ungraded; original-result verdicts remain inconclusive.";
   } else {
     // Any recorded claim the judge skipped still gets a row, as inconclusive.
     const judgedIds = new Set(results.map(r => r.id));
@@ -999,6 +1037,9 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     categoryTag: "reproduction",
     fallbacks: ["reproducibility", "ai research", "replication"],
   });
+  if ("completeReport" in toolLoopResult && typeof toolLoopResult.completeReport === "function") {
+    await toolLoopResult.completeReport();
+  }
 
   return {
     markdown: questioning ? `# qP — Questioning Reproducer\n\n${questioning.markdown()}\n\n${markdown.replace(/This report follows the protocol[^]*?## Environment/, "Original-result verdicts below are separated from the qP suitability and adapted-analysis assessment above.\n\n## Environment")}` : markdown,

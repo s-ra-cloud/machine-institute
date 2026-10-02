@@ -570,7 +570,7 @@ export default function ReproductionDetail() {
             </FadeIn>
           )}
 
-          {run.status === "completed" && run.logbookMarkdown && (
+          {(run.status === "completed" || run.status === "failed") && run.logbookMarkdown && (
             <FadeIn delay={0.32}>
               <div className="mb-10">
                 <button

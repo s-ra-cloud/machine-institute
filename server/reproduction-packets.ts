@@ -1,0 +1,62 @@
+import { createHash } from "node:crypto";
+import { renderSourcePage } from "./reproduction-source-page";
+
+/** Coordinates are UTF-16 offsets in the immutable canonical source. */
+export interface SourcePacket {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+}
+
+export function prepareSourcePackets(source: string): SourcePacket[] {
+  const packets: SourcePacket[] = [];
+  let start = 0;
+  while (start < source.length) {
+    const page = renderSourcePage("/work/paper.md", source, start, 6000);
+    const range = /^Returned characters: (\d+)-(\d+) of \d+$/m.exec(page);
+    if (!range) throw new Error("Source preparation failed: no bounded Unicode-safe packet.");
+    const end = Number(range[2]);
+    const text = source.slice(start, end);
+    packets.push({ id: createHash("sha256").update(`${start}:${end}:${text}`).digest("hex"), start, end, text });
+    if (end === source.length) break;
+    // Overlap keeps nearby table/heading context. Never split a surrogate pair.
+    let next = Math.max(start + 1, end - 600);
+    if (/[\uDC00-\uDFFF]/.test(source.charAt(next))) next--;
+    start = Math.max(start + 1, next);
+  }
+  // Headings guide scheduling only; they never establish scientific meaning.
+  return packets.sort((a, b) => Number(/^#{1,6}\s*(?:\d+\.?\s*)?(?:results|findings|evaluation|experiments)\b/im.test(b.text))
+    - Number(/^#{1,6}\s*(?:\d+\.?\s*)?(?:results|findings|evaluation|experiments)\b/im.test(a.text))
+    || a.start - b.start);
+}
+
+export interface ExtractedCandidate {
+  claim: string;
+  source_quote: string;
+  original_value?: string;
+  required_material?: string;
+}
+
+/** Does not infer numbers, paraphrases, source identity, or scientific meaning. */
+export function validateCandidate(candidate: unknown, packet: SourcePacket): string[] {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return ["candidate must be an object"];
+  const c = candidate as Record<string, unknown>;
+  const errors: string[] = [];
+  for (const key of Object.keys(c)) {
+    if (!["claim", "source_quote", "original_value", "required_material"].includes(key)) errors.push(`${key} is not an extraction field`);
+    else if (typeof c[key] !== "string") errors.push(`${key} must be a string`);
+  }
+  if (typeof c.claim !== "string" || !c.claim.trim() || c.claim.length > 2000) errors.push("claim must be nonempty and at most 2000 characters");
+  if (typeof c.source_quote !== "string" || c.source_quote.trim().length < 24
+    || c.source_quote.trim().split(/\s+/).length < 5 || c.source_quote.length > 4000) {
+    errors.push("source_quote must contain 24–4000 characters and at least five words");
+  } else {
+    if (!packet.text.includes(c.source_quote)) errors.push("source_quote must occur exactly in this packet");
+    if (typeof c.claim === "string" && !c.source_quote.includes(c.claim)) errors.push("claim must occur verbatim in source_quote");
+    for (const key of ["original_value", "required_material"]) {
+      if (typeof c[key] === "string" && !c.source_quote.includes(c[key])) errors.push(`${key} must occur verbatim in source_quote`);
+    }
+  }
+  return errors;
+}

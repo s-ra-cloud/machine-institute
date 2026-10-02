@@ -104,6 +104,21 @@ export class ReproductionSession {
     this.sourceGrounding = { paperPath: input.paperPath, paperText: input.paperText };
   }
 
+  /** A host-side canonical read, before sandbox allocation, with run-wide ID. */
+  registerExtractedClaim(input: { claim: string; source_quote: string; original_value?: string; required_material?: string;
+    packet: { start: number; end: number; text: string } }): void {
+    if (!this.sourceGrounding || this.sourceGrounding.paperText.slice(input.packet.start, input.packet.end) !== input.packet.text)
+      throw new Error("Extraction packet does not match canonical source.");
+    const index = this.toolCalls.length + 1;
+    this.observeToolCall({ index, name: "read_file", args: { path: this.sourceGrounding.paperPath, offset: input.packet.start },
+      result: `Verified file: ${this.sourceGrounding.paperPath}\nReturned characters: ${input.packet.start}-${input.packet.end} of ${this.sourceGrounding.paperText.length}\n---\n${input.packet.text}`,
+      durationMs: 0, error: false });
+    const response = this.recordResult({ id: `R${this.recorded.size + 1}`, claim: input.claim,
+      status: "pending", source_quote: input.source_quote, source_location: `characters ${input.packet.start}-${input.packet.end}`,
+      source_tool_call_id: index, original_value: input.original_value, required_material: input.required_material });
+    if (!response.startsWith("Registered ")) throw new Error(`Extraction registration failed: ${response}`);
+  }
+
   configureMaterialGrounding(input: {
     inventoryPath: string;
     shippedPaths: readonly string[];

@@ -38,6 +38,8 @@ export interface ReproductionFailureDiagnostics {
   events: Array<Record<string, string | number | string[]>>;
   claims: Array<{ id: string; claim: string; status: string }>;
   paging?: ReproductionPagingDiagnostics;
+  milestones?: Array<Record<string, string | number | string[]>>;
+  identity?: { controller: string; model: string; provider: string; mode: string; build?: string };
 }
 
 const safeNumber = (value: unknown): number =>
@@ -52,8 +54,20 @@ export class ReproductionDiagnostics {
     truncated: false, droppedEvents: 0, events: [], claims: [],
   };
 
-  stage(stage: "preflight" | "materials" | "sandbox" | "tool-loop" | "completion" | "judge" | "report" | "background"): void {
+  stage(stage: "preflight" | "materials" | "sandbox" | "tool-loop" | "completion" | "judge" | "report" | "background" | "extraction"): void {
     this.data.stage = stage;
+    this.pin({ kind: "phase", phase: stage });
+  }
+
+  identity(model: string, provider: string, mode: string, build?: string): void {
+    this.data.identity = { controller: "stage-controller-1", model: diagnosticExcerpt(model, 180),
+      provider: diagnosticExcerpt(provider, 120), mode: diagnosticExcerpt(mode, 80),
+      ...(build && /^[a-f0-9]{64}$/.test(build) ? { build } : {}) };
+  }
+
+  private pin(event: Record<string, string | number | string[]>): void {
+    const milestones = this.data.milestones ??= [];
+    if (milestones.length < 10) milestones.push(event);
   }
 
   /** Numeric and enum-only snapshot; no source text, paths, quotes or prompts. */
@@ -115,6 +129,12 @@ export class ReproductionDiagnostics {
     if (event.requestedTotalTokens !== undefined) safe.requestedTotalTokens = safeNumber(event.requestedTotalTokens);
     if (JSON.stringify(safe).includes("[TRUNCATED]") || (event.validationErrors?.length ?? 0) > 8) this.data.truncated = true;
     this.data.events.push(safe);
+    if (event.validationErrors?.length && !this.data.milestones?.some(e => e.kind === "first-validation-failure")) {
+      this.pin({ kind: "first-validation-failure", callCount: safe.callCount,
+        validationErrors: event.validationErrors.slice(0, 3).map(s => diagnosticExcerpt(s, 240)) });
+    }
+    if (event.kind === "provider-error" && !this.data.milestones?.some(e => e.kind === "first-provider-error"))
+      this.pin({ kind: "first-provider-error", providerStatus: safe.providerStatus ?? 0, providerReason: safe.providerReason ?? "unknown" });
     while (this.data.events.length > MAX_EVENTS) this.dropEvent();
   }
 

@@ -257,7 +257,7 @@ export interface ToolCallRecord {
 }
 
 export interface ToolLoopOutcome {
-  kind: "completion" | "arguments" | "tool" | "stop" | "provider-error";
+  kind: "completion" | "arguments" | "tool" | "stop" | "provider-error" | "context";
   round: number;
   callCount: number;
   finishReason?: "stop" | "length" | "tool_calls" | "content_filter" | "function_call" | "unknown";
@@ -280,6 +280,12 @@ export interface ToolLoopOutcome {
 }
 
 export interface ToolLoopOptions {
+  /** Stage contract check on the actual fitted request, before dispatch. */
+  onRequestPrepared?: (request: Record<string, unknown>) => void;
+  /** Application-owned stage completion. No extra model finalization request. */
+  isStageComplete?: () => boolean;
+  /** Preserve run-wide evidence IDs across short, independent stage loops. */
+  toolCallIndexOffset?: number;
   maxToolCalls: number;
   /** Absolute epoch-ms deadline after which the agent is told to wrap up. */
   deadlineMs: number;
@@ -587,6 +593,7 @@ export async function runToolLoop(
   };
 
   for (let round = 1; round <= maxRounds; round++) {
+    if (options.isStageComplete?.()) return { content: "", toolCalls, rounds: round - 1, stoppedBy: "model" };
     const budgetExhausted = toolCalls.length >= options.maxToolCalls;
     const pastDeadline = Date.now() >= options.deadlineMs;
     const stallReason = !budgetExhausted && !pastDeadline ? options.getStallReason?.() : null;
@@ -662,6 +669,7 @@ export async function runToolLoop(
         stoppedBy = "deadline";
         return { content: "", toolCalls, rounds: round, stoppedBy };
       }
+      options.onRequestPrepared?.(request);
       try {
         completion = await client.chat.completions.create(
           request as any,
@@ -839,6 +847,7 @@ export async function runToolLoop(
     }
 
     for (const call of calls) {
+      if (options.isStageComplete?.()) return { content: "", toolCalls, rounds: round, stoppedBy: "model" };
       if (!forceFinal && options.getStallReason?.(call.function.name)) {
         forceFinal = true;
         stoppedBy = "no-progress";
@@ -904,14 +913,14 @@ export async function runToolLoop(
       }
       result = truncateToolResult(result ?? "", maxToolResultChars);
       if (dispatched && !error && options.transformToolResult) {
-        result = options.transformToolResult(call.function.name, result, toolCalls.length + 1);
+        result = options.transformToolResult(call.function.name, result, toolCalls.length + 1 + (options.toolCallIndexOffset ?? 0));
       }
       await observe({ kind: "tool", round, callCount: toolCalls.length + (dispatched ? 1 : 0),
         toolName: call.function.name, argumentParse, validationErrors, toolExcerpt: result.slice(0, 2000) });
       let resultContent = result;
       if (dispatched) {
         const record: ToolCallRecord = {
-          index: toolCalls.length + 1,
+          index: toolCalls.length + 1 + (options.toolCallIndexOffset ?? 0),
           name: call.function.name,
           args,
           result,

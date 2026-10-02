@@ -80,3 +80,15 @@ Separate recovery preparation, bounded analysis, and reserved finalization rathe
 **Why:** A subsequent real trace reached command execution and prediction-data inspection, but the short allowance blocked its next command before recording. Execution is an opportunity to analyze, not proof of independent reproduction: a command can merely print shipped CSVs.
 
 **How to apply:** Never renew analysis for each command or retrieval. Preserve time for evidence retrieval and record repair after experiments close, keep overall budgets authoritative, and leave unsupported claims unresolved rather than inventing a blocker or verdict.
+
+Treat historical scripted replay tests as a baseline, not evidence of real-model workflow reliability.
+
+**Why:** Successive instruction and recovery fixes passed prescribed-turn mocks while live runs stalled at different workflow transitions. A successful scripted path only establishes that the application permits that sequence.
+
+**How to apply:** Keep application-owned phase contracts and bookkeeping separate from scientific model decisions. Require explicitly approved repeated real-model compatibility measurements before describing operational reliability; GPU validation is a further, separate expense. Metadata-only checkpoints cannot justify claims of full evidence restoration or safe automatic command replay after interruption.
+
+Validate execution provenance and numerical evidence against the same successful execution, and carry exact authorization contracts across fresh stage transcripts.
+
+**Why:** Independent checks can accidentally join a failed planned script with successful CSV-display evidence. Likewise, a summary suitable for judging can omit the exact adaptation paths and instructions needed for execution.
+
+**How to apply:** Test mixed failed/successful evidence, not only individually invalid calls. Test qP stage handoffs with arbitrary authorized changes recovered exclusively from the application packet, never supplied to the execution mock through fixture state.

@@ -25,6 +25,8 @@ import { buildConventionName, withMbSuffix, buildFsAgentDescription } from "./ag
 import { INITIATIVE_DOC_IDS, JOURNAL_DISPLAY_NAMES, INITIATIVE_SLUGS, getJournalDisplayName, resolveJournalId } from "./journals";
 import { fetchJournalPaperCatalogue } from "./paper-catalogue";
 import { runReproduction } from "./reproduce";
+import type { PipelineCheckpoint } from "./reproduction-pipeline";
+import { diagnosticExcerpt } from "./reproduction-diagnostics";
 import { canRetryReproduction } from "./reproduction-retry";
 import { BYOC_PROVIDERS, getManagedModels, resolveByocSelection, resolveManagedSelection, ManagedModelError } from "./managed-models";
 import { assertReproductionProviderCredit, ProviderCredentialPreflightError, ProviderCreditPreflightError } from "./provider-credit-preflight";
@@ -141,7 +143,8 @@ function publicReproduction(run: Omit<Reproduction, "questioningJson"> & { quest
     ...publicRun,
     contentHtml: null,
     contentMarkdown: null,
-    logbookMarkdown: null,
+    logbookMarkdown: run.logbookMarkdown?.startsWith("# Incomplete reproduction — not a scientific verdict\n")
+      ? run.logbookMarkdown : null,
     reportTitle: null,
     reportAbstract: null,
     overallVerdict: null,
@@ -3059,6 +3062,7 @@ I will now provide the papers.`;
     const robotAgentName = buildConventionName(resolvedModel, data.agentId);
     const gpu = resolveGpu(data.gpu);
     const diagnosticCapture: { latest?: ReproductionFailureDiagnostics } = {};
+    let pipelineCheckpoint: PipelineCheckpoint | undefined;
 
     async function emit(phase: string, message: string) {
       try {
@@ -3089,6 +3093,17 @@ I will now provide the papers.`;
         gpu,
         emitEvent: emit,
         onDiagnostics: snapshot => { diagnosticCapture.latest = snapshot; },
+        onCheckpoint: async checkpoint => {
+          // Metadata only: never persist command text, credentials, or raw output.
+          const safe = JSON.parse(JSON.stringify(checkpoint, (key, value) =>
+            typeof value === "string" && key !== "sha256"
+              ? diagnosticExcerpt(value, key === "logbook" ? 20000 : 2400) : value)) as PipelineCheckpoint;
+          if (Buffer.byteLength(JSON.stringify(safe), "utf8") > 96000) throw new Error("Pipeline checkpoint exceeded its bounded metadata capacity.");
+          await storage.saveReproductionFailureDiagnostics(reproductionId, JSON.stringify({
+            ...(diagnosticCapture.latest ?? createFallbackReproductionDiagnostics()), pipeline: safe,
+          }));
+          pipelineCheckpoint = safe;
+        },
       });
 
       const safeHtml = sanitizeHtml(markdownToHtml(result.markdown));
@@ -3181,7 +3196,9 @@ I will now provide the papers.`;
         completedAt: new Date(),
         contentHtml: null,
         contentMarkdown: null,
-        logbookMarkdown: null,
+        logbookMarkdown: pipelineCheckpoint
+          ? `# Incomplete reproduction — not a scientific verdict\n\n${pipelineCheckpoint.logbook}`
+          : "# Incomplete reproduction — not a scientific verdict\n\n## Claims\nNo validated pipeline checkpoint was retained.\n\n## Reproduction Log\nThe run failed before a checkpoint was available.\n\n## Discrepancies\nNo scientific conclusions established.\n\n## Limitations\nIncomplete reproduction. Consult the private failure diagnostics; no publication was produced.",
         questioningJson: null,
       });
       try {
@@ -3189,7 +3206,7 @@ I will now provide the papers.`;
           ?? (diagnosticCapture.latest
             ? { ...diagnosticCapture.latest, stage: "background" }
             : createFallbackReproductionDiagnostics());
-        await storage.saveReproductionFailureDiagnostics(reproductionId, JSON.stringify(diagnostics));
+        await storage.saveReproductionFailureDiagnostics(reproductionId, JSON.stringify({ ...diagnostics, pipeline: pipelineCheckpoint }));
       } catch {
         console.error(`[Reproduction ${reproductionId}] Private diagnostic snapshot could not be saved.`);
       }

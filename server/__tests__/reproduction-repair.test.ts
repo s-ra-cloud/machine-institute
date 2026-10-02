@@ -27,7 +27,8 @@ vi.mock("../modal-sandbox", () => ({
 }));
 vi.mock("../provider-credit-preflight", () => ({ assertReproductionRuntimeProviderCredits }));
 
-import { runReproduction, REPRODUCTION_BUDGET } from "../reproduce";
+import { REPRODUCTION_BUDGET } from "../reproduce";
+import { runLegacyBaseline as runReproduction } from "./legacy-reproduction-baseline";
 import { buildEffectiveReproducerPrompt } from "../prompts/reproduce";
 import { getReproductionFailureDiagnostics } from "../reproduction-diagnostics";
 import type { ModelProviderConfig } from "../model-service";
