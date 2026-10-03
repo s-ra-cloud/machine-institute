@@ -1,0 +1,516 @@
+Private operational snapshot, not a completed scientific report.
+
+{
+  "version": 1,
+  "stage": "extraction",
+  "stopReason": "tool-budget",
+  "rounds": 4,
+  "callCount": 3,
+  "redaction": "Credential fields, authorization, URLs, private keys and opaque tokens are redacted. Excerpts and history are bounded; prompts, raw provider errors and full outputs are excluded.",
+  "truncated": true,
+  "droppedEvents": 0,
+  "events": [
+    {
+      "kind": "completion",
+      "round": 1,
+      "callCount": 0,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "I'll extract the core scientific claims from this paper packet. Let me identify the exact quoted results with their reported values."
+    },
+    {
+      "kind": "arguments",
+      "round": 1,
+      "callCount": 0,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 1,
+      "callCount": 1,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Refused: claims[0]: claim must occur verbatim in source_quote; claims[0]: original_value must occur verbatim in source_quote; claims[0]: required_material must occur verbatim in source_quote; claims[1]: claim must occur verbatim in source_quote; claims[1]: original_value must occur verbatim in source_quote; claims[1]: required_material must occur verbatim in source_quote; claims[2]: original_value must occur verbatim in source_quote; claims[2]: required_material must occur verbatim in source_quote; claims[3]: claim must occur verbatim in source_quote; claims[3]: original_value must occur verbatim in source_quote; claims[3]: required_material must occur verbati[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 2,
+      "callCount": 1,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "I need to correct the fields so that `claim`, `original_value`, and `required_material` all occur verbatim within `source_quote`. Let me use the exact sentences from the packet as both the claim and source_quote, and place the reported values verbatim within the quote.\n\n"
+    },
+    {
+      "kind": "arguments",
+      "round": 2,
+      "callCount": 1,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 2,
+      "callCount": 2,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Extraction accepted."
+    },
+    {
+      "kind": "completion",
+      "round": 1,
+      "callCount": 0,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "I'll extract the core scientific claims from the provided paper packet text."
+    },
+    {
+      "kind": "arguments",
+      "round": 1,
+      "callCount": 0,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 1,
+      "callCount": 1,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Refused: claims[0]: claim must occur verbatim in source_quote; claims[0]: original_value must occur verbatim in source_quote; claims[0]: required_material must occur verbatim in source_quote; claims[1]: original_value must occur verbatim in source_quote; claims[1]: required_material must occur verbatim in source_quote; claims[2]: original_value must occur verbatim in source_quote; claims[2]: required_material must occur verbatim in source_quote; claims[3]: claim must occur verbatim in source_quote; claims[3]: original_value must occur verbatim in source_quote; claims[3]: required_material must occur verbatim in source_quote; claims[4]: claim must occur verbati[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 2,
+      "callCount": 1,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "\n\n"
+    },
+    {
+      "kind": "arguments",
+      "round": 2,
+      "callCount": 1,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 2,
+      "callCount": 2,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Refused: claims[0]: required_material must occur verbatim in source_quote; claims[1]: required_material must occur verbatim in source_quote; claims[2]: required_material must occur verbatim in source_quote; claims[3]: required_material must occur verbatim in source_quote; claims[4]: required_material must occur verbatim in source_quote. Correct these fields using the SAME supplied packet."
+    },
+    {
+      "kind": "completion",
+      "round": 3,
+      "callCount": 2,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "\n\n"
+    },
+    {
+      "kind": "arguments",
+      "round": 3,
+      "callCount": 2,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 3,
+      "callCount": 3,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Extraction accepted."
+    },
+    {
+      "kind": "completion",
+      "round": 1,
+      "callCount": 0,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "I'll extract the core scientific claims from the provided paper packet text."
+    },
+    {
+      "kind": "arguments",
+      "round": 1,
+      "callCount": 0,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 1,
+      "callCount": 1,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Refused: claims[0]: claim must occur verbatim in source_quote; claims[0]: required_material must occur verbatim in source_quote; claims[1]: original_value must occur verbatim in source_quote; claims[1]: required_material must occur verbatim in source_quote; claims[2]: claim must occur verbatim in source_quote; claims[2]: original_value must occur verbatim in source_quote; claims[2]: required_material must occur verbatim in source_quote; claims[3]: claim must occur verbatim in source_quote; claims[3]: original_value must occur verbatim in source_quote; claims[3]: required_material must occur verbatim in source_quote; claims[4]: claim must occur verbatim in sour[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 2,
+      "callCount": 1,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "I need to correct my claims so that the claim, original_value, and required_material all occur verbatim within the source_quote, and the claim itself must be verbatim from the packet."
+    },
+    {
+      "kind": "arguments",
+      "round": 2,
+      "callCount": 1,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 2,
+      "callCount": 2,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Extraction accepted."
+    },
+    {
+      "kind": "completion",
+      "round": 1,
+      "callCount": 0,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "I'll extract the core scientific claims from the provided paper packet text."
+    },
+    {
+      "kind": "arguments",
+      "round": 1,
+      "callCount": 0,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 1,
+      "callCount": 1,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Refused: claims[0]: original_value must occur verbatim in source_quote; claims[0]: required_material must occur verbatim in source_quote; claims[1]: original_value must occur verbatim in source_quote; claims[1]: required_material must occur verbatim in source_quote; claims[2]: claim must occur verbatim in source_quote; claims[2]: original_value must occur verbatim in source_quote; claims[2]: required_material must occur verbatim in source_quote; claims[3]: original_value must occur verbatim in source_quote; claims[3]: required_material must occur verbatim in source_quote; claims[4]: original_value must occur verbatim in source_quote; claims[4]: required_materi[TRUNCATED]"
+    },
+    {
+      "kind": "completion",
+      "round": 2,
+      "callCount": 1,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "\n\n"
+    },
+    {
+      "kind": "arguments",
+      "round": 2,
+      "callCount": 1,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 2,
+      "callCount": 2,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Refused: claims[0]: required_material must occur verbatim in source_quote; claims[2]: original_value must occur verbatim in source_quote; claims[2]: required_material must occur verbatim in source_quote; claims[3]: original_value must occur verbatim in source_quote; claims[3]: required_material must occur verbatim in source_quote; claims[4]: required_material must occur verbatim in source_quote. Correct these fields using the SAME supplied packet."
+    },
+    {
+      "kind": "completion",
+      "round": 3,
+      "callCount": 2,
+      "finishReason": "tool_calls",
+      "responseExcerpt": "\n\n"
+    },
+    {
+      "kind": "arguments",
+      "round": 3,
+      "callCount": 2,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 3,
+      "callCount": 3,
+      "argumentParse": "valid",
+      "toolName": "unknown",
+      "validationErrors": [],
+      "toolExcerpt": "Refused: claims[0]: required_material must occur verbatim in source_quote; claims[2]: original_value must occur verbatim in source_quote; claims[2]: required_material must occur verbatim in source_quote; claims[3]: original_value must occur verbatim in source_quote; claims[3]: required_material must occur verbatim in source_quote; claims[4]: required_material must occur verbatim in source_quote. Correct these fields using the SAME supplied packet."
+    },
+    {
+      "kind": "completion",
+      "round": 4,
+      "callCount": 3,
+      "finishReason": "stop",
+      "responseExcerpt": "# LOGBOOK\n\n## Claims\n\n| # | Claim | Status |\n|---|-------|--------|\n| 1 | Cardinal donor matrix: 37/37 rows at layer 3, 35/37 at layer 8 produced intended target | inconclusive |\n| 2 | Four-direction confusion matrix: 50/52 diagonal at layer 3, 48/52 at layer 8 | inconclusive |\n| 3 | Shuffled donor states: 1/13 designated donor, 12/13 (L3) and 10/13 (L8) carried direction | inconclusive |\n| 4 | Norm-matched `bright` displacement: 16/26 preserved, TV movement 0.416 (L3) and 0.339 (L8) | inconclusive |\n| 5 | Final-prefill state trajectory: 0.157 (L14) → 0.736/12-13 (L17) → 0.789/13-13 (L18) → 1.000 (L31) | inconclusive |\n\n## Reproduction Log\n[TRUNCATED]"
+    },
+    {
+      "kind": "stop",
+      "round": 4,
+      "callCount": 3,
+      "finishReason": "stop"
+    }
+  ],
+  "claims": [
+    {
+      "id": "R1",
+      "claim": "The premise-ending pilot produced no donor-answer changes among 12 eligible affected pairs; its best residual recovery was 0.044.",
+      "status": "pending"
+    },
+    {
+      "id": "R2",
+      "claim": "At layer 0, the relation-token residual produced 0.992 mean recovery and 16/16 donor answers, while the complete premise produced 0.999 and 16/16.",
+      "status": "pending"
+    },
+    {
+      "id": "R3",
+      "claim": "A complete-premise layer-0 MLP patch produced 0.939 and 16/16, whereas isolated attention-output patches never changed an answer.",
+      "status": "pending"
+    },
+    {
+      "id": "R4",
+      "claim": "A layer-3 relation residual yielded 0.987 recovery and 13/13 donor answers across all four source directions; the complete premise at layer 5 yielded 0.994 and 13/13.",
+      "status": "pending"
+    },
+    {
+      "id": "R5",
+      "claim": "The semantic intervention produced 0.701 recovery with 26/39 donor answers at layer 3, 0.706 with 26/39 at layer 5, and 0.621 with 23/39 at layer 8.",
+      "status": "pending"
+    },
+    {
+      "id": "R6",
+      "claim": "All experiments analyze `[REDACTED opaque value]`, a 32-layer autoregressive decoder, in evaluation mode without training, fine-tuning, or parameter modification.",
+      "status": "pending"
+    },
+    {
+      "id": "R7",
+      "claim": "Final runs used bfloat16 on an NVIDIA H100.",
+      "status": "pending"
+    },
+    {
+      "id": "R8",
+      "claim": "The current environment used Python 3.9.21, PyTorch 2.5.1+cu121, Transformers 4.57.6, pandas 2.2.3, and NumPy 2.0.2; the subspace analysis additionally used scikit-learn 1.6.1.",
+      "status": "pending"
+    },
+    {
+      "id": "R9",
+      "claim": "The primary output diagnostic scores the single-token labels `north`, `south`, `east`, `west`, and `unrelated` after an assistant prefill.",
+      "status": "pending"
+    },
+    {
+      "id": "R10",
+      "claim": "The statistic is not clipped: zero denotes no movement from the base contrast and one matches the clean donor contrast.",
+      "status": "pending"
+    },
+    {
+      "id": "R11",
+      "claim": "The frozen manifest SHA-256 is `[REDACTED opaque value]`.",
+      "status": "pending"
+    },
+    {
+      "id": "R12",
+      "claim": "The large replication separates a 16-world development set from 32 evaluation worlds, with disjoint entities, graphs, and complete question sentences.",
+      "status": "pending"
+    },
+    {
+      "id": "R13",
+      "claim": "The semantic intervention uses 128 calibration prompts spanning four lexical families, four directions, and eight varied contexts per combination.",
+      "status": "pending"
+    },
+    {
+      "id": "R14",
+      "claim": "Ninety-six test pairs come from 16 new worlds with disjoint entity codes and held-out world/form combinations.",
+      "status": "pending"
+    },
+    {
+      "id": "R15",
+      "claim": "Confidence intervals use 10,000 nonparametric resamples of the 32 worlds.",
+      "status": "pending"
+    }
+  ],
+  "identity": {
+    "controller": "stage-controller-1",
+    "model": "deepseek/deepseek-v4-pro-0813",
+    "provider": "openrouter",
+    "mode": "byoc",
+    "build": "a5680e936cb36a38175ce0c1b2fc0acff05f5158f78d2f08887246f582e1f553"
+  },
+  "milestones": [
+    {
+      "kind": "phase",
+      "phase": "materials"
+    },
+    {
+      "kind": "phase",
+      "phase": "extraction"
+    }
+  ],
+  "pipeline": {
+    "controller": {
+      "version": 1,
+      "phase": "extraction",
+      "calls": 0,
+      "phaseCalls": 0,
+      "commandCompletionUnknown": false,
+      "plans": [],
+      "milestones": [
+        {
+          "phase": "extraction",
+          "calls": 0
+        }
+      ]
+    },
+    "claims": [
+      {
+        "id": "R1",
+        "claim": "The premise-ending pilot produced no donor-answer changes among 12 eligible affected pairs; its best residual recovery was 0.044.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R2",
+        "claim": "At layer 0, the relation-token residual produced 0.992 mean recovery and 16/16 donor answers, while the complete premise produced 0.999 and 16/16.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R3",
+        "claim": "A complete-premise layer-0 MLP patch produced 0.939 and 16/16, whereas isolated attention-output patches never changed an answer.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R4",
+        "claim": "A layer-3 relation residual yielded 0.987 recovery and 13/13 donor answers across all four source directions; the complete premise at layer 5 yielded 0.994 and 13/13.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R5",
+        "claim": "The semantic intervention produced 0.701 recovery with 26/39 donor answers at layer 3, 0.706 with 26/39 at layer 5, and 0.621 with 23/39 at layer 8.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R6",
+        "claim": "All experiments analyze `[REDACTED opaque value]`, a 32-layer autoregressive decoder, in evaluation mode without training, fine-tuning, or parameter modification.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R7",
+        "claim": "Final runs used bfloat16 on an NVIDIA H100.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R8",
+        "claim": "The current environment used Python 3.9.21, PyTorch 2.5.1+cu121, Transformers 4.57.6, pandas 2.2.3, and NumPy 2.0.2; the subspace analysis additionally used scikit-learn 1.6.1.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R9",
+        "claim": "The primary output diagnostic scores the single-token labels `north`, `south`, `east`, `west`, and `unrelated` after an assistant prefill.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R10",
+        "claim": "The statistic is not clipped: zero denotes no movement from the base contrast and one matches the clean donor contrast.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R11",
+        "claim": "The frozen manifest SHA-256 is `[REDACTED opaque value]`.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R12",
+        "claim": "The large replication separates a 16-world development set from 32 evaluation worlds, with disjoint entities, graphs, and complete question sentences.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R13",
+        "claim": "The semantic intervention uses 128 calibration prompts spanning four lexical families, four directions, and eight varied contexts per combination.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R14",
+        "claim": "Ninety-six test pairs come from 16 new worlds with disjoint entity codes and held-out world/form combinations.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R15",
+        "claim": "Confidence intervals use 10,000 nonparametric resamples of the 32 worlds.",
+        "status": "pending",
+        "evidenceIds": []
+      }
+    ],
+    "outputs": [],
+    "logbook": "## Claims\n\n- R1: The premise-ending pilot produced no donor-answer changes among 12 eligible affected pairs; its best residual recovery was 0.044.\n  Accepted status: pending; method: not established.\n- R2: At layer 0, the relation-token residual produced 0.992 mean recovery and 16/16 donor answers, while the complete premise produced 0.999 and 16/16.\n  Accepted status: pending; method: not established.\n- R3: A complete-premise layer-0 MLP patch produced 0.939 and 16/16, whereas isolated attention-output patches never changed an answer.\n  Accepted status: pending; method: not established.\n- R4: A layer-3 relation residual yielded 0.987 recovery and 13/13 donor answers across all four source directions; the complete premise at layer 5 yielded 0.994 and 13/13.\n  Accepted status: pending; method: not established.\n- R5: The semantic intervention produced 0.701 recovery with 26/39 donor answers at layer 3, 0.706 with 26/39 at layer 5, and 0.621 with 23/39 at layer 8.\n  Accepted status: pending; method: not established.\n- R6: All experiments analyze `[REDACTED opaque value]`, a 32-layer autoregressive decoder, in evaluation mode without training, fine-tuning, or parameter modification.\n  Accepted status: pending; method: not established.\n- R7: Final runs used bfloat16 on an NVIDIA H100.\n  Accepted status: pending; method: not established.\n- R8: The current environment used Python 3.9.21, PyTorch 2.5.1+cu121, Transformers 4.57.6, pandas 2.2.3, and NumPy 2.0.2; the subspace analysis additionally used scikit-learn 1.6.1.\n  Accepted status: pending; method: not established.\n- R9: The primary output diagnostic scores the single-token labels `north`, `south`, `east`, `west`, and `unrelated` after an assistant prefill.\n  Accepted status: pending; method: not established.\n- R10: The statistic is not clipped: zero denotes no movement from the base contrast and one matches the clean donor contrast.\n  Accepted status: pending; method: not established.\n- R11: The frozen manifest SHA-256 is `[REDACTED opaque value]`.\n  Accepted status: pending; method: not established.\n- R12: The large replication separates a 16-world development set from 32 evaluation worlds, with disjoint entities, graphs, and complete question sentences.\n  Accepted status: pending; method: not established.\n- R13: The semantic intervention uses 128 calibration prompts spanning four lexical families, four directions, and eight varied contexts per combination.\n  Accepted status: pending; method: not established.\n- R14: Ninety-six test pairs come from 16 new worlds with disjoint entity codes and held-out world/form combinations.\n  Accepted status: pending; method: not established.\n- R15: Confidence intervals use 10,000 nonparametric resamples of the 32 worlds.\n  Accepted status: pending; method: not established.\n\n## Reproduction Log\n\nNo commands executed.\n\n## Discrepancies\n\nNo accepted falsification recorded. This is not proof of agreement.\n\n## Limitations\n\nExtraction is still in progress; no experiments have run and no scientific verdict exists.\n\n- R1: Claim not independently verified.\n\n- R2: Claim not independently verified.\n\n- R3: Claim not independently verified.\n\n- R4: Claim not independently verified.\n\n- R5: Claim not independently verified.\n\n- R6: Claim not independently verified.\n\n- R7: Claim not independently verified.\n\n- R8: Claim not independently verified.\n\n- R9: Claim not independently verified.\n\n- R10: Claim not independently verified.\n\n- R11: Claim not independently verified.\n\n- R12: Claim not independently verified.\n\n- R13: Claim not independently verified.\n\n- R14: Claim not independently verified.\n\n- R15: Claim not independently verified."
+  }
+}
+Hide raw agent logbook
+# Incomplete reproduction — not a scientific verdict
+
+## Claims
+
+- R1: The premise-ending pilot produced no donor-answer changes among 12 eligible affected pairs; its best residual recovery was 0.044.
+  Accepted status: pending; method: not established.
+- R2: At layer 0, the relation-token residual produced 0.992 mean recovery and 16/16 donor answers, while the complete premise produced 0.999 and 16/16.
+  Accepted status: pending; method: not established.
+- R3: A complete-premise layer-0 MLP patch produced 0.939 and 16/16, whereas isolated attention-output patches never changed an answer.
+  Accepted status: pending; method: not established.
+- R4: A layer-3 relation residual yielded 0.987 recovery and 13/13 donor answers across all four source directions; the complete premise at layer 5 yielded 0.994 and 13/13.
+  Accepted status: pending; method: not established.
+- R5: The semantic intervention produced 0.701 recovery with 26/39 donor answers at layer 3, 0.706 with 26/39 at layer 5, and 0.621 with 23/39 at layer 8.
+  Accepted status: pending; method: not established.
+- R6: All experiments analyze `[REDACTED opaque value]`, a 32-layer autoregressive decoder, in evaluation mode without training, fine-tuning, or parameter modification.
+  Accepted status: pending; method: not established.
+- R7: Final runs used bfloat16 on an NVIDIA H100.
+  Accepted status: pending; method: not established.
+- R8: The current environment used Python 3.9.21, PyTorch 2.5.1+cu121, Transformers 4.57.6, pandas 2.2.3, and NumPy 2.0.2; the subspace analysis additionally used scikit-learn 1.6.1.
+  Accepted status: pending; method: not established.
+- R9: The primary output diagnostic scores the single-token labels `north`, `south`, `east`, `west`, and `unrelated` after an assistant prefill.
+  Accepted status: pending; method: not established.
+- R10: The statistic is not clipped: zero denotes no movement from the base contrast and one matches the clean donor contrast.
+  Accepted status: pending; method: not established.
+- R11: The frozen manifest SHA-256 is `[REDACTED opaque value]`.
+  Accepted status: pending; method: not established.
+- R12: The large replication separates a 16-world development set from 32 evaluation worlds, with disjoint entities, graphs, and complete question sentences.
+  Accepted status: pending; method: not established.
+- R13: The semantic intervention uses 128 calibration prompts spanning four lexical families, four directions, and eight varied contexts per combination.
+  Accepted status: pending; method: not established.
+- R14: Ninety-six test pairs come from 16 new worlds with disjoint entity codes and held-out world/form combinations.
+  Accepted status: pending; method: not established.
+- R15: Confidence intervals use 10,000 nonparametric resamples of the 32 worlds.
+  Accepted status: pending; method: not established.
