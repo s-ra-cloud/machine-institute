@@ -3,6 +3,7 @@ import { runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolLoopOpti
 import { ReproductionController, renderAcceptedLogbook, type ExperimentPlan } from "./reproduction-controller";
 import type { ReproductionSession } from "./reproduction-session";
 import { ContextBudgetError, estimateRequestTokens } from "./llm-context";
+import { describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
 
 const controls: ToolSpec[] = [
   { name: "submit_plan", description: "Commit a claim-specific plan using actual shipped paths. Code controls the next stage; qP assessment is additionally required.",
@@ -15,6 +16,7 @@ const controls: ToolSpec[] = [
     parameters: { type: "object", properties: {}, additionalProperties: false } },
 ];
 export interface PipelineCheckpoint {
+  extraction?: ExtractionCoverage;
   controller: ReturnType<ReproductionController["snapshot"]>;
   claims: Array<{ id: string; claim: string; status: string; evidenceIds: number[] }>;
   outputs: Array<{ id: number; tool: string; sha256: string; error: boolean }>;
@@ -25,6 +27,7 @@ export async function runControlledReproduction(input: {
   session: ReproductionSession; shippedPaths: Set<string>;
   execute: (name: string, args: Record<string, unknown>) => Promise<string>;
   options: ToolLoopOptions; extractionCalls: number;
+  extraction?: ExtractionCoverage;
   checkpoint?: (value: PipelineCheckpoint) => Promise<void>;
 }): Promise<ToolLoopResult & { completeReport: () => Promise<void> }> {
   const controller = new ReproductionController(input.options.deadlineMs, input.options.maxToolCalls);
@@ -35,11 +38,12 @@ export async function runControlledReproduction(input: {
   const started = input.session.toolCalls.length;
   const save = async (limitation?: string) => {
     await input.checkpoint?.({
+      extraction: input.extraction,
       controller: controller.snapshot(),
       claims: Array.from(input.session.recorded.values()).map(c => ({ id: c.id, claim: c.claim, status: c.status, evidenceIds: c.evidenceToolCallIds ?? [] })),
       outputs: input.session.toolCalls.map(c => ({ id: c.index, tool: c.name,
         sha256: createHash("sha256").update(c.result).digest("hex"), error: c.error })),
-      logbook: renderAcceptedLogbook(Array.from(input.session.recorded.values()), input.session.toolCalls, limitation),
+      logbook: renderAcceptedLogbook(Array.from(input.session.recorded.values()), input.session.toolCalls, [limitation, input.extraction && describeExtractionCoverage(input.extraction)].filter(Boolean).join("\n\n")),
     });
   };
   try {

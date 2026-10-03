@@ -9,6 +9,12 @@ Evidence validation must provide a practical repair path while the sandbox remai
 
 **How to apply:** Test the actual model/tool orchestration using recorded or simulated premature-stop sequences, including completion beyond two productive recovery cycles, no-progress termination, and recovery of old evidence without rerunning expensive experiments. Distinguish simulated validation from live GPU/model verification when reporting results.
 
+Extraction coverage is not scientific coverage: accepting a bounded set of exact quotations does not establish that every core result was selected.
+
+**Why:** An observed extraction accepted fifteen claims, then a later packet's optional-field refusals aborted all progress before execution. Retaining earlier valid claims is useful only if omitted passages remain explicitly unassessed, rather than becoming scientific verdicts.
+
+**How to apply:** Separate packet-validation exhaustion from infrastructure and persistence failures. Preserve valid progress without relaxing source evidence, and disclose bounded scope in public reports as well as private checkpoints.
+
 Current mandatory tool requirements must accompany saved prompts at execution time without erasing custom scientific instructions.
 
 **Why:** Explicit reruns retain old prompts, which can predate stricter evidence contracts. Changing only the default prompt leaves retries inconsistent with the validator.

@@ -11,8 +11,14 @@ the application owns workflow transitions and source bookkeeping.
    they are not evidence of scientific meaning.
 2. Native `submit_claims` calls supply exact quotations. At most six packets,
    three submission attempts per packet and twelve accepted claims are permitted.
-   Coverage is disclosed in the report. Empty or invalid extraction fails before
-   GPU allocation. This bounded sample is not exhaustive review of long papers.
+   The cap applies before registration. Valid siblings survive rejected candidates;
+   retries never duplicate accepted claims. Optional metadata must be quoted or
+   explicitly omitted by the model, never inferred. Later packet validation
+   exhaustion retains prior valid claims for planning; zero accepted claims,
+   persistence/provider failures and deadline exhaustion still fail before GPU
+   allocation. Coverage, failed packet ranges and unprocessed packet counts are
+   disclosed in checkpoints and prominently in the report. This bounded sample
+   is not an exhaustive review, even when all scheduled packets were attempted.
 3. Each accepted claim receives a material-grounded plan, an execution stage,
    and evidence assessment. Planning allows 12 calls, execution 30, assessment
    8, and at most two plan revisions per claim. These allowances never override

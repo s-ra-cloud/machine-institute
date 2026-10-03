@@ -1,7 +1,7 @@
 import { getContextWindow, runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolCallRecord } from "./model-service";
 import { loadPaperContext } from "./ethics-review";
 import { ReproductionRecovery } from "./reproduction-recovery";
-import { extractReproductionClaims } from "./reproduction-extraction";
+import { extractReproductionClaims, describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
 import { runControlledReproduction, type PipelineCheckpoint } from "./reproduction-pipeline";
 import { ReproductionController, renderAcceptedLogbook } from "./reproduction-controller";
 import { createHash } from "node:crypto";
@@ -518,20 +518,30 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
   extractionState.startExtraction();
   await emitEvent("reproduction-extraction", "Extracting grounded claims before GPU allocation.");
   diagnostics.stage("extraction");
+  let extractionCoverage: ExtractionCoverage | undefined;
+  const saveExtraction = async (limitation: string) => {
+    await opts.onCheckpoint?.({
+      extraction: extractionCoverage,
+      controller: { ...extractionState.snapshot(), phaseCalls: extractionState.phase === "extraction" ? extractionState.calls : 0 },
+      claims: Array.from(session.recorded.values()).map(c => ({ id: c.id, claim: c.claim, status: c.status, evidenceIds: [] })),
+      outputs: [],
+      logbook: renderAcceptedLogbook(Array.from(session.recorded.values()), session.toolCalls, limitation),
+    });
+  };
   const extracted = opts.legacyControllerForComparison ? { claims: [], calls: 0, inspectedPackets: 0, totalPackets: 0 } : await extractReproductionClaims({
     paper: paperText, instructions: opts.reproducerPrompt, config: modelConfig,
     deadline: startTime + REPRODUCTION_BUDGET.wallClockMs,
-    onOutcome: event => diagnostics.observe(event),
+    onOutcome: event => { extractionState.calls = event.callCount; diagnostics.observe(event); },
+    onProgress: async coverage => {
+      extractionCoverage = coverage;
+      extractionState.calls = coverage.calls;
+      if (coverage.termination === "failed") extractionState.fail();
+      await saveExtraction(`${coverage.termination === "failed" ? `Extraction failed (${coverage.failure}); accepted claims remain pending. No GPU allocated.` : "Extraction checkpoint; no experiments have run."}\n\n${describeExtractionCoverage(coverage)}`);
+    },
     onAccepted: async claim => {
       session.registerExtractedClaim(claim);
       diagnostics.claims(session.recorded.values());
-      await opts.onCheckpoint?.({
-        controller: extractionState.snapshot(),
-        claims: Array.from(session.recorded.values()).map(c => ({ id: c.id, claim: c.claim, status: c.status, evidenceIds: [] })),
-        outputs: [],
-        logbook: renderAcceptedLogbook(Array.from(session.recorded.values()), session.toolCalls,
-          "Extraction is still in progress; no experiments have run and no scientific verdict exists."),
-      });
+      await saveExtraction("Extraction is still in progress; no experiments have run and no scientific verdict exists.");
     },
   });
   await emitEvent("reproduction-extraction", `Accepted ${extracted.claims.length} grounded claims from ${extracted.inspectedPackets}/${extracted.totalPackets} source packets. Uninspected packets are outside this run's extraction coverage.`);
@@ -835,6 +845,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     toolLoopResult = await runPipeline({
       config: modelConfig, instructions: effectivePrompt, tools, execute, session,
       shippedPaths: new Set(shippedPaths), extractionCalls: extracted.calls,
+      extraction: extractionCoverage,
       checkpoint: opts.onCheckpoint,
       options: {
       onOutcome: event => { try { diagnostics.observe(event); } catch { /* best effort */ } },
@@ -916,7 +927,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     const recordedResults = Array.from(recorded.values());
     const budgetExhausted = toolLoopResult.stoppedBy === "deadline" || toolLoopResult.stoppedBy === "tool-budget";
     finalizeBudgetExhaustedResults({ recordedResults, toolCalls: session.toolCalls, stoppedBy: toolLoopResult.stoppedBy });
-    logbook = toolLoopResult.content + (opts.legacyControllerForComparison ? "" : `\n\nExtraction coverage: ${extracted.inspectedPackets}/${extracted.totalPackets} source packets inspected. No claims about uninspected passages are implied.`);
+    logbook = toolLoopResult.content + (extractionCoverage ? `\n\n${describeExtractionCoverage(extractionCoverage)}` : "");
     if (budgetExhausted) {
       const states = recordedResults.map(r => `${r.id}: ${r.status} — ${r.evidence || r.reproducedValue || "No result obtained."}`).join("\n");
       // Tools are unavailable at a hard stop. Never depend on one more model call
@@ -1012,7 +1023,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     wallClockMinutes: Math.round(REPRODUCTION_BUDGET.wallClockMs / 60000),
     perCommandMinutes: Math.round(REPRODUCTION_BUDGET.perCommandMs / 60000),
   };
-  const markdown = buildReproductionMarkdown({
+  const markdown = (extractionCoverage ? `> ${describeExtractionCoverage(extractionCoverage)}\n\n` : "") + buildReproductionMarkdown({
     paperTitle: title,
     paperAuthors: authors,
     paperDate: date,

@@ -123,6 +123,79 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("attempted fifteen claims proceed with only twelve registered and no cap overflow checkpoint", async () => {
+    const sentences = Array.from({ length: 15 }, (_, i) => `The measured experimental score for condition ${i} is 0.91.`);
+    const longPaper = [0, 5, 10].map(start => sentences.slice(start, start + 5).join("\n").padEnd(5400, " ")).join("");
+    mock.materials.mockResolvedValue({ paperMarkdown: longPaper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
+    const sb = sandbox(); mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    let packet = 0;
+    mock.complete.mockImplementation((request: any) => {
+      if ((request.tools ?? []).some((t: any) => t.function.name === "submit_claims")) {
+        const selected = sentences.slice(packet * 5, ++packet * 5);
+        return complete(null, [tool("submit_claims", { claims: selected.map(claim => ({ claim, source_quote: claim, original_value: "0.91" })) })]);
+      }
+      return responder(request);
+    });
+    const saved: PipelineCheckpoint[] = [];
+    const result = await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
+    expect(packet).toBe(3);
+    expect(saved.every(s => s.claims.length <= 12)).toBe(true);
+    expect(saved.at(-1)?.claims).toHaveLength(12);
+    expect(saved.at(-1)?.claims.every(c => c.status === "verified")).toBe(true);
+    expect(result.markdown).toContain("claim-limit");
+    expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("analyze.py"))).toHaveLength(12);
+  });
+  for (const failure of ["provider", "checkpoint"]) it(`${failure} after accepted claims remains a hard failure without GPU`, async () => {
+    const longPaper = paper.padEnd(5400, " ") + "An additional measured result was 0.82.".padEnd(5400, " ");
+    mock.materials.mockResolvedValue({ paperMarkdown: longPaper, files: [], textFileCount: 0, binaryFileCount: 0 });
+    const responder = stageResponder();
+    mock.complete.mockImplementation((request: any) => {
+      if (!String(request.messages[1]?.content).includes(paper)) throw new Error("Provider unavailable");
+      return responder(request);
+    });
+    const saved: PipelineCheckpoint[] = [];
+    await expect(runReproduction({ ...options(), onCheckpoint: async value => {
+      saved.push(structuredClone(value));
+      if (failure === "checkpoint") throw new Error("Storage unavailable");
+    } })).rejects.toThrow(failure === "provider" ? "LLM request failed" : "Storage unavailable");
+    expect(mock.create).not.toHaveBeenCalled();
+    expect(saved.at(-1)?.claims[0].status).toBe("pending");
+    expect(saved.at(-1)?.logbook).not.toContain("still in progress");
+    expect(saved.at(-1)?.controller.phase).toBe("failed");
+  });
+  for (const agentId of ["P", "qP"] as const) it(`${agentId}: later extraction refusals preserve early claims through execution`, async () => {
+    const longPaper = paper.padEnd(5400, " ") + "A later measured experimental result was 0.82.".padEnd(5400, " ");
+    mock.materials.mockResolvedValue({ paperMarkdown: longPaper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
+    const sb = sandbox(); mock.create.mockResolvedValue(sb);
+    const responder = stageResponder(agentId === "qP" ? "qp-suitable" : "success");
+    mock.complete.mockImplementation((request: any) => {
+      if ((request.tools ?? []).some((t: any) => t.function.name === "submit_claims")
+        && !String(request.messages[1]?.content).includes(paper)) {
+        const quote = "A later measured experimental result was 0.82.";
+        return complete(null, [tool("submit_claims", { claims: [{ claim: quote, source_quote: quote, required_material: "invented" }] })]);
+      }
+      return responder(request);
+    });
+    const checkpoints: PipelineCheckpoint[] = [];
+    const result = await runReproduction({ ...options(), agentId, reproducerPrompt: getReproducerPrompt(agentId),
+      judgePrompt: getJudgePrompt(agentId), onCheckpoint: async value => { checkpoints.push(structuredClone(value)); } });
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].verdict).toBe("verified");
+    expect(result.markdown).toMatch(/^> Bounded extraction coverage/m);
+    expect(result.logbook).toContain("validation-exhausted");
+    expect(checkpoints.at(-1)?.extraction?.packets.some(p => p.status === "validation-exhausted")).toBe(true);
+    expect(sb.exec.mock.calls.some(c => JSON.stringify(c).includes("analyze.py"))).toBe(true);
+  });
+  it("persists terminal extraction failure without stale in-progress wording", async () => {
+    mock.complete.mockImplementation(stageResponder("bad-quote"));
+    const saved: PipelineCheckpoint[] = [];
+    await expect(runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } })).rejects.toThrow("Extraction failed");
+    expect(saved.at(-1)?.controller.phase).toBe("failed");
+    expect(saved.at(-1)?.logbook).toContain("no-claims");
+    expect(saved.at(-1)?.logbook).not.toContain("still in progress");
+    expect(mock.create).not.toHaveBeenCalled();
+  });
   for (const scriptExit of [0, 1]) it(`rejects mixed CSV measurement evidence even with script exit ${scriptExit}`, async () => {
     const sb = sandbox();
     sb.exec.mockImplementation(async (...args: any[]) => {

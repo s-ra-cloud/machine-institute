@@ -95,6 +95,7 @@ export class ReproductionDiagnostics {
     providerLimitSource?: string; providerPaymentReason?: string;
     providerRetryAfterMs?: number;
     requestedInputTokens?: number; requestedOutputTokens?: number; requestedTotalTokens?: number;
+    packetIndex?: number; packetCallCount?: number; packetRound?: number;
   }): void {
     this.data.rounds = Math.max(this.data.rounds, safeNumber(event.round));
     this.data.callCount = Math.max(this.data.callCount, safeNumber(event.callCount));
@@ -103,11 +104,16 @@ export class ReproductionDiagnostics {
       kind: diagnosticExcerpt(event.kind, 100), round: safeNumber(event.round),
       callCount: safeNumber(event.callCount),
     };
+    if (event.packetIndex !== undefined) {
+      safe.packetIndex = safeNumber(event.packetIndex);
+      safe.packetCallCount = safeNumber(event.packetCallCount);
+      safe.packetRound = safeNumber(event.packetRound);
+    }
     if (event.finishReason !== undefined) safe.finishReason = enumValue(event.finishReason,
       ["stop", "length", "tool_calls", "function_call", "content_filter", "unknown"]);
     if (event.argumentParse) safe.argumentParse = diagnosticExcerpt(event.argumentParse, 100);
     if (event.toolName) safe.toolName = enumValue(event.toolName,
-      ["record_result", "read_tool_result", "read_reproduction_context", "run_command", "read_file", "write_file", "list_files"]);
+      ["submit_claims", "submit_plan", "submit_for_assessment", "request_plan_revision", "record_result", "read_tool_result", "read_reproduction_context", "run_command", "read_file", "write_file", "list_files"]);
     if (event.validationErrors) safe.validationErrors = event.validationErrors.slice(0, 8).map(s => diagnosticExcerpt(s, 300));
     if (event.responseExcerpt) safe.responseExcerpt = diagnosticExcerpt(event.responseExcerpt);
     if (event.toolExcerpt) safe.toolExcerpt = diagnosticExcerpt(event.toolExcerpt);
