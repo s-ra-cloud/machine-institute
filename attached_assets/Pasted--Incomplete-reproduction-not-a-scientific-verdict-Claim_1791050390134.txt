@@ -1,0 +1,66 @@
+# Incomplete reproduction — not a scientific verdict
+
+## Claims
+
+- R1: The premise-ending pilot produced no donor-answer changes among 12 eligible affected pairs; its best residual recovery was 0.044.
+  Accepted status: pending; method: not established.
+- R2: At layer 0, the relation-token residual produced 0.992 mean recovery and 16/16 donor answers, while the complete premise produced 0.999 and 16/16.
+  Accepted status: pending; method: not established.
+- R3: A layer-3 relation residual yielded 0.987 recovery and 13/13 donor answers across all four source directions; the complete premise at layer 5 yielded 0.994 and 13/13.
+  Accepted status: pending; method: not established.
+- R4: The semantic intervention produced 0.701 recovery with 26/39 donor answers at layer 3, 0.706 with 26/39 at layer 5, and 0.621 with 23/39 at layer 8.
+  Accepted status: pending; method: not established.
+- R5: At the primary layer 3, the source-endpoint patch changed 14/18 eligible direct answers, with a world-bootstrap 95% interval of 0.571–0.947 for the flip rate.
+  Accepted status: pending; method: not established.
+- R6: Final runs used bfloat16 on an NVIDIA H100.
+  Accepted status: pending; method: not established.
+- R7: The current environment used Python 3.9.21, PyTorch 2.5.1+cu121, Transformers 4.57.6, pandas 2.2.3, and NumPy 2.0.2; the subspace analysis additionally used scikit-learn 1.6.1.
+  Accepted status: pending; method: not established.
+- R8: Probabilities reported for the principal recovery metric are conditional on these five labels.
+  Accepted status: pending; method: not established.
+- R9: All experiments analyze `[REDACTED opaque value]`, a 32-layer autoregressive decoder, in evaluation mode without training, fine-tuning, or parameter modification.
+  Accepted status: pending; method: not established.
+- R10: The primary output diagnostic scores the single-token labels `north`, `south`, `east`, `west`, and `unrelated` after an assistant prefill.
+  Accepted status: pending; method: not established.
+- R11: The semantic intervention uses 128 calibration prompts spanning four lexical families, four directions, and eight varied contexts per combination.
+  Accepted status: pending; method: not established.
+- R12: The large replication separates a 16-world development set from 32 evaluation worlds, with disjoint entities, graphs, and complete question sentences.
+  Accepted status: pending; method: not established.
+
+## Reproduction Log
+
+No commands executed.
+
+## Discrepancies
+
+No accepted falsification recorded. This is not proof of agreement.
+
+## Limitations
+
+Pipeline failed during planning; unfinished claims remain unresolved. No automatic command replay.
+
+Bounded extraction coverage (not an exhaustive paper review): 3/6 packets attempted; 3 packets unprocessed. Termination: claim-limit. Incomplete packet ranges: 0-6000 (validation-exhausted), 5400-11400 (claim-limit). Omitted claims and passages were not experimentally assessed and have no scientific verdict.
+
+- R1: Claim not independently verified.
+
+- R2: Claim not independently verified.
+
+- R3: Claim not independently verified.
+
+- R4: Claim not independently verified.
+
+- R5: Claim not independently verified.
+
+- R6: Claim not independently verified.
+
+- R7: Claim not independently verified.
+
+- R8: Claim not independently verified.
+
+- R9: Claim not independently verified.
+
+- R10: Claim not independently verified.
+
+- R11: Claim not independently verified.
+
+- R12: Claim not independently verified.

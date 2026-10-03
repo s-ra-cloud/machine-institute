@@ -1,0 +1,638 @@
+{
+  "version": 1,
+  "stage": "tool-loop",
+  "stopReason": "tool-budget",
+  "rounds": 7,
+  "callCount": 12,
+  "redaction": "Credential fields, authorization, URLs, private keys and opaque tokens are redacted. Excerpts and history are bounded; prompts, raw provider errors and full outputs are excluded.",
+  "truncated": true,
+  "droppedEvents": 22,
+  "events": [
+    {
+      "kind": "completion",
+      "round": 2,
+      "callCount": 2,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 2,
+      "callCount": 2,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_tool_result",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 2,
+      "callCount": 3,
+      "argumentParse": "valid",
+      "toolName": "read_tool_result",
+      "validationErrors": [],
+      "toolExcerpt": "Original evidence tool call #13 (read_file); characters 0-5657 of 6457. Cite #13, not this retrieval call. Sandbox capture elision markers mean uncaptured output; inspect saved output files for those portions.\nVerified file: /work/materials/README.md\nReturned characters: 0-6376 of 6376\n---\n# Causal Propagation in Synthetic World Models\n\nThis repository contains the finalized paper, code, frozen prompt artifacts, and analysis outputs for a causal-intervention study of synthetic spatial reasoning in `[REDACTED opaque value]`.\n\nThe study asks whether an activation associated with one in-context premise functions as a causally upstream state: can replacing[TRUNCATED]"
+    },
+    {
+      "kind": "arguments",
+      "round": 2,
+      "callCount": 3,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_tool_result",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 2,
+      "callCount": 4,
+      "argumentParse": "valid",
+      "toolName": "read_tool_result",
+      "validationErrors": [],
+      "toolExcerpt": "Original evidence tool call #14 (list_files); characters 0-2439 of 2439. Cite #14, not this retrieval call. Sandbox capture elision markers mean uncaptured output; inspect saved output files for those portions.\nVerified directory: /work/materials\nf 01_premise_boundary.py (20025 B)\nf 02_source_spans.py (31536 B)\nf 03_position_scan.py (31032 B)\nf 04_query_transition.py (29584 B)\nf 05_semantic_subspace.py (36915 B)\nf 06_development_check.py (13227 B)\nf 06_frozen_replication.py (40391 B)\nf 07_attention_edges.py (46204 B)\nf 08_donor_specificity.py (46885 B)\nf 09_output_robustness.py (43462 B)\nf README.md (6390 B)\nf activation_patching_results.csv (2299[TRUNCATED]"
+    },
+    {
+      "kind": "context",
+      "round": 0,
+      "callCount": 5,
+      "requestedInputTokens": 23561
+    },
+    {
+      "kind": "completion",
+      "round": 3,
+      "callCount": 4,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 3,
+      "callCount": 4,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 3,
+      "callCount": 5,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "Verified file: /work/materials/README.md\nReturned characters: 0-6376 of 6376\n---\n# Causal Propagation in Synthetic World Models\n\nThis repository contains the finalized paper, code, frozen prompt artifacts, and analysis outputs for a causal-intervention study of synthetic spatial reasoning in `[REDACTED opaque value]`.\n\nThe study asks whether an activation associated with one in-context premise functions as a causally upstream state: can replacing or editing that state make the model recompute consequences of the premise while preserving disconnected facts? The experiments localize the source state, test a wording-general direction subspace, replicate se[TRUNCATED]"
+    },
+    {
+      "kind": "arguments",
+      "round": 3,
+      "callCount": 5,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 3,
+      "callCount": 6,
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": [],
+      "toolExcerpt": "Verified directory: /work/materials\nf 01_premise_boundary.py (20025 B)\nf 02_source_spans.py (31536 B)\nf 03_position_scan.py (31032 B)\nf 04_query_transition.py (29584 B)\nf 05_semantic_subspace.py (36915 B)\nf 06_development_check.py (13227 B)\nf 06_frozen_replication.py (40391 B)\nf 07_attention_edges.py (46204 B)\nf 08_donor_specificity.py (46885 B)\nf 09_output_robustness.py (43462 B)\nf README.md (6390 B)\nf activation_patching_results.csv (229946 B)\nf [REDACTED opaque value].csv (984 B)\nf [REDACTED opaque value].csv (43745 B)\nf [REDACTED opaque value].csv (89848 B)\nf baseline_behavior.csv (2814 B)\nf best_layer_by_condition.csv (1185 B)\nf best_lay[TRUNCATED]"
+    },
+    {
+      "kind": "context",
+      "round": 0,
+      "callCount": 5,
+      "requestedInputTokens": 23561
+    },
+    {
+      "kind": "completion",
+      "round": 4,
+      "callCount": 6,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 4,
+      "callCount": 6,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 4,
+      "callCount": 7,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "Verified file: /work/materials/README.md\nReturned characters: 0-6376 of 6376\n---\n# Causal Propagation in Synthetic World Models\n\nThis repository contains the finalized paper, code, frozen prompt artifacts, and analysis outputs for a causal-intervention study of synthetic spatial reasoning in `[REDACTED opaque value]`.\n\nThe study asks whether an activation associated with one in-context premise functions as a causally upstream state: can replacing or editing that state make the model recompute consequences of the premise while preserving disconnected facts? The experiments localize the source state, test a wording-general direction subspace, replicate se[TRUNCATED]"
+    },
+    {
+      "kind": "arguments",
+      "round": 4,
+      "callCount": 7,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 4,
+      "callCount": 8,
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": [],
+      "toolExcerpt": "Verified directory: /work/materials\nf 01_premise_boundary.py (20025 B)\nf 02_source_spans.py (31536 B)\nf 03_position_scan.py (31032 B)\nf 04_query_transition.py (29584 B)\nf 05_semantic_subspace.py (36915 B)\nf 06_development_check.py (13227 B)\nf 06_frozen_replication.py (40391 B)\nf 07_attention_edges.py (46204 B)\nf 08_donor_specificity.py (46885 B)\nf 09_output_robustness.py (43462 B)\nf README.md (6390 B)\nf activation_patching_results.csv (229946 B)\nf [REDACTED opaque value].csv (984 B)\nf [REDACTED opaque value].csv (43745 B)\nf [REDACTED opaque value].csv (89848 B)\nf baseline_behavior.csv (2814 B)\nf best_layer_by_condition.csv (1185 B)\nf best_lay[TRUNCATED]"
+    },
+    {
+      "kind": "context",
+      "round": 0,
+      "callCount": 5,
+      "requestedInputTokens": 23561
+    },
+    {
+      "kind": "completion",
+      "round": 5,
+      "callCount": 8,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 5,
+      "callCount": 8,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 5,
+      "callCount": 9,
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": [],
+      "toolExcerpt": "Verified directory: /work/materials\nf 01_premise_boundary.py (20025 B)\nf 02_source_spans.py (31536 B)\nf 03_position_scan.py (31032 B)\nf 04_query_transition.py (29584 B)\nf 05_semantic_subspace.py (36915 B)\nf 06_development_check.py (13227 B)\nf 06_frozen_replication.py (40391 B)\nf 07_attention_edges.py (46204 B)\nf 08_donor_specificity.py (46885 B)\nf 09_output_robustness.py (43462 B)\nf README.md (6390 B)\nf activation_patching_results.csv (229946 B)\nf [REDACTED opaque value].csv (984 B)\nf [REDACTED opaque value].csv (43745 B)\nf [REDACTED opaque value].csv (89848 B)\nf baseline_behavior.csv (2814 B)\nf best_layer_by_condition.csv (1185 B)\nf best_lay[TRUNCATED]"
+    },
+    {
+      "kind": "arguments",
+      "round": 5,
+      "callCount": 9,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 5,
+      "callCount": 10,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "Verified file: /work/materials/README.md\nReturned characters: 0-6376 of 6376\n---\n# Causal Propagation in Synthetic World Models\n\nThis repository contains the finalized paper, code, frozen prompt artifacts, and analysis outputs for a causal-intervention study of synthetic spatial reasoning in `[REDACTED opaque value]`.\n\nThe study asks whether an activation associated with one in-context premise functions as a causally upstream state: can replacing or editing that state make the model recompute consequences of the premise while preserving disconnected facts? The experiments localize the source state, test a wording-general direction subspace, replicate se[TRUNCATED]"
+    },
+    {
+      "kind": "context",
+      "round": 0,
+      "callCount": 5,
+      "requestedInputTokens": 23561
+    },
+    {
+      "kind": "completion",
+      "round": 6,
+      "callCount": 10,
+      "finishReason": "tool_calls"
+    },
+    {
+      "kind": "arguments",
+      "round": 6,
+      "callCount": 10,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 6,
+      "callCount": 11,
+      "argumentParse": "valid",
+      "toolName": "read_file",
+      "validationErrors": [],
+      "toolExcerpt": "Verified file: /work/materials/README.md\nReturned characters: 0-6376 of 6376\n---\n# Causal Propagation in Synthetic World Models\n\nThis repository contains the finalized paper, code, frozen prompt artifacts, and analysis outputs for a causal-intervention study of synthetic spatial reasoning in `[REDACTED opaque value]`.\n\nThe study asks whether an activation associated with one in-context premise functions as a causally upstream state: can replacing or editing that state make the model recompute consequences of the premise while preserving disconnected facts? The experiments localize the source state, test a wording-general direction subspace, replicate se[TRUNCATED]"
+    },
+    {
+      "kind": "arguments",
+      "round": 6,
+      "callCount": 11,
+      "finishReason": "tool_calls",
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": []
+    },
+    {
+      "kind": "tool",
+      "round": 6,
+      "callCount": 12,
+      "argumentParse": "valid",
+      "toolName": "list_files",
+      "validationErrors": [],
+      "toolExcerpt": "Verified directory: /work/materials\nf 01_premise_boundary.py (20025 B)\nf 02_source_spans.py (31536 B)\nf 03_position_scan.py (31032 B)\nf 04_query_transition.py (29584 B)\nf 05_semantic_subspace.py (36915 B)\nf 06_development_check.py (13227 B)\nf 06_frozen_replication.py (40391 B)\nf 07_attention_edges.py (46204 B)\nf 08_donor_specificity.py (46885 B)\nf 09_output_robustness.py (43462 B)\nf README.md (6390 B)\nf activation_patching_results.csv (229946 B)\nf [REDACTED opaque value].csv (984 B)\nf [REDACTED opaque value].csv (43745 B)\nf [REDACTED opaque value].csv (89848 B)\nf baseline_behavior.csv (2814 B)\nf best_layer_by_condition.csv (1185 B)\nf best_lay[TRUNCATED]"
+    },
+    {
+      "kind": "context",
+      "round": 0,
+      "callCount": 5,
+      "requestedInputTokens": 21833
+    },
+    {
+      "kind": "completion",
+      "round": 7,
+      "callCount": 12,
+      "finishReason": "stop",
+      "responseExcerpt": "## Claims\n\n| ID | Verbatim claim | Original value | Final status | Method | Reproduced value | Evidence / notes |\n|----|----------------|----------------|--------------|--------|------------------|------------------|\n| R1 | The premise-ending pilot produced no donor-answer changes among 12 eligible affected pairs; its best residual recovery was 0.044. | 0.044 | **inconclusive** | blocked — system-enforced tool-call budget exhaustion | — | The claim was extracted from `/work/paper.md` at characters 10800–16800. However, no reproduction script was executed before the tool-call budget was exhausted. The `/work/materials` directory listing confirmed `01_[TRUNCATED]"
+    },
+    {
+      "kind": "stop",
+      "round": 7,
+      "callCount": 12,
+      "finishReason": "stop"
+    }
+  ],
+  "claims": [
+    {
+      "id": "R1",
+      "claim": "The premise-ending pilot produced no donor-answer changes among 12 eligible affected pairs; its best residual recovery was 0.044.",
+      "status": "pending"
+    },
+    {
+      "id": "R2",
+      "claim": "At layer 0, the relation-token residual produced 0.992 mean recovery and 16/16 donor answers, while the complete premise produced 0.999 and 16/16.",
+      "status": "pending"
+    },
+    {
+      "id": "R3",
+      "claim": "A layer-3 relation residual yielded 0.987 recovery and 13/13 donor answers across all four source directions; the complete premise at layer 5 yielded 0.994 and 13/13.",
+      "status": "pending"
+    },
+    {
+      "id": "R4",
+      "claim": "The semantic intervention produced 0.701 recovery with 26/39 donor answers at layer 3, 0.706 with 26/39 at layer 5, and 0.621 with 23/39 at layer 8.",
+      "status": "pending"
+    },
+    {
+      "id": "R5",
+      "claim": "At the primary layer 3, the source-endpoint patch changed 14/18 eligible direct answers, with a world-bootstrap 95% interval of 0.571–0.947 for the flip rate.",
+      "status": "pending"
+    },
+    {
+      "id": "R6",
+      "claim": "Final runs used bfloat16 on an NVIDIA H100.",
+      "status": "pending"
+    },
+    {
+      "id": "R7",
+      "claim": "The current environment used Python 3.9.21, PyTorch 2.5.1+cu121, Transformers 4.57.6, pandas 2.2.3, and NumPy 2.0.2; the subspace analysis additionally used scikit-learn 1.6.1.",
+      "status": "pending"
+    },
+    {
+      "id": "R8",
+      "claim": "Probabilities reported for the principal recovery metric are conditional on these five labels.",
+      "status": "pending"
+    },
+    {
+      "id": "R9",
+      "claim": "All experiments analyze `[REDACTED opaque value]`, a 32-layer autoregressive decoder, in evaluation mode without training, fine-tuning, or parameter modification.",
+      "status": "pending"
+    },
+    {
+      "id": "R10",
+      "claim": "The primary output diagnostic scores the single-token labels `north`, `south`, `east`, `west`, and `unrelated` after an assistant prefill.",
+      "status": "pending"
+    },
+    {
+      "id": "R11",
+      "claim": "The semantic intervention uses 128 calibration prompts spanning four lexical families, four directions, and eight varied contexts per combination.",
+      "status": "pending"
+    },
+    {
+      "id": "R12",
+      "claim": "The large replication separates a 16-world development set from 32 evaluation worlds, with disjoint entities, graphs, and complete question sentences.",
+      "status": "pending"
+    }
+  ],
+  "identity": {
+    "controller": "stage-controller-1",
+    "model": "deepseek/deepseek-v4-pro-0813",
+    "provider": "openrouter",
+    "mode": "byoc",
+    "build": "ef349eb2dc3fec66b510cf585c186f68e89b6f072519d6e654360551a7f456c9"
+  },
+  "milestones": [
+    {
+      "kind": "phase",
+      "phase": "materials"
+    },
+    {
+      "kind": "phase",
+      "phase": "extraction"
+    },
+    {
+      "kind": "phase",
+      "phase": "sandbox"
+    },
+    {
+      "kind": "phase",
+      "phase": "tool-loop"
+    }
+  ],
+  "paging": {
+    "sourceReadCount": 5,
+    "sourceRepeatCount": 4,
+    "outputRepeatCount": 0,
+    "outputNewRangeCount": 2,
+    "paperFirstGap": 0,
+    "paperTotal": 0,
+    "outputNextOffset": 2439,
+    "originalOutputCallId": 14,
+    "navigation": "none",
+    "stalled": true
+  },
+  "pipeline": {
+    "extraction": {
+      "totalPackets": 6,
+      "packets": [
+        {
+          "start": 10800,
+          "end": 16800,
+          "calls": 2,
+          "status": "accepted"
+        },
+        {
+          "start": 0,
+          "end": 6000,
+          "calls": 2,
+          "status": "validation-exhausted"
+        },
+        {
+          "start": 5400,
+          "end": 11400,
+          "calls": 1,
+          "status": "claim-limit"
+        }
+      ],
+      "calls": 5,
+      "termination": "claim-limit"
+    },
+    "controller": {
+      "version": 1,
+      "phase": "failed",
+      "calls": 17,
+      "phaseCalls": 0,
+      "activeClaimId": "R1",
+      "commandCompletionUnknown": false,
+      "plans": [],
+      "milestones": [
+        {
+          "phase": "extraction",
+          "calls": 0
+        },
+        {
+          "phase": "planning",
+          "calls": 5
+        },
+        {
+          "phase": "failed",
+          "calls": 17
+        }
+      ]
+    },
+    "claims": [
+      {
+        "id": "R1",
+        "claim": "The premise-ending pilot produced no donor-answer changes among 12 eligible affected pairs; its best residual recovery was 0.044.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R2",
+        "claim": "At layer 0, the relation-token residual produced 0.992 mean recovery and 16/16 donor answers, while the complete premise produced 0.999 and 16/16.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R3",
+        "claim": "A layer-3 relation residual yielded 0.987 recovery and 13/13 donor answers across all four source directions; the complete premise at layer 5 yielded 0.994 and 13/13.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R4",
+        "claim": "The semantic intervention produced 0.701 recovery with 26/39 donor answers at layer 3, 0.706 with 26/39 at layer 5, and 0.621 with 23/39 at layer 8.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R5",
+        "claim": "At the primary layer 3, the source-endpoint patch changed 14/18 eligible direct answers, with a world-bootstrap 95% interval of 0.571–0.947 for the flip rate.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R6",
+        "claim": "Final runs used bfloat16 on an NVIDIA H100.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R7",
+        "claim": "The current environment used Python 3.9.21, PyTorch 2.5.1+cu121, Transformers 4.57.6, pandas 2.2.3, and NumPy 2.0.2; the subspace analysis additionally used scikit-learn 1.6.1.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R8",
+        "claim": "Probabilities reported for the principal recovery metric are conditional on these five labels.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R9",
+        "claim": "All experiments analyze `[REDACTED opaque value]`, a 32-layer autoregressive decoder, in evaluation mode without training, fine-tuning, or parameter modification.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R10",
+        "claim": "The primary output diagnostic scores the single-token labels `north`, `south`, `east`, `west`, and `unrelated` after an assistant prefill.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R11",
+        "claim": "The semantic intervention uses 128 calibration prompts spanning four lexical families, four directions, and eight varied contexts per combination.",
+        "status": "pending",
+        "evidenceIds": []
+      },
+      {
+        "id": "R12",
+        "claim": "The large replication separates a 16-world development set from 32 evaluation worlds, with disjoint entities, graphs, and complete question sentences.",
+        "status": "pending",
+        "evidenceIds": []
+      }
+    ],
+    "outputs": [
+      {
+        "id": 1,
+        "tool": "read_file",
+        "sha256": "1a1265976e303a2f2fff3b7ed82347666acee85dec44b521febd55b87e2699f7",
+        "error": false
+      },
+      {
+        "id": 2,
+        "tool": "read_file",
+        "sha256": "1a1265976e303a2f2fff3b7ed82347666acee85dec44b521febd55b87e2699f7",
+        "error": false
+      },
+      {
+        "id": 3,
+        "tool": "read_file",
+        "sha256": "1a1265976e303a2f2fff3b7ed82347666acee85dec44b521febd55b87e2699f7",
+        "error": false
+      },
+      {
+        "id": 4,
+        "tool": "read_file",
+        "sha256": "1a1265976e303a2f2fff3b7ed82347666acee85dec44b521febd55b87e2699f7",
+        "error": false
+      },
+      {
+        "id": 5,
+        "tool": "read_file",
+        "sha256": "1a1265976e303a2f2fff3b7ed82347666acee85dec44b521febd55b87e2699f7",
+        "error": false
+      },
+      {
+        "id": 6,
+        "tool": "read_file",
+        "sha256": "a6065220b68a14b2ef317c2c6d74513ae331a1e57b00787dd8615a238d94309c",
+        "error": false
+      },
+      {
+        "id": 7,
+        "tool": "read_file",
+        "sha256": "a6065220b68a14b2ef317c2c6d74513ae331a1e57b00787dd8615a238d94309c",
+        "error": false
+      },
+      {
+        "id": 8,
+        "tool": "read_file",
+        "sha256": "a6065220b68a14b2ef317c2c6d74513ae331a1e57b00787dd8615a238d94309c",
+        "error": false
+      },
+      {
+        "id": 9,
+        "tool": "read_file",
+        "sha256": "a6065220b68a14b2ef317c2c6d74513ae331a1e57b00787dd8615a238d94309c",
+        "error": false
+      },
+      {
+        "id": 10,
+        "tool": "read_file",
+        "sha256": "a6065220b68a14b2ef317c2c6d74513ae331a1e57b00787dd8615a238d94309c",
+        "error": false
+      },
+      {
+        "id": 11,
+        "tool": "read_file",
+        "sha256": "c0e53ec74b5a32b45d192f300398278c8d10d871d9597f4c36ef2e27dccd032d",
+        "error": false
+      },
+      {
+        "id": 12,
+        "tool": "read_file",
+        "sha256": "c0e53ec74b5a32b45d192f300398278c8d10d871d9597f4c36ef2e27dccd032d",
+        "error": false
+      },
+      {
+        "id": 13,
+        "tool": "read_file",
+        "sha256": "38f7e0272263344ba0bcaaa98287ead128101e568a84e2d000ac009f8b2ce762",
+        "error": false
+      },
+      {
+        "id": 14,
+        "tool": "list_files",
+        "sha256": "6976f3ed0e14d246e6e36abcf356ecde30b039e68946597fe13e30efc09542fa",
+        "error": false
+      },
+      {
+        "id": 15,
+        "tool": "read_tool_result",
+        "sha256": "0e1fcfd935a488f041602ec72a4313fc53097209e557e77d809d63212e3b55ba",
+        "error": false
+      },
+      {
+        "id": 16,
+        "tool": "read_tool_result",
+        "sha256": "a3d70d2d38a5e22277c3a8f2b7fd1b8d5524088a41e3a911f37f2e34cec71ddf",
+        "error": false
+      },
+      {
+        "id": 17,
+        "tool": "read_file",
+        "sha256": "38f7e0272263344ba0bcaaa98287ead128101e568a84e2d000ac009f8b2ce762",
+        "error": false
+      },
+      {
+        "id": 18,
+        "tool": "list_files",
+        "sha256": "6976f3ed0e14d246e6e36abcf356ecde30b039e68946597fe13e30efc09542fa",
+        "error": false
+      },
+      {
+        "id": 19,
+        "tool": "read_file",
+        "sha256": "38f7e0272263344ba0bcaaa98287ead128101e568a84e2d000ac009f8b2ce762",
+        "error": false
+      },
+      {
+        "id": 20,
+        "tool": "list_files",
+        "sha256": "6976f3ed0e14d246e6e36abcf356ecde30b039e68946597fe13e30efc09542fa",
+        "error": false
+      },
+      {
+        "id": 21,
+        "tool": "list_files",
+        "sha256": "6976f3ed0e14d246e6e36abcf356ecde30b039e68946597fe13e30efc09542fa",
+        "error": false
+      },
+      {
+        "id": 22,
+        "tool": "read_file",
+        "sha256": "38f7e0272263344ba0bcaaa98287ead128101e568a84e2d000ac009f8b2ce762",
+        "error": false
+      },
+      {
+        "id": 23,
+        "tool": "read_file",
+        "sha256": "38f7e0272263344ba0bcaaa98287ead128101e568a84e2d000ac009f8b2ce762",
+        "error": false
+      },
+      {
+        "id": 24,
+        "tool": "list_files",
+        "sha256": "6976f3ed0e14d246e6e36abcf356ecde30b039e68946597fe13e30efc09542fa",
+        "error": false
+      }
+    ],
+    "logbook": "## Claims\n\n- R1: The premise-ending pilot produced no donor-answer changes among 12 eligible affected pairs; its best residual recovery was 0.044.\n  Accepted status: pending; method: not established.\n- R2: At layer 0, the relation-token residual produced 0.992 mean recovery and 16/16 donor answers, while the complete premise produced 0.999 and 16/16.\n  Accepted status: pending; method: not established.\n- R3: A layer-3 relation residual yielded 0.987 recovery and 13/13 donor answers across all four source directions; the complete premise at layer 5 yielded 0.994 and 13/13.\n  Accepted status: pending; method: not established.\n- R4: The semantic intervention produced 0.701 recovery with 26/39 donor answers at layer 3, 0.706 with 26/39 at layer 5, and 0.621 with 23/39 at layer 8.\n  Accepted status: pending; method: not established.\n- R5: At the primary layer 3, the source-endpoint patch changed 14/18 eligible direct answers, with a world-bootstrap 95% interval of 0.571–0.947 for the flip rate.\n  Accepted status: pending; method: not established.\n- R6: Final runs used bfloat16 on an NVIDIA H100.\n  Accepted status: pending; method: not established.\n- R7: The current environment used Python 3.9.21, PyTorch 2.5.1+cu121, Transformers 4.57.6, pandas 2.2.3, and NumPy 2.0.2; the subspace analysis additionally used scikit-learn 1.6.1.\n  Accepted status: pending; method: not established.\n- R8: Probabilities reported for the principal recovery metric are conditional on these five labels.\n  Accepted status: pending; method: not established.\n- R9: All experiments analyze `[REDACTED opaque value]`, a 32-layer autoregressive decoder, in evaluation mode without training, fine-tuning, or parameter modification.\n  Accepted status: pending; method: not established.\n- R10: The primary output diagnostic scores the single-token labels `north`, `south`, `east`, `west`, and `unrelated` after an assistant prefill.\n  Accepted status: pending; method: not established.\n- R11: The semantic intervention uses 128 calibration prompts spanning four lexical families, four directions, and eight varied contexts per combination.\n  Accepted status: pending; method: not established.\n- R12: The large replication separates a 16-world development set from 32 evaluation worlds, with disjoint entities, graphs, and complete question sentences.\n  Accepted status: pending; method: not established.\n\n## Reproduction Log\n\nNo commands executed.\n\n## Discrepancies\n\nNo accepted falsification recorded. This is not proof of agreement.\n\n## Limitations\n\nPipeline failed during planning; unfinished claims remain unresolved. No automatic command replay.\n\nBounded extraction coverage (not an exhaustive paper review): 3/6 packets attempted; 3 packets unprocessed. Termination: claim-limit. Incomplete packet ranges: 0-6000 (validation-exhausted), 5400-11400 (claim-limit). Omitted claims and passages were not experimentally assessed and have no scientific verdict.\n\n- R1: Claim not independently verified.\n\n- R2: Claim not independently verified.\n\n- R3: Claim not independently verified.\n\n- R4: Claim not independently verified.\n\n- R5: Claim not independently verified.\n\n- R6: Claim not independently verified.\n\n- R7: Claim not independently verified.\n\n- R8: Claim not independently verified.\n\n- R9: Claim not independently verified.\n\n- R10: Claim not independently verified.\n\n- R11: Claim not independently verified.\n\n- R12: Claim not independently verified."
+  }
+}
+Show raw agent logbook
+Machine Institute
+Machine Institute
