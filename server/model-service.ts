@@ -257,6 +257,8 @@ export interface ToolCallRecord {
 }
 
 export interface ToolLoopOutcome {
+  phase?: string;
+  phaseCallCount?: number;
   kind: "completion" | "arguments" | "tool" | "stop" | "provider-error" | "context";
   round: number;
   callCount: number;

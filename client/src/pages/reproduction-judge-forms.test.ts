@@ -26,7 +26,7 @@ vi.mock("@/components/ui/carousel", () => ({
 }));
 vi.mock("@/components/PaperPicker", () => ({
   PaperPicker: ({ onSelect, papers }: any) => createElement("button", {
-    "data-testid": "pick-paper", onClick: () => onSelect(papers[0]),
+    "data-testid": "pick-paper", disabled: !papers.length, onClick: () => onSelect(papers[0]),
   }, "Pick paper"),
 }));
 
@@ -87,7 +87,7 @@ async function render(retry: boolean) {
     createElement(retry ? ReproductionDetail : GenerationDashboard))));
   if (!retry) {
     click("button-workflow-reproduce");
-    await waitFor(() => expect(container.querySelector('[data-testid="pick-paper"]')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector<HTMLButtonElement>('[data-testid="pick-paper"]')?.disabled).toBe(false));
     click("pick-paper");
   }
   await waitFor(() => expect(container.querySelector('[data-testid="button-link-judge"]')).not.toBeNull());

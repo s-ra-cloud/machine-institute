@@ -96,6 +96,7 @@ export class ReproductionDiagnostics {
     providerRetryAfterMs?: number;
     requestedInputTokens?: number; requestedOutputTokens?: number; requestedTotalTokens?: number;
     packetIndex?: number; packetCallCount?: number; packetRound?: number;
+    phase?: string; phaseCallCount?: number;
   }): void {
     this.data.rounds = Math.max(this.data.rounds, safeNumber(event.round));
     this.data.callCount = Math.max(this.data.callCount, safeNumber(event.callCount));
@@ -108,6 +109,10 @@ export class ReproductionDiagnostics {
       safe.packetIndex = safeNumber(event.packetIndex);
       safe.packetCallCount = safeNumber(event.packetCallCount);
       safe.packetRound = safeNumber(event.packetRound);
+    }
+    if (event.phase !== undefined) {
+      safe.phase = enumValue(event.phase, ["planning", "execution", "assessment"]);
+      safe.phaseCallCount = safeNumber(event.phaseCallCount);
     }
     if (event.finishReason !== undefined) safe.finishReason = enumValue(event.finishReason,
       ["stop", "length", "tool_calls", "function_call", "content_filter", "unknown"]);
@@ -158,7 +163,7 @@ export class ReproductionDiagnostics {
 
   stop(reason: string): void {
     this.data.stopReason = enumValue(reason,
-      ["model", "tool-budget", "deadline", "round-cap", "no-progress", "exception",
+       ["model", "tool-budget", "planning-allowance", "deadline", "round-cap", "no-progress", "exception",
         "context-budget", "provider-payment", "provider-credit", "rate-limit",
         "completion-validation", "cleanup-failed"]);
   }

@@ -4,6 +4,7 @@ import { ReproductionController, renderAcceptedLogbook, type ExperimentPlan } fr
 import type { ReproductionSession } from "./reproduction-session";
 import { ContextBudgetError, estimateRequestTokens } from "./llm-context";
 import { describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
+import { PlanningRecovery } from "./reproduction-planning-recovery";
 
 const controls: ToolSpec[] = [
   { name: "submit_plan", description: "Commit a claim-specific plan using actual shipped paths. Code controls the next stage; qP assessment is additionally required.",
@@ -16,6 +17,8 @@ const controls: ToolSpec[] = [
     parameters: { type: "object", properties: {}, additionalProperties: false } },
 ];
 export interface PipelineCheckpoint {
+  planningRecovery?: Array<{ claimId: string; firstStallCall: number; aggregateCall: number; outcome: string }>;
+  failure?: { phase: string; phaseCalls: number; aggregateCalls: number; reason: string };
   extraction?: ExtractionCoverage;
   controller: ReturnType<ReproductionController["snapshot"]>;
   claims: Array<{ id: string; claim: string; status: string; evidenceIds: number[] }>;
@@ -36,9 +39,12 @@ export async function runControlledReproduction(input: {
   let calls = input.extractionCalls;
   let rounds = 0;
   const started = input.session.toolCalls.length;
+  const planningRecovery: NonNullable<PipelineCheckpoint["planningRecovery"]> = [];
+  let failure: PipelineCheckpoint["failure"];
   const save = async (limitation?: string) => {
     await input.checkpoint?.({
       extraction: input.extraction,
+      planningRecovery, failure,
       controller: controller.snapshot(),
       claims: Array.from(input.session.recorded.values()).map(c => ({ id: c.id, claim: c.claim, status: c.status, evidenceIds: c.evidenceToolCallIds ?? [] })),
       outputs: input.session.toolCalls.map(c => ({ id: c.index, tool: c.name,
@@ -53,6 +59,13 @@ export async function runControlledReproduction(input: {
         if (calls >= input.options.maxToolCalls || Date.now() >= input.options.deadlineMs)
           throw new Error("System-enforced global reproduction budget exhausted.");
         const phase = controller.phase;
+        const recovery = phase === "planning" ? new PlanningRecovery() : undefined;
+        const stageStartCalls = calls;
+        let stageCalls = 0;
+        let recoveryRecord: (typeof planningRecovery)[number] | undefined;
+        const activeInstruction = () => recovery
+          ? recovery.instruction(Math.max(0, 12 - stageCalls), Math.max(0, input.options.maxToolCalls - stageStartCalls - stageCalls), Boolean(input.session.questioning))
+          : `Application stage: ${controller.phase}; claim ${initial.id}. No source re-extraction. Follow the supplied claim/plan packet.`;
         const current = input.session.recorded.get(initial.id)!;
         const packet = JSON.stringify({ stage: phase, claim: current, plan: controller.plans.get(initial.id),
           materials: Array.from(input.shippedPaths),
@@ -115,26 +128,53 @@ export async function runControlledReproduction(input: {
             return result;
           }, {
             ...input.options,
+            getArgumentRepair: () => activeInstruction(),
+            transformToolResult: (name, result, index) => {
+              if (!recovery) return input.options.transformToolResult?.(name, result, index) ?? result;
+              recovery.observe(name, result, index, stageCalls + 1);
+              return result;
+            },
+            onOutcome: event => input.options.onOutcome?.({
+              ...event, round: rounds + event.round, callCount: stageStartCalls + event.callCount,
+              phase, phaseCallCount: event.callCount,
+              stopReason: phase === "planning" && event.stopReason === "tool-budget"
+                && stageStartCalls + event.callCount < input.options.maxToolCalls
+                ? "planning-allowance" : event.stopReason,
+            }),
             onRequestPrepared: request => {
               const messages = request.messages as Array<{ content?: unknown }>;
               if (!messages.some(m => m.content === packet)) throw new ContextBudgetError("The current claim/plan packet did not survive request fitting; refusing a contextless stage request.");
-              void input.options.onOutcome?.({ kind: "context", round: rounds, callCount: calls,
+              void input.options.onOutcome?.({ kind: "context", round: rounds, callCount: stageStartCalls + stageCalls,
+                phase, phaseCallCount: stageCalls,
                 requestedInputTokens: estimateRequestTokens(request) });
             },
             maxToolCalls: Math.min(controller.remainingStageCalls, input.options.maxToolCalls - calls),
             toolCallIndexOffset: input.session.toolCalls.length,
             getStallReason: () => commandInFlight ? "Command completion unknown; automatic re-execution forbidden." : null,
             isStageComplete: () => controller.phase !== phase || input.session.recorded.get(initial.id)?.status !== "pending",
-            onPrematureStop: () => `Stage ${phase} is not complete. Use the stage's declared tools and exact current claim; do not return prose.`,
+            onPrematureStop: () => `${activeInstruction()} Stage is incomplete; use declared tools, not prose.`,
             maxPrematureStopRecoveries: 1,
             getRecoveryProgress: undefined,
             contextProtection: {
-              getState: () => JSON.stringify({ phase: controller.phase, claimId: initial.id, calls }),
-              getActiveInstruction: () => `Application stage: ${controller.phase}; claim ${initial.id}. No source re-extraction. Follow the supplied claim/plan packet.`,
+              getState: (maxBytes = 2500) => {
+                const state = { phase: controller.phase, claimId: initial.id,
+                  calls: stageStartCalls + stageCalls, stageCalls, planning: recovery?.state() };
+                while (Buffer.byteLength(JSON.stringify(JSON.stringify(state))) > maxBytes
+                  && state.planning?.inspected.length) state.planning.inspected.shift();
+                return JSON.stringify(state);
+              },
+              getActiveInstruction: activeInstruction,
               compactUserMessage: packet,
               resizeRetrieval: (name, args, result, bytes) => input.session.resizeRetrieval(name, args, result, bytes),
             },
             onToolCall: async record => {
+              stageCalls++;
+              if (recovery?.firstStallCall !== undefined && !recoveryRecord) {
+                recoveryRecord = { claimId: initial.id, firstStallCall: recovery.firstStallCall,
+                  aggregateCall: stageStartCalls + recovery.firstStallCall, outcome: "repairing" };
+                planningRecovery.push(recoveryRecord);
+              }
+              if (recoveryRecord && controller.phase !== phase) recoveryRecord.outcome = "plan-accepted";
               await input.options.onToolCall?.(record);
               await save();
             },
@@ -149,8 +189,12 @@ export async function runControlledReproduction(input: {
         if ((Date.now() >= input.options.deadlineMs || calls >= input.options.maxToolCalls)
           && Array.from(input.session.recorded.values()).some(c => c.status === "pending"))
           throw new Error("Pipeline stopped at the enforced global resource limit; unfinished claims are not scientific results.");
-        if (controller.phase === phase && input.session.recorded.get(initial.id)?.status === "pending")
-          throw new Error(`Pipeline ${phase} failed for ${initial.id}: ${outcome.stoppedBy}; accepted evidence retained.`);
+        if (controller.phase === phase && input.session.recorded.get(initial.id)?.status === "pending") {
+          if (recoveryRecord) recoveryRecord.outcome = "unresolved";
+          const reason = recovery ? `planning-stall (${outcome.stoppedBy === "tool-budget" ? "local planning allowance exhausted, not global budget" : outcome.stoppedBy})` : outcome.stoppedBy;
+          failure = { phase, phaseCalls: stageCalls, aggregateCalls: calls, reason };
+          throw new Error(`Pipeline ${phase} failed for ${initial.id}: ${reason}; accepted evidence retained.`);
+        }
       }
       if (Array.from(input.session.recorded.values()).every(c => c.status !== "pending")) break;
     }
@@ -161,8 +205,13 @@ export async function runControlledReproduction(input: {
       completeReport: async () => { controller.report(); await save(); controller.complete(); await save(); } };
   } catch (error) {
     const failedPhase = controller.phase;
+    failure ??= { phase: failedPhase, phaseCalls: controller.snapshot().phaseCalls,
+      aggregateCalls: controller.calls,
+      reason: Date.now() >= input.options.deadlineMs ? "global deadline"
+        : controller.calls >= input.options.maxToolCalls ? "global tool budget"
+          : "stage exception; no automatic replay" };
     controller.fail();
-    try { await save(`Pipeline failed during ${failedPhase}; unfinished claims remain unresolved. No automatic command replay.`); }
+    try { await save(`Pipeline failed during ${failedPhase}${failure ? `: ${failure.reason}` : ""}; unfinished claims remain unresolved. No automatic command replay.`); }
     catch { /* Preserve the original failure when checkpoint storage is unavailable. */ }
     throw error;
   }

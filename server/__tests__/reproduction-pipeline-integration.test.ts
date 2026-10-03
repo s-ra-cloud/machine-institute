@@ -123,6 +123,71 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  for (const scenario of ["qp-suitable", "qp-adapt", "qp-blocked"]) it(`${scenario} repairs planning without bypassing suitability`, async () => {
+    const sb = sandbox(); mock.create.mockResolvedValue(sb);
+    const responder = stageResponder(scenario);
+    let reads = 0;
+    mock.complete.mockImplementation((request: any) => {
+      const names = (request.tools ?? []).map((t: any) => t.function.name);
+      if (names.includes("submit_plan") && reads < 3) {
+        reads++;
+        expect(names).not.toContain("run_command");
+        return complete(null, [tool("read_file", { path: "/work/materials/analyze.py" })]);
+      }
+      if (names.includes("submit_plan")) expect(JSON.stringify(request.messages)).toContain("PLANNING REPAIR");
+      return responder(request);
+    });
+    const result = await runReproduction({ ...options(), agentId: "qP",
+      reproducerPrompt: getReproducerPrompt("qP"), judgePrompt: getJudgePrompt("qP") });
+    expect(JSON.parse(result.questioningJson!).assessment.decision).toBe(scenario.slice(3));
+    expect(result.results[0].verdict).toBe(scenario === "qp-suitable" ? "verified" : "inconclusive");
+  });
+  it("repairs README/list/archive loops with twelve claims before executing inspected code", async () => {
+    const claims = Array.from({ length: 12 }, (_, i) => `The measured experimental score for condition ${i} is 0.91.`);
+    const text = [0, 5, 10].map(start => claims.slice(start, start + 5).join("\n").padEnd(5400, " ")).join("");
+    mock.materials.mockResolvedValue({ paperMarkdown: text, files: [
+      { name: "README.md", kind: "text", source: "additional", text: "Use analyze.py for the held-out measurement.\n".repeat(150) },
+      { name: "analyze.py", kind: "text", source: "additional", text: "# held-out measurement\n".repeat(900) + "print('measured_score=0.91')" },
+    ], textFileCount: 2, binaryFileCount: 0 });
+    const sb = sandbox(); mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    let orientation = 0;
+    let repaired = false;
+    let scriptRead = false;
+    let extractionPacket = 0;
+    const saved: PipelineCheckpoint[] = [];
+    mock.complete.mockImplementation(async (request: any) => {
+      const names = (request.tools ?? []).map((t: any) => t.function.name);
+      if (names.includes("submit_claims")) return complete(null, [tool("submit_claims", {
+        claims: claims.slice(extractionPacket * 5, ++extractionPacket * 5).map(claim => ({ claim, source_quote: claim, original_value: "0.91" })),
+      })]);
+      if (names.includes("submit_plan") && !scriptRead) {
+        const context = JSON.stringify(request.messages);
+        if (context.includes("PLANNING REPAIR")) {
+          repaired = true;
+          expect(context).toContain("stage calls");
+          expect(context).toContain("inspected");
+          expect(names).not.toContain("run_command");
+          expect(names).not.toContain("record_result");
+          scriptRead = true;
+          return complete(null, [tool("read_file", { path: "/work/materials/analyze.py", offset: 0 })]);
+        }
+        orientation++;
+        if (orientation === 2) return complete(null, [
+          tool("read_tool_result", { tool_call_id: 13 }), tool("read_tool_result", { tool_call_id: 14 }),
+        ]);
+        return complete(null, [tool("read_file", { path: "/work/materials/README.md" }),
+          tool("list_files", { path: "/work/materials" })]);
+      }
+      return responder(request);
+    });
+    await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
+    expect(repaired).toBe(true);
+    expect(saved.at(-1)?.planningRecovery?.[0]).toMatchObject({ firstStallCall: 6, outcome: "plan-accepted" });
+    expect(saved.at(-1)?.claims).toHaveLength(12);
+    expect(saved.at(-1)?.claims.every(c => c.status === "verified")).toBe(true);
+    expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("analyze.py"))).toHaveLength(12);
+  });
   it("attempted fifteen claims proceed with only twelve registered and no cap overflow checkpoint", async () => {
     const sentences = Array.from({ length: 15 }, (_, i) => `The measured experimental score for condition ${i} is 0.91.`);
     const longPaper = [0, 5, 10].map(start => sentences.slice(start, start + 5).join("\n").padEnd(5400, " ")).join("");
@@ -283,6 +348,12 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(saved.at(-1)?.controller.phase).toBe("failed");
     expect(saved.at(-1)?.claims[0].status).toBe("pending");
     expect(saved.at(-1)?.logbook).toContain("## Limitations");
+    if (scenario === "planning-loop") {
+      expect(saved.at(-1)?.failure).toMatchObject({ phase: "planning", phaseCalls: 12, aggregateCalls: 13 });
+      expect(saved.at(-1)?.logbook).toContain("local planning allowance exhausted, not global budget");
+      expect(saved.at(-1)?.planningRecovery?.[0].outcome).toBe("unresolved");
+      expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("analyze.py"))).toHaveLength(0);
+    }
     expect(sb.terminate).toHaveBeenCalledOnce();
   });
   it("does not dispatch a command when its pre-dispatch checkpoint cannot be saved", async () => {
