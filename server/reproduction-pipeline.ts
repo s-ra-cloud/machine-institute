@@ -63,14 +63,18 @@ export async function runControlledReproduction(input: {
         const stageStartCalls = calls;
         let stageCalls = 0;
         let executionNavigationCalls = 0;
+        const executionOutputs = new Set<string>();
+        let repeatedExecutionOutputs = 0;
         let recoveryRecord: (typeof planningRecovery)[number] | undefined;
         const activeInstruction = () => recovery
           ? recovery.instruction(Math.max(0, 12 - stageCalls), Math.max(0, input.options.maxToolCalls - stageStartCalls - stageCalls), Boolean(input.session.questioning))
           : phase === "execution"
             ? `EXECUTION: claim ${initial.id}. Follow the accepted plan. ${executionNavigationCalls >= 6
-              ? "Navigation allowance reached. Write or run the claim-specific analysis; if you cannot safely proceed, submit_for_assessment so assessment can request a bounded plan revision. Do not invent missing materials or results."
+              ? "Navigation allowance reached. Write or run the claim-specific analysis; if you cannot safely proceed, submit_for_assessment so assessment can request a bounded plan revision. Repeated command output is not progress; after repeated outputs, submit_for_assessment is required. Do not invent missing materials or results."
               : "Inspect only what the accepted experiment needs, then write/run it. Do not repeat directory orientation."} Only captured experimental output can support a result. Result recording and final logbooks belong to later stages.`
-            : `Application stage: ${controller.phase}; claim ${initial.id}. No source re-extraction. Follow the supplied claim/plan packet.`;
+            : `ASSESSMENT: claim ${initial.id}. ${stageCalls >= 4
+              ? "Evidence browsing is closed. Use record_result only with evidence already obtained; otherwise request_plan_revision for missing experiments. Never turn source-code inspection into a measured result."
+              : "Inspect only the evidence needed to assess this claim. If no experiment was performed, request_plan_revision rather than repeatedly reading source code."} No source re-extraction. Follow the supplied claim/plan packet.`;
         const current = input.session.recorded.get(initial.id)!;
         const packet = JSON.stringify({ stage: phase, claim: current, plan: controller.plans.get(initial.id),
           materials: Array.from(input.shippedPaths),
@@ -94,6 +98,11 @@ export async function runControlledReproduction(input: {
           [...input.tools, ...controls].filter(t => controller.allowedTools.includes(t.name)),
           async (name, args) => {
             controller.charge(name);
+            if (phase === "assessment" && stageCalls >= 4
+              && !["record_result", "request_plan_revision"].includes(name))
+              return "Refused: assessment browsing allowance reached. Record only an evidence-backed result, or request_plan_revision. Missing evidence is not a fabricated blocker or a verdict.";
+            if (phase === "execution" && repeatedExecutionOutputs >= 2 && name !== "submit_for_assessment")
+              return "Refused: repeated execution output without progress. Submit_for_assessment; assessment may request a bounded plan revision. No scientific result is inferred.";
             if (phase === "execution" && executionNavigationCalls >= 6
               && ["read_file", "read_tool_result", "list_files"].includes(name))
               return "Refused: execution navigation allowance reached. Write/run the accepted analysis, or submit_for_assessment for a bounded plan revision. No scientific result is inferred.";
@@ -142,9 +151,11 @@ export async function runControlledReproduction(input: {
             getRequiredTool: () => phase === "planning" && stageCalls >= 8
               ? input.session.questioning && !input.session.questioning.assessment
                 ? "assess_suitability" : "submit_plan"
-              : undefined,
+              : phase === "execution" && repeatedExecutionOutputs >= 2 ? "submit_for_assessment" : undefined,
             getAvailableTools: () => phase === "execution" && executionNavigationCalls >= 6
               ? controller.allowedTools.filter(name => ["write_file", "run_command", "setup_environment", "submit_for_assessment"].includes(name))
+              : phase === "assessment" && stageCalls >= 4
+                ? ["record_result", "request_plan_revision"]
               : controller.allowedTools,
             getArgumentRepair: () => activeInstruction(),
             transformToolResult: (name, result, index) => {
@@ -178,9 +189,27 @@ export async function runControlledReproduction(input: {
             contextProtection: {
               getState: (maxBytes = 2500) => {
                 const state = { phase: controller.phase, claimId: initial.id,
-                  calls: stageStartCalls + stageCalls, stageCalls, planning: recovery?.state() };
+                  calls: stageStartCalls + stageCalls, stageCalls, planning: recovery?.state(),
+                  recentExecution: phase === "execution" ? input.session.toolCalls
+                    .filter(call => call.name === "run_command" || call.name === "write_file")
+                    .slice(-2).map(call => ({
+                      id: call.index, tool: call.name, error: call.error,
+                      action: String(call.args.command ?? call.args.path ?? "").slice(0, 120),
+                      excerpt: call.result.slice(0, 400),
+                      retrieve: `read_tool_result tool_call_id=${call.index}`,
+                    })) : [] };
                 while (Buffer.byteLength(JSON.stringify(JSON.stringify(state))) > maxBytes
                   && state.planning?.inspected.length) state.planning.inspected.shift();
+                while (Buffer.byteLength(JSON.stringify(JSON.stringify(state))) > maxBytes
+                  && state.recentExecution.length) {
+                  if (state.recentExecution.length > 1) state.recentExecution.shift();
+                  else {
+                    const latest = state.recentExecution[0];
+                    if (latest.excerpt.length) latest.excerpt = latest.excerpt.slice(0, Math.floor(latest.excerpt.length / 2));
+                    else if (latest.action.length) latest.action = "";
+                    else break; // Keep the authoritative original evidence ID.
+                  }
+                }
                 return JSON.stringify(state);
               },
               getActiveInstruction: activeInstruction,
@@ -191,8 +220,23 @@ export async function runControlledReproduction(input: {
               stageCalls++;
               if (phase === "execution") {
                 if (["read_file", "read_tool_result", "list_files"].includes(record.name)) executionNavigationCalls++;
-                else if (["write_file", "run_command"].includes(record.name) && !record.error
-                  && !record.result.startsWith("Refused:")) executionNavigationCalls = 0;
+                else if (record.name === "write_file" && !record.error && !record.result.startsWith("Refused:")) {
+                  executionNavigationCalls = 0;
+                  executionOutputs.clear();
+                  repeatedExecutionOutputs = 0;
+                } else if (record.name === "run_command" && !record.error && !record.result.startsWith("Refused:")) {
+                  // Execution status/duration is not scientific progress. Compare
+                  // actual output, not shell syntax or the presence of a command.
+                  const normalized = record.result.replace(/^(exit code -?\d+) \([\d.]+s\)/, "$1");
+                  const hash = createHash("sha256").update(normalized).digest("hex");
+                  if (executionOutputs.has(hash)) {
+                    repeatedExecutionOutputs++;
+                    executionNavigationCalls = Math.max(6, executionNavigationCalls);
+                  } else {
+                    executionOutputs.add(hash);
+                    executionNavigationCalls = 0;
+                  }
+                }
               }
               if (recovery?.firstStallCall !== undefined && !recoveryRecord) {
                 recoveryRecord = { claimId: initial.id, firstStallCall: recovery.firstStallCall,

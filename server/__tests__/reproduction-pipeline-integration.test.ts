@@ -123,6 +123,52 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("reserves assessment capacity for an evidence-backed decision or plan revision", async () => {
+    mock.create.mockResolvedValue(sandbox());
+    const responder = stageResponder();
+    let reads = 0;
+    let restricted = false;
+    mock.complete.mockImplementation((request: any) => {
+      const names = request.tools?.map((t: any) => t.function.name) ?? [];
+      if (names.includes("record_result")) {
+        if (reads++ < 4) return complete(null, [tool("read_tool_result", {})]);
+        expect(names.sort()).toEqual(["record_result", "request_plan_revision"]);
+        expect(request.tool_choice).toBe("auto");
+        restricted = true;
+      }
+      return responder(request);
+    });
+    const result = await runReproduction(options());
+    expect(restricted).toBe(true);
+    expect(result.results[0].verdict).toBe("verified");
+  });
+  for (const changed of [false, true]) it(`compares command output before resetting execution progress (changed=${changed})`, async () => {
+    const sb = sandbox();
+    if (changed) {
+      let sequence = 0;
+      sb.exec.mockImplementation(async () => ({
+        stdout: `distinct measurement ${++sequence}`, stderr: "", exitCode: 0, timedOut: false, durationMs: 1,
+      }));
+    }
+    mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    let commands = 0;
+    let checked = false;
+    mock.complete.mockImplementation((request: any) => {
+      const names = request.tools?.map((t: any) => t.function.name) ?? [];
+      if (names.includes("submit_for_assessment")) {
+        if (commands++ < 3) return complete(null, [tool("run_command", { command: "grep score /work/materials/analyze.py" })]);
+        expect(request.tool_choice).toEqual(changed ? "auto" : {
+          type: "function", function: { name: "submit_for_assessment" },
+        });
+        checked = true;
+        throw new Error("Test intentionally stops before scientific assessment.");
+      }
+      return responder(request);
+    });
+    await expect(runReproduction(options())).rejects.toThrow();
+    expect(checked).toBe(true);
+  });
   it("keeps the immutable execution handoff compact and original evidence retrievable", async () => {
     const sb = sandbox(); mock.create.mockResolvedValue(sb);
     const responder = stageResponder();

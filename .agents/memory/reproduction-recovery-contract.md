@@ -37,6 +37,12 @@ Keep immutable stage handoffs limited to required scientific state and compact e
 
 **How to apply:** Preserve the exact claim, plan, qP authorization and original evidence IDs. Retrieve full evidence on demand rather than protecting multiple large copies in every stage's initial packet.
 
+Do not treat any successful shell call as progress or rely on pre-execution evidence references after compaction.
+
+**Why:** A live run moved past directory browsing but repeatedly ran the same grep/sed inspections; resetting navigation after every command let this continue until the execution allowance ended. The immutable stage packet also predated those commands.
+
+**How to apply:** Compare captured outputs without transient duration text, preserve compact current command references in bounded state, and move persistent no-progress execution to assessment/revision. This is loop control, never evidence of scientific reproduction.
+
 **Why:** A real DeepSeek retry returned length-truncated responses repeatedly for Results packets while accepting empty lists elsewhere, ending with no grounded claims. Output ceilings for reasoning models also cover reasoning, not just the visible structured answer.
 
 **How to apply:** Preserve rejection of truncated tool calls, provision bounded structured-output headroom, and inspect packet-level finish reasons before interpreting empty extraction as a property of the paper.
@@ -125,7 +131,7 @@ Separate recovery preparation, bounded analysis, and reserved finalization rathe
 
 Treat historical scripted replay tests as a baseline, not evidence of real-model workflow reliability.
 
-**Why:** Successive instruction and recovery fixes passed prescribed-turn mocks while live runs stalled at different workflow transitions. A successful scripted path only establishes that the application permits that sequence.
+**Why:** Successive instruction and recovery fixes passed prescribed-turn mocks while live runs stalled at different workflow transitions. A successful scripted path only establishes that the application permits that sequence. Even successful assessment-to-plan revision returned to source inspection without an experiment; moving the failure to another stage is not end-to-end progress.
 
 **How to apply:** Keep application-owned phase contracts and bookkeeping separate from scientific model decisions. Require explicitly approved repeated real-model compatibility measurements before describing operational reliability; GPU validation is a further, separate expense. Metadata-only checkpoints cannot justify claims of full evidence restoration or safe automatic command replay after interruption.
 
