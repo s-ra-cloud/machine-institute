@@ -42,6 +42,8 @@ export interface CreateSandboxOptions {
   env?: Record<string, string>;
   /** qP never accepts inherited/custom image credentials or caller secrets. */
   questioning?: boolean;
+  /** Optional host-owned spending bound; never accepted from model tool arguments. */
+  resourceLimits?: { cpu: number; memoryMiB: number };
 }
 
 function truncateCapture(s: string): string {
@@ -81,6 +83,10 @@ export class ReproductionSandbox {
     const sb = await modal.sandboxes.create(app, image, {
       gpu: opts.gpu,
       timeoutMs: opts.timeoutMs,
+      ...(opts.resourceLimits ? {
+        cpu: opts.resourceLimits.cpu, cpuLimit: opts.resourceLimits.cpu,
+        memoryMiB: opts.resourceLimits.memoryMiB, memoryLimitMiB: opts.resourceLimits.memoryMiB,
+      } : {}),
       secrets,
       workdir: "/work",
     });

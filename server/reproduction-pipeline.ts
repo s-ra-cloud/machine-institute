@@ -62,16 +62,24 @@ export async function runControlledReproduction(input: {
         const recovery = phase === "planning" ? new PlanningRecovery() : undefined;
         const stageStartCalls = calls;
         let stageCalls = 0;
+        let executionNavigationCalls = 0;
         let recoveryRecord: (typeof planningRecovery)[number] | undefined;
         const activeInstruction = () => recovery
           ? recovery.instruction(Math.max(0, 12 - stageCalls), Math.max(0, input.options.maxToolCalls - stageStartCalls - stageCalls), Boolean(input.session.questioning))
-          : `Application stage: ${controller.phase}; claim ${initial.id}. No source re-extraction. Follow the supplied claim/plan packet.`;
+          : phase === "execution"
+            ? `EXECUTION: claim ${initial.id}. Follow the accepted plan. ${executionNavigationCalls >= 6
+              ? "Navigation allowance reached. Write or run the claim-specific analysis; if you cannot safely proceed, submit_for_assessment so assessment can request a bounded plan revision. Do not invent missing materials or results."
+              : "Inspect only what the accepted experiment needs, then write/run it. Do not repeat directory orientation."} Only captured experimental output can support a result. Result recording and final logbooks belong to later stages.`
+            : `Application stage: ${controller.phase}; claim ${initial.id}. No source re-extraction. Follow the supplied claim/plan packet.`;
         const current = input.session.recorded.get(initial.id)!;
         const packet = JSON.stringify({ stage: phase, claim: current, plan: controller.plans.get(initial.id),
           materials: Array.from(input.shippedPaths),
           evidence: input.session.toolCalls.filter(c => ["run_command", "read_file", "list_files"].includes(c.name))
-            .slice(-5).map(c => ({ id: c.index, tool: c.name, excerpt: c.result.slice(0, 1600),
-              omitted: c.result.length > 1600, retrieve: `read_tool_result tool_call_id=${c.index}` })),
+            // Navigation references, not duplicate canonical evidence. This packet
+            // survives compaction intact, so large excerpts otherwise consume the
+            // entire input allowance before the next stage can make its first call.
+            .slice(-3).map(c => ({ id: c.index, tool: c.name, excerpt: c.result.slice(0, 400),
+              omitted: c.result.length > 400, retrieve: `read_tool_result tool_call_id=${c.index}` })),
           questioning: input.session.questioning?.judgeContext(),
           // The judge summary deliberately clips/omits adaptation instructions.
           // Execution needs the exact authorized contract, protected with the packet.
@@ -86,6 +94,9 @@ export async function runControlledReproduction(input: {
           [...input.tools, ...controls].filter(t => controller.allowedTools.includes(t.name)),
           async (name, args) => {
             controller.charge(name);
+            if (phase === "execution" && executionNavigationCalls >= 6
+              && ["read_file", "read_tool_result", "list_files"].includes(name))
+              return "Refused: execution navigation allowance reached. Write/run the accepted analysis, or submit_for_assessment for a bounded plan revision. No scientific result is inferred.";
             if (name === "submit_plan") {
               if (input.session.questioning && !input.session.questioning.assessment) return "Refused: qP requires assess_suitability before committing an experiment plan.";
               controller.acceptPlan(args as unknown as ExperimentPlan, input.shippedPaths);
@@ -128,9 +139,18 @@ export async function runControlledReproduction(input: {
             return result;
           }, {
             ...input.options,
+            getRequiredTool: () => phase === "planning" && stageCalls >= 8
+              ? input.session.questioning && !input.session.questioning.assessment
+                ? "assess_suitability" : "submit_plan"
+              : undefined,
+            getAvailableTools: () => phase === "execution" && executionNavigationCalls >= 6
+              ? controller.allowedTools.filter(name => ["write_file", "run_command", "setup_environment", "submit_for_assessment"].includes(name))
+              : controller.allowedTools,
             getArgumentRepair: () => activeInstruction(),
             transformToolResult: (name, result, index) => {
-              if (!recovery) return input.options.transformToolResult?.(name, result, index) ?? result;
+              // Legacy browsing hints request record_result/final logbooks, neither
+              // of which is legal during execution. Stage guidance owns recovery.
+              if (!recovery) return phase === "execution" ? result : input.options.transformToolResult?.(name, result, index) ?? result;
               recovery.observe(name, result, index, stageCalls + 1);
               return result;
             },
@@ -169,6 +189,11 @@ export async function runControlledReproduction(input: {
             },
             onToolCall: async record => {
               stageCalls++;
+              if (phase === "execution") {
+                if (["read_file", "read_tool_result", "list_files"].includes(record.name)) executionNavigationCalls++;
+                else if (["write_file", "run_command"].includes(record.name) && !record.error
+                  && !record.result.startsWith("Refused:")) executionNavigationCalls = 0;
+              }
               if (recovery?.firstStallCall !== undefined && !recoveryRecord) {
                 recoveryRecord = { claimId: initial.id, firstStallCall: recovery.firstStallCall,
                   aggregateCall: stageStartCalls + recovery.firstStallCall, outcome: "repairing" };

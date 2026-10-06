@@ -282,6 +282,10 @@ export interface ToolLoopOutcome {
 }
 
 export interface ToolLoopOptions {
+  /** Host-owned stage transition; does not supply the model's scientific arguments. */
+  getRequiredTool?: () => string | undefined;
+  /** Restrict the next request to host-authorized tools without adding calls. */
+  getAvailableTools?: () => readonly string[];
   /** Stage contract check on the actual fitted request, before dispatch. */
   onRequestPrepared?: (request: Record<string, unknown>) => void;
   /** Application-owned stage completion. No extra model finalization request. */
@@ -627,10 +631,17 @@ export async function runToolLoop(
       }
       return null;
     };
+    const requiredTool = forceFinal ? undefined : options.getRequiredTool?.();
+    const availableNames = options.getAvailableTools?.();
+    const availableToolDefs = availableNames
+      ? toolDefs.filter(tool => availableNames.includes(tool.function.name)) : toolDefs;
+    if (requiredTool && !availableToolDefs.some(tool => tool.function.name === requiredTool))
+      throw new Error("Required stage tool is unavailable.");
     const baseRequest: Record<string, unknown> = {
       model,
       messages: messages as any,
-      ...(forceFinal ? {} : { tools: toolDefs as any, tool_choice: "auto" as const }),
+      ...(forceFinal ? {} : { tools: availableToolDefs as any, tool_choice: requiredTool
+        ? { type: "function", function: { name: requiredTool } } : "auto" }),
       max_tokens: maxTokens,
       temperature,
     };

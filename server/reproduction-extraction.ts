@@ -72,7 +72,10 @@ export async function extractReproductionClaims(input: {
         accepted = !issues.length || claims.length >= 12;
         return accepted ? "Extraction accepted." : `Refused candidates: ${issues.join("; ")}. Valid siblings retained. Correct rejected fields using the SAME supplied packet, or explicitly omit unsupported optional original_value/required_material fields.`;
       }, {
-        maxToolCalls: 3, deadlineMs: input.deadline, maxTokens: 2000,
+        // Reasoning-model output budgets include hidden reasoning as well as the
+        // structured claims. A 2k ceiling repeatedly truncated real Results
+        // packets before any usable tool call; never execute truncated output.
+        maxToolCalls: 3, deadlineMs: input.deadline, maxTokens: 8000,
         maxPrematureStopRecoveries: 1,
         onPrematureStop: () => "Submit claims through the declared tool using this same packet; prose is not an extraction.",
         isStageComplete: () => accepted,

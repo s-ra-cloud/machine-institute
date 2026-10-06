@@ -29,7 +29,7 @@ export class PlanningRecovery {
   }
 
   instruction(remaining: number, globalRemaining: number, qp: boolean): string {
-    return `${this.firstStallCall === undefined ? "PLANNING" : "PLANNING REPAIR"}: ${remaining} stage calls, ${globalRemaining} global calls remain. Do not repeat README/list orientation. Read a relevant shipped script/data page (use its continuation offset), then submit_plan with this packet's exact claimId, inspected paths, measurement and rationale. ${qp ? "qP: assess_suitability is required before submit_plan; no execution or edits here. " : ""}Retrieve original evidence only for omitted text; never invent values or blockers.`;
+    return `${this.firstStallCall === undefined ? "PLANNING" : "PLANNING REPAIR"}: ${remaining} stage calls, ${globalRemaining} global calls remain. ${remaining <= 4 ? "Navigation is closed: commit a grounded provisional plan now; execution can inspect further and revise it. A plan is NOT a scientific verdict. " : "Inspect only enough relevant shipped script/data to design the experiment; do not exhaustively read source or prepare execution here. "}Do not repeat README/list orientation. Submit_plan with this packet's exact claimId, inspected paths, measurement and rationale. ${qp ? "qP: assess_suitability is required before submit_plan; no execution or edits here. " : ""}Never invent values or blockers; an unsupported plan must fail honestly.`;
   }
 
   state() {

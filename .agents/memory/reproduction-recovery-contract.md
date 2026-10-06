@@ -17,6 +17,30 @@ Stage-controlled planning needs its own recovery instructions, not the legacy fi
 
 **How to apply:** Keep repair within the current stage allowance, preserve inspected references and exact claim identity through compaction, and test a successful planning-to-execution replay as well as bounded failure. Never treat more browsing as scientific progress.
 
+Verbal planning-repair hints alone are not evidence of live recovery.
+
+**Why:** A paid DeepSeek run on the real Modal workflow used every planning call on reads/retrievals despite receiving the repair instruction, never committing a plan. Reserve transition capacity structurally rather than merely repeating stronger wording.
+
+**How to apply:** Preserve qP suitability before plan submission and model ownership of scientific arguments. A required transition tool is not permission to fabricate a plan or a scientific result. Verify improvements with the same real workflow, not only cooperative mocked turns.
+
+Treat extraction output-token exhaustion separately from absent scientific claims.
+
+Execution needs stage-specific recovery too; successful planning is not evidence that experiments run.
+
+**Why:** A subsequent real run accepted a grounded plan but spent its whole execution allowance browsing, while legacy hints requested result recording that the execution stage does not expose.
+
+**How to apply:** Do not inject legacy final-logbook/result-recording instructions into execution. Bound browsing while retaining a choice between performing analysis and requesting assessment/revision; never force an invented command or verdict.
+
+Keep immutable stage handoffs limited to required scientific state and compact evidence references.
+
+**Why:** A live run reached a valid plan but failed before execution because duplicate read excerpts in the protected stage packet could not be compacted below the local input allowance.
+
+**How to apply:** Preserve the exact claim, plan, qP authorization and original evidence IDs. Retrieve full evidence on demand rather than protecting multiple large copies in every stage's initial packet.
+
+**Why:** A real DeepSeek retry returned length-truncated responses repeatedly for Results packets while accepting empty lists elsewhere, ending with no grounded claims. Output ceilings for reasoning models also cover reasoning, not just the visible structured answer.
+
+**How to apply:** Preserve rejection of truncated tool calls, provision bounded structured-output headroom, and inspect packet-level finish reasons before interpreting empty extraction as a property of the paper.
+
 **Why:** A previous change passed validator tests and review but a subsequent real run still failed with pending claims and malformed evidence. The tests demonstrated rejection rather than successful orchestration recovery.
 
 **How to apply:** Test the actual model/tool orchestration using recorded or simulated premature-stop sequences, including completion beyond two productive recovery cycles, no-progress termination, and recovery of old evidence without rerunning expensive experiments. Distinguish simulated validation from live GPU/model verification when reporting results.

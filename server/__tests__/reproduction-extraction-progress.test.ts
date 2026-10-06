@@ -67,3 +67,10 @@ it("does not convert provider or deadline failures to partial success", async ()
   mock.loop.mockRejectedValue(new Error("Provider authentication failed"));
   await expect(extractReproductionClaims(input())).rejects.toThrow("Provider authentication");
 });
+it("reserves structured-output headroom without increasing extraction tool calls", async () => {
+  respond(() => [candidate(sentence(0))]);
+  await extractReproductionClaims(input());
+  for (const call of mock.loop.mock.calls) {
+    expect(call[5]).toMatchObject({ maxTokens: 8000, maxToolCalls: 3, maxPrematureStopRecoveries: 1 });
+  }
+});

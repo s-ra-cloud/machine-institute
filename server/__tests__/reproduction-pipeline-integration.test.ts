@@ -123,18 +123,91 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("keeps the immutable execution handoff compact and original evidence retrievable", async () => {
+    const sb = sandbox(); mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    let reads = 0;
+    let checked = false;
+    mock.complete.mockImplementation((request: any) => {
+      const names = request.tools?.map((t: any) => t.function.name) ?? [];
+      if (names.includes("submit_plan") && reads++ < 5)
+        return complete(null, [tool("read_file", { path: "/work/materials/analyze.py" })]);
+      if (names.includes("submit_for_assessment")) {
+        const packet = request.messages.map((m: any) => {
+          try { return JSON.parse(m.content); } catch { return null; }
+        }).find((m: any) => m?.stage === "execution");
+        expect(packet.claim.claim).toBe(paper);
+        expect(packet.plan.claimId).toBe("R1");
+        expect(packet.evidence.length).toBeLessThanOrEqual(3);
+        for (const item of packet.evidence) {
+          expect(item.excerpt.length).toBeLessThanOrEqual(400);
+          expect(item.retrieve).toBe(`read_tool_result tool_call_id=${item.id}`);
+        }
+        checked = true;
+      }
+      return responder(request);
+    });
+    await runReproduction(options());
+    expect(checked).toBe(true);
+  });
+  it("closes repeated execution browsing without forcing commands or a verdict", async () => {
+    mock.create.mockResolvedValue(sandbox());
+    const responder = stageResponder();
+    let reads = 0;
+    let restricted = false;
+    mock.complete.mockImplementation((request: any) => {
+      const names = request.tools?.map((t: any) => t.function.name) ?? [];
+      if (names.includes("submit_for_assessment")) {
+        if (reads++ < 6) return complete(null, [tool("list_files", { path: "/work/materials" })]);
+        restricted = true;
+        expect(names).not.toContain("list_files");
+        expect(names).not.toContain("read_tool_result");
+        expect(names).toContain("write_file");
+        expect(names).toContain("run_command");
+        expect(request.tool_choice).toBe("auto");
+        expect(JSON.stringify(request.messages)).not.toContain("Repeated inspection");
+      }
+      return responder(request);
+    });
+    const result = await runReproduction(options());
+    expect(restricted).toBe(true);
+    expect(result.results[0].verdict).toBe("verified");
+  });
+  it("reserves the last planning calls for a model-authored plan after eight reads", async () => {
+    mock.create.mockResolvedValue(sandbox());
+    const responder = stageResponder();
+    let reads = 0;
+    let forced = false;
+    mock.complete.mockImplementation((request: any) => {
+      if (request.tools?.some((t: any) => t.function.name === "submit_plan")) {
+        if (reads++ < 8) {
+          expect(request.tool_choice).toBe("auto");
+          return complete(null, [tool("read_file", { path: "/work/materials/analyze.py" })]);
+        }
+        expect(request.tool_choice).toEqual({ type: "function", function: { name: "submit_plan" } });
+        forced = true;
+      }
+      return responder(request);
+    });
+    const result = await runReproduction(options());
+    expect(forced).toBe(true);
+    expect(result.results[0].verdict).toBe("verified");
+  });
   for (const scenario of ["qp-suitable", "qp-adapt", "qp-blocked"]) it(`${scenario} repairs planning without bypassing suitability`, async () => {
     const sb = sandbox(); mock.create.mockResolvedValue(sb);
     const responder = stageResponder(scenario);
     let reads = 0;
     mock.complete.mockImplementation((request: any) => {
       const names = (request.tools ?? []).map((t: any) => t.function.name);
-      if (names.includes("submit_plan") && reads < 3) {
+      if (names.includes("submit_plan") && reads < 8) {
         reads++;
         expect(names).not.toContain("run_command");
         return complete(null, [tool("read_file", { path: "/work/materials/analyze.py" })]);
       }
-      if (names.includes("submit_plan")) expect(JSON.stringify(request.messages)).toContain("PLANNING REPAIR");
+      if (names.includes("submit_plan")) {
+        expect(JSON.stringify(request.messages)).toContain("PLANNING REPAIR");
+        expect(["assess_suitability", "submit_plan"]).toContain(request.tool_choice.function.name);
+      }
       return responder(request);
     });
     const result = await runReproduction({ ...options(), agentId: "qP",
