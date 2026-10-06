@@ -392,39 +392,34 @@ function removeOldestCompleteGroup(messages: Message[], protectedIds: Set<string
   return false;
 }
 
-function resizeLatestRetrieval(
+function resizeProtectedRetrievals(
   messages: Message[],
   resize: NonNullable<ToolContextProtection["resizeRetrieval"]>,
   originals: Map<string, string>,
   originalCalls: Map<string, { name: string; args: Record<string, unknown> }>,
   fits: () => boolean,
+  recentIds: Set<string>,
 ): boolean {
-  const protectedIds = latestRetrievalIds(messages);
-  const id = protectedIds.values().next().value as string | undefined;
-  if (!id) return false;
-  const resultIndex = messages.findIndex(message => toolId(message) === id);
-  if (resultIndex < 0) return false;
-  const originalCall = originalCalls.get(id);
-  if (!originalCall) return false;
-  const { name, args } = originalCall;
-  if (!name) return false;
-
-  const original = originals.get(id) ?? String(messages[resultIndex].content ?? "");
-  const prefix = original.match(/^\[Tool call #\d+\]\n/)?.[0] ?? "";
-  const originalBody = prefix ? original.slice(prefix.length) : original;
-  let previousBytes = serializedBytes(messages[resultIndex].content);
+  const ids = Array.from(new Set(Array.from(latestRetrievalIds(messages)).concat(Array.from(recentIds))));
   let changed = false;
   for (const maxBytes of [4_000, 2_500, 1_500, 800, 400]) {
-    const resized = resize(name, clone(args), originalBody, maxBytes);
-    if (typeof resized !== "string") continue;
-    const returnedBody = resized.replace(/^\[Tool call #\d+\]\n/, "");
-    const candidate = `${prefix}${returnedBody}`;
-    const candidateBytes = serializedBytes(candidate);
-    if (candidateBytes >= previousBytes) continue;
-    messages[resultIndex].content = candidate;
-    previousBytes = candidateBytes;
-    changed = true;
-    if (fits()) return true;
+    // Batch protection must have matching batch resizing. Otherwise an older
+    // sibling stays full-size forever while only the final page gets smaller.
+    for (const id of ids) {
+      const resultIndex = messages.findIndex(message => toolId(message) === id);
+      const originalCall = originalCalls.get(id);
+      const original = originals.get(id);
+      if (resultIndex < 0 || !originalCall || original === undefined) continue;
+      const prefix = original.match(/^\[Tool call #\d+\]\n/)?.[0] ?? "";
+      const originalBody = prefix ? original.slice(prefix.length) : original;
+      const resized = resize(originalCall.name, clone(originalCall.args), originalBody, maxBytes);
+      if (typeof resized !== "string") continue;
+      const candidate = `${prefix}${resized.replace(/^\[Tool call #\d+\]\n/, "")}`;
+      if (serializedBytes(candidate) >= serializedBytes(messages[resultIndex].content)) continue;
+      messages[resultIndex].content = candidate;
+      changed = true;
+      if (fits()) return true;
+    }
   }
   return changed;
 }
@@ -600,12 +595,13 @@ export function fitToolContext<T extends Record<string, any>>(
   if (
     options.protection.archiveContext
     && options.protection.resizeRetrieval
-    && resizeLatestRetrieval(
+    && resizeProtectedRetrievals(
       messages,
       options.protection.resizeRetrieval,
       retrievalOriginals,
       retrievalCalls,
       fits,
+      recentIds,
     )
     && fits()
   ) {

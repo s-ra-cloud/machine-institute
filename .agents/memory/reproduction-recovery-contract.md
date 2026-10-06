@@ -141,6 +141,18 @@ Stage-specific context protection must extend the session's protection contract,
 
 **How to apply:** Preserve the newest batch and its paired declarations; regenerate oversized outputs as genuine numbered evidence pages. Keep the hard context bound and fail explicitly if evidence cannot safely fit. Preserve session archive callbacks when overriding stage state/instructions, and test request fitting rather than only scripted stage transitions.
 
+Protecting a batch requires resizing every protected retrieval sibling, not just the most recent one.
+
+**Why:** The next live run requested two evidence pages together. Both were correctly protected, but only the last was resized, creating a false irreducible-context failure.
+
+**How to apply:** Apply bounded page regeneration across the complete protected batch using each page's canonical arguments and source offsets. Include multi-page, nonzero-offset and multibyte text cases in context-fitting tests.
+
+Persist local spending-stop reasons before passing through provider SDK error handling.
+
+**Why:** A live run ended before its next request was recorded, but the surfaced error told the user to check their provider key. Generic provider-error sanitization can hide locally thrown budget errors, so that wording alone cannot establish a credential problem or prove which guard fired.
+
+**How to apply:** Record the local cap decision independently before dispatch, keep ordinary provider failures distinct, and never retroactively assert a precise stop cause from a generic historical error.
+
 Validate execution provenance and numerical evidence against the same successful execution, and carry exact authorization contracts across fresh stage transcripts.
 
 **Why:** Independent checks can accidentally join a failed planned script with successful CSV-display evidence. Likewise, a summary suitable for judging can omit the exact adaptation paths and instructions needed for execution.

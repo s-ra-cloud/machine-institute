@@ -15,6 +15,51 @@ function budget(inputLimit: number): RequestContextBudget {
 }
 
 describe("fitToolContext", () => {
+  it("resizes every protected retrieval in a batch with genuine source offsets", () => {
+    const pages = [500, 900].map(offset => JSON.stringify({
+      offset, end: offset + 18000, total: offset + 20000, text: "λ".repeat(18000),
+    }));
+    const request = {
+      messages: [
+        { role: "system", content: "Scientific evidence must retain its original identity." },
+        { role: "user", content: "Inspect both stored outputs." },
+        { role: "assistant", content: "", tool_calls: pages.map((_, i) => ({
+          id: `page-${i}`, type: "function", function: {
+            name: "read_tool_result", arguments: JSON.stringify({ tool_call_id: i + 1, offset: [500, 900][i] }),
+          },
+        })) },
+        ...pages.map((page, i) => ({ role: "tool", tool_call_id: `page-${i}`, content: `[Tool call #${i + 3}]\n${page}` })),
+      ],
+    };
+    const canonical = JSON.stringify(request);
+    const resizedIds = new Set<number>();
+    const limit = budget(2000);
+    const fitted = fitToolContext(request, {
+      budget: limit,
+      protection: {
+        getState: () => "state", preserveLatestToolBatch: true,
+        archiveContext: key => `[Archived ${key}]`,
+        resizeRetrieval: (_name, args, original, maxBytes) => {
+          resizedIds.add(Number(args.tool_call_id));
+          const page = JSON.parse(original);
+          expect(page.offset).toBe(args.offset);
+          const text = page.text.slice(0, Math.max(1, Math.floor((maxBytes - 200) / 4)));
+          return JSON.stringify({ ...page, text, end: page.offset + text.length });
+        },
+      },
+    });
+    expect(resizedIds.size).toBe(2);
+    expect(limit.fits(fitted)).toBe(true);
+    for (let i = 0; i < 2; i++) {
+      const result = fitted.messages.find((m: any) => m.tool_call_id === `page-${i}`)!;
+      const page = JSON.parse(result.content.replace(/^\[Tool call #\d+\]\n/, ""));
+      expect(page.offset).toBe([500, 900][i]);
+      expect(page.end).toBe(page.offset + page.text.length);
+      expect(page.text.length).toBeGreaterThan(0);
+      expect(page.total).toBe([20500, 20900][i]);
+    }
+    expect(JSON.stringify(request)).toBe(canonical);
+  });
   const freshOutputRequest = (output = "NEW_MEASUREMENT score=0.91") => ({
     messages: [
       { role: "system", content: "Preserve scientific evidence." },

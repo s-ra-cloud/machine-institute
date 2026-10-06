@@ -9,6 +9,7 @@ import { getReproducerPrompt, getJudgePrompt } from "../server/prompts/reproduce
 import { INITIATIVE_DOC_IDS, INITIATIVE_SLUGS, getJournalDisplayName } from "../server/journals";
 import { ReproductionSandbox } from "../server/modal-sandbox";
 import { getReproductionFailureDiagnostics } from "../server/reproduction-diagnostics";
+import { createSpendingGuard } from "./live-reproduction-budget";
 
 const modelName = "deepseek/deepseek-v4-pro-0813";
 const root = ".local/state/live-reproduction";
@@ -26,6 +27,10 @@ const saveLedger = () => {
 const attempt = `${root}/website-${Date.now()}`;
 mkdirSync(attempt);
 const save = (name: string, value: unknown) => writeFileSync(`${attempt}/${name}.json`, JSON.stringify(value, null, 2));
+const spendingGuard = createSpendingGuard(stop => {
+  save("budget-stop", stop);
+  console.error(JSON.stringify({ event: "budget-stop", ...stop }));
+});
 const originalFetch = globalThis.fetch;
 // The largest published pricing override, validated anew before every request.
 globalThis.fetch = async (input, init) => {
@@ -47,8 +52,7 @@ globalThis.fetch = async (input, init) => {
   // unlike reserving the entire million-token context it scales with requests.
   const inputBound = Math.min(Number(model.context_length), Buffer.byteLength(init.body, "utf8") * 4 + 65536);
   const reservation = (inputBound * prompt + maxTokens * completion) * 1.1;
-  if (!Number.isFinite(reservation) || reservation <= 0 || ledger.reservedOrSpent + reservation > 5)
-    throw new Error("DeepSeek $5 spending guard stopped this run.");
+  spendingGuard.check("DeepSeek", ledger.reservedOrSpent, reservation, 5);
   ledger.reservedOrSpent += reservation; ledger.requests++; saveLedger();
   const response = await originalFetch(input, init);
   const result = await response.clone().json().catch(() => null) as any;
@@ -73,7 +77,7 @@ ReproductionSandbox.create = async opts => {
   // at the published per-second rates for the full 2h20m lifetime is < $3.
   // Remaining reserve covers image build/overhead. Completed allocations may
   // only be reconciled using verified termination and conservative cost bounds.
-  if ((ledger.modalReserved ?? 0) + 5 > 10) throw new Error("Modal $10 spending guard stopped this run.");
+  spendingGuard.check("Modal", ledger.modalReserved ?? 0, 5, 10);
   ledger.modalReserved = (ledger.modalReserved ?? 0) + 5; saveLedger();
   return create({ ...opts, resourceLimits: { cpu: 2, memoryMiB: 8192 } });
 };
@@ -94,8 +98,8 @@ try {
   console.log(JSON.stringify({ event: "complete", overall: result.overall, attempt }));
 } catch (error) {
   save("diagnostics", getReproductionFailureDiagnostics(error) ?? null);
-  const message = error instanceof Error ? error.message : "Unknown failure";
-  save("failure", { message });
+  const message = spendingGuard.failure?.message ?? (error instanceof Error ? error.message : "Unknown failure");
+  save("failure", { message, ...(spendingGuard.failure ? { budgetStop: spendingGuard.failure } : {}) });
   console.error(message);
   process.exitCode = 1;
 } finally {
