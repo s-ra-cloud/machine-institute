@@ -5,6 +5,12 @@ description: Why evidence enforcement must include live repair and runtime instr
 
 Evidence validation must provide a practical repair path while the sandbox remains alive; rejecting incomplete final reports alone is not a reliability fix.
 
+Live reproduction-and-repair work must use exactly the website's normal workflow, including Modal GPU execution and judging, not a separate extraction-only or compatibility procedure.
+
+**Why:** The user explicitly rejected an alternative runner because the goal is to fix the usual process. “Not reproduced” is a valid scientific outcome; software fixes must not force a passing result.
+
+**How to apply:** Exercise the existing website orchestration and distinguish infrastructure/software failures from scientific non-reproduction. Obtain separate approval for model and Modal spending limits; do not substitute CPU-only or simulated execution.
+
 Stage-controlled planning needs its own recovery instructions, not the legacy finalization handoff.
 
 **Why:** A live run retained twelve claims but exhausted planning on README/list repeats. The legacy handoff requests result recording, which is not permitted during planning; restoring that callback alone would just stop earlier.
