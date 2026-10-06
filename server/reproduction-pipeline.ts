@@ -187,6 +187,15 @@ export async function runControlledReproduction(input: {
             maxPrematureStopRecoveries: 1,
             getRecoveryProgress: undefined,
             contextProtection: {
+              ...input.options.contextProtection,
+              preserveLatestToolBatch: true,
+              resizeRecentToolOutput: (result, bytes) => {
+                const index = result.match(/^\[Tool call #(\d+)\]\n/)?.[1];
+                if (!index) return undefined;
+                const args = { tool_call_id: Number(index), offset: 0, max_chars: 6000 };
+                const page = input.session.readToolResult(args);
+                return input.session.resizeRetrieval("read_tool_result", args, page, bytes);
+              },
               getState: (maxBytes = 2500) => {
                 const state = { phase: controller.phase, claimId: initial.id,
                   calls: stageStartCalls + stageCalls, stageCalls, planning: recovery?.state(),

@@ -4,6 +4,9 @@ import { describeToolContext } from "./context-diagnostics";
 export { describeToolContext } from "./context-diagnostics";
 
 export interface ToolContextProtection {
+  /** Keep the newest completed tool batch observable, not just older retrievals. */
+  preserveLatestToolBatch?: boolean;
+  resizeRecentToolOutput?: (originalResult: string, maxBytes: number) => string | undefined;
   getState: (maxBytes?: number) => string;
   /**
    * Return the bounded, self-contained action the model must take next.
@@ -111,6 +114,7 @@ function compactToolOutputs(
   fits: () => boolean,
   keepRecent = 8,
   includeRetrieval = true,
+  protectedIds: Set<string> = new Set(),
 ): boolean {
   const toolIndexes = messages
     .map((message, index) => message.role === "tool" ? index : -1)
@@ -130,6 +134,7 @@ function compactToolOutputs(
   let changed = false;
   for (const index of ordered) {
     const message = messages[index];
+    if (protectedIds.has(toolId(message) ?? "")) continue;
     const original = typeof message.content === "string" ? message.content : "";
     const replacement = oldOutput(message, note);
     if (includeRetrieval && isRetrievalResult(messages, index) && original.length > replacement.length) {
@@ -494,6 +499,16 @@ export function fitToolContext<T extends Record<string, any>>(
 ): T {
   const fitted = clone(request);
   const messages = Array.isArray(fitted.messages) ? fitted.messages as Message[] : [];
+  const recentIds = new Set<string>();
+  if (options.protection.preserveLatestToolBatch) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant" && hasCompletedCall(messages, i)) {
+        callIds(messages[i]).forEach(id => recentIds.add(id));
+        break;
+      }
+    }
+  }
+  const protectedIds = () => new Set(Array.from(latestRetrievalIds(messages)).concat(Array.from(recentIds)));
   let state = boundedState(options.protection, DEFAULT_STATE_BYTES);
   // A forced-final turn is already the active instruction. Do not even
   // snapshot a session repair projection that cannot be used by this request.
@@ -560,12 +575,12 @@ export function fitToolContext<T extends Record<string, any>>(
     // Remove old repair scaffolding before sacrificing current evidence.
   }
   if (fits()) return fitted;
-  compactToolOutputs(messages, note, fits, 8, false);
+  compactToolOutputs(messages, note, fits, 8, false, recentIds);
   if (fits()) return fitted;
 
   while (!fits()) {
     if (removeObsoleteProse(messages, state, active)) continue;
-    if (!removeOldestCompleteGroup(messages, latestRetrievalIds(messages))) break;
+    if (!removeOldestCompleteGroup(messages, protectedIds())) break;
   }
   if (fits()) return fitted;
 
@@ -601,10 +616,29 @@ export function fitToolContext<T extends Record<string, any>>(
   // metadata and may start at a non-zero source offset. Never manufacture a
   // page by slicing their serialized wrapper. Legacy generic callers retain
   // the historical bounded evidence fallback with an honest omission note.
-  compactToolOutputs(messages, note, fits, 8, !options.protection.archiveContext);
+  // Regenerate genuine pages from stored evidence; never slice a source
+  // envelope and leave its old offsets, or erase fresh results to a pointer.
+  if (options.protection.resizeRecentToolOutput) {
+    const originals = new Map(messages
+      .filter(message => recentIds.has(toolId(message) ?? ""))
+      .map(message => [toolId(message)!, String(message.content ?? "")]));
+    for (const bytes of [4000, 2000, 1000, 600]) {
+      for (let index = 0; index < messages.length; index++) {
+        const message = messages[index];
+        const original = originals.get(toolId(message) ?? "");
+        if (original === undefined || isRetrievalResult(messages, index)) continue;
+        const page = options.protection.resizeRecentToolOutput(original, bytes);
+        if (page !== undefined && serializedBytes(page) < serializedBytes(message.content)) {
+          message.content = page;
+          if (fits()) return fitted;
+        }
+      }
+    }
+  }
+  compactToolOutputs(messages, note, fits, 8, !options.protection.archiveContext, recentIds);
   if (fits()) return fitted;
   while (!fits()) {
-    if (removeOldestCompleteGroup(messages, latestRetrievalIds(messages))) continue;
+    if (removeOldestCompleteGroup(messages, protectedIds())) continue;
     break;
   }
   if (!options.protection.archiveContext) {

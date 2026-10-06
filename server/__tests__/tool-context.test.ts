@@ -15,6 +15,68 @@ function budget(inputLimit: number): RequestContextBudget {
 }
 
 describe("fitToolContext", () => {
+  const freshOutputRequest = (output = "NEW_MEASUREMENT score=0.91") => ({
+    messages: [
+      { role: "system", content: "Preserve scientific evidence." },
+      { role: "user", content: "Execute the accepted experiment." },
+      { role: "assistant", content: "", tool_calls: [
+        { id: "old", type: "function", function: { name: "read_tool_result", arguments: "{}" } },
+      ] },
+      { role: "tool", tool_call_id: "old", content: "old source ".repeat(4000) },
+      { role: "assistant", content: "", tool_calls: [
+        { id: "fresh", type: "function", function: { name: "run_command", arguments: "{}" } },
+        { id: "sibling", type: "function", function: { name: "read_file", arguments: "{}" } },
+      ] },
+      { role: "tool", tool_call_id: "fresh", content: `[Tool call #2]\n${output}` },
+      { role: "tool", tool_call_id: "sibling", content: "[Tool call #3]\nCURRENT_CONFIGURATION" },
+    ],
+  });
+
+  it("retains every fresh result in the newest batch instead of favoring stale retrievals", () => {
+    const request = freshOutputRequest();
+    const canonical = JSON.stringify(request);
+    const limit = budget(2000);
+    const fitted = fitToolContext(request, {
+      budget: limit, protection: { getState: () => "state", preserveLatestToolBatch: true },
+    });
+    expect(limit.fits(fitted)).toBe(true);
+    expect(JSON.stringify(fitted)).toContain("NEW_MEASUREMENT");
+    expect(JSON.stringify(fitted)).toContain("CURRENT_CONFIGURATION");
+    expect(JSON.stringify(request)).toBe(canonical);
+    const declared = fitted.messages.flatMap((message: any) => message.tool_calls ?? []).map((call: any) => call.id);
+    for (const message of fitted.messages.filter((message: any) => message.role === "tool"))
+      expect(declared).toContain(message.tool_call_id);
+  });
+
+  it("fails closed rather than erasing an oversized fresh result without a safe pager", () => {
+    expect(() => fitToolContext(freshOutputRequest("x".repeat(40000)), {
+      budget: budget(2000), protection: { getState: () => "state", preserveLatestToolBatch: true },
+    })).toThrow(ContextBudgetError);
+  });
+
+  it("uses the supplied evidence pager for fresh results and preserves canonical output", () => {
+    const request = freshOutputRequest("x".repeat(40000));
+    const canonical = JSON.stringify(request);
+    const limit = budget(2000);
+    let paged = false;
+    const fitted = fitToolContext(request, {
+      budget: limit,
+      protection: {
+        getState: () => "state", preserveLatestToolBatch: true,
+        resizeRecentToolOutput: original => {
+          if (!original.startsWith("[Tool call #2]")) return undefined;
+          expect(original).toBe(request.messages[5].content);
+          paged = true;
+          return "Original evidence #2; page 0-10 of 40000: xxxxxxxxxx; retrieve offset=10";
+        },
+      },
+    });
+    expect(paged).toBe(true);
+    expect(limit.fits(fitted)).toBe(true);
+    expect(JSON.stringify(fitted)).toContain("retrieve offset=10");
+    expect(JSON.stringify(fitted)).toContain("CURRENT_CONFIGURATION");
+    expect(JSON.stringify(request)).toBe(canonical);
+  });
   it("fits a clone while preserving system, exact state, paired calls, and canonical args", () => {
     const args = JSON.stringify({ command: "python reproduce.py", source: "x".repeat(3_000) });
     const request = {

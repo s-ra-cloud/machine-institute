@@ -135,6 +135,12 @@ Treat historical scripted replay tests as a baseline, not evidence of real-model
 
 **How to apply:** Keep application-owned phase contracts and bookkeeping separate from scientific model decisions. Require explicitly approved repeated real-model compatibility measurements before describing operational reliability; GPU validation is a further, separate expense. Metadata-only checkpoints cannot justify claims of full evidence restoration or safe automatic command replay after interruption.
 
+Stage-specific context protection must extend the session's protection contract, and recent completed tool batches need protection independently of older retrievals.
+
+**Why:** Offline diagnosis reproduced a fresh command measurement disappearing entirely from the fitted request while older retrieval evidence survived. Replacing nested protection settings also dropped archiving and silently selected legacy retrieval compaction. The saved live trace omitted full outgoing requests, so this establishes a concrete defect, not a proven sole cause of the live stall.
+
+**How to apply:** Preserve the newest batch and its paired declarations; regenerate oversized outputs as genuine numbered evidence pages. Keep the hard context bound and fail explicitly if evidence cannot safely fit. Preserve session archive callbacks when overriding stage state/instructions, and test request fitting rather than only scripted stage transitions.
+
 Validate execution provenance and numerical evidence against the same successful execution, and carry exact authorization contracts across fresh stage transcripts.
 
 **Why:** Independent checks can accidentally join a failed planned script with successful CSV-display evidence. Likewise, a summary suitable for judging can omit the exact adaptation paths and instructions needed for execution.

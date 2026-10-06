@@ -15,6 +15,7 @@ vi.mock("../fs-materials", () => ({
 vi.mock("../modal-sandbox", () => ({ isModalConfigured: () => true, ReproductionSandbox: { create: mock.create } }));
 vi.mock("../provider-credit-preflight", () => ({ assertReproductionRuntimeProviderCredits: vi.fn(async () => {}) }));
 import { runReproduction } from "../reproduce";
+import { ReproductionSession } from "../reproduction-session";
 import { getReproducerPrompt, getJudgePrompt } from "../prompts/reproduce";
 import { getReproductionFailureDiagnostics } from "../reproduction-diagnostics";
 import type { PipelineCheckpoint } from "../reproduction-pipeline";
@@ -123,6 +124,27 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("retains the session archive callback across stage-specific context overrides", async () => {
+    mock.create.mockResolvedValue(sandbox());
+    const archive = vi.spyOn(ReproductionSession.prototype, "archiveContext");
+    const responder = stageResponder();
+    let injected = false;
+    mock.complete.mockImplementation((request: any) => {
+      if (!injected && request.tools?.some((t: any) => t.function.name === "submit_plan")) {
+        injected = true;
+        return complete("ARCHIVE_THIS_GENERATED_HISTORY ".repeat(25000), [
+          tool("read_file", { path: "/work/materials/analyze.py" }),
+        ]);
+      }
+      return responder(request);
+    });
+    try {
+      await runReproduction(options());
+      expect(archive.mock.calls.some(([, text]) => text.startsWith("ARCHIVE_THIS_GENERATED_HISTORY"))).toBe(true);
+    } finally {
+      archive.mockRestore();
+    }
+  });
   it("reserves assessment capacity for an evidence-backed decision or plan revision", async () => {
     mock.create.mockResolvedValue(sandbox());
     const responder = stageResponder();
