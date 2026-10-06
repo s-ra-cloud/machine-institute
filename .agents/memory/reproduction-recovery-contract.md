@@ -147,6 +147,18 @@ Protecting a batch requires resizing every protected retrieval sibling, not just
 
 **How to apply:** Apply bounded page regeneration across the complete protected batch using each page's canonical arguments and source offsets. Include multi-page, nonzero-offset and multibyte text cases in context-fitting tests.
 
+Distinguish unknown routed-model limits from verified exact-model catalogue metadata.
+
+**Why:** The selected OpenRouter model advertised a million-token window, but every reproduction stage still began at the unknown-route 32K limit. Compaction repeatedly removed inspected code before execution. This was a concrete context mismatch, not proof of the sole cause of stalled scientific execution.
+
+**How to apply:** Resolve exact-model metadata on the normal server reproduction path, preserve conservative fallback with a visible notice when unavailable, and let provider-reported smaller limits tighten each request budget. Metadata must not come from untrusted config fields; paid-run spending caps remain independent of available context.
+
+Reject incompatible planned-script launch formats before paying to execute them, rather than discovering the mismatch only when recording evidence.
+
+**Why:** A live baseline was launched through `cd ... && python ... | tee ...`; the pipeline exit status could belong to tee, so the strict standalone-source evidence check correctly refused it. Repeated attempts to record that output cannot repair its provenance.
+
+**How to apply:** Keep the standalone evidence check strict. Align the execution instructions and pre-dispatch guard with it, offer an explicit working directory for P instead of shell chaining, and preserve qP's sealed-snapshot working directory. A terminated wrapper reporting zero is not a certified successful experiment.
+
 Persist local spending-stop reasons before passing through provider SDK error handling.
 
 **Why:** A live run ended before its next request was recorded, but the surfaced error told the user to check their provider key. Generic provider-error sanitization can hide locally thrown budget errors, so that wording alone cannot establish a credential problem or prove which guard fired.

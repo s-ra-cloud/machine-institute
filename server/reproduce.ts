@@ -1,4 +1,5 @@
 import { getContextWindow, runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolCallRecord } from "./model-service";
+import { prepareProviderContext } from "./provider-context";
 import { loadPaperContext } from "./ethics-review";
 import { ReproductionRecovery } from "./reproduction-recovery";
 import { extractReproductionClaims, describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
@@ -385,11 +386,12 @@ const TOOLS: ToolSpec[] = [
   },
   {
     name: "run_command",
-    description: "Run a bash command in the sandbox (working directory /work) and return its exit code, stdout and stderr. The GPU is available; HF_TOKEN is set. Commands are killed at timeout_seconds (max 900).",
+    description: "Run a bash command in the sandbox and return its exit code, stdout and stderr (automatically retained). For scientific reruns, use a standalone planned source entrypoint, not cd/chaining/pipes/tee/redirection. Use working_directory for relative input files. The GPU is available; HF_TOKEN is set. Commands are killed at timeout_seconds (max 900).",
     parameters: {
       type: "object",
       properties: {
         command: { type: "string" },
+        working_directory: { type: "string", enum: ["/work", "/work/materials"], description: "P only: working directory, default /work. qP always uses its sealed snapshot; omit this field for qP." },
         timeout_seconds: { type: "integer", description: "Kill the command after this many seconds (default 600, max 900)." },
       },
       required: ["command"],
@@ -457,6 +459,8 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
 async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diagnostics: ReproductionDiagnostics): Promise<ReproductionOutput> {
   const startTime = Date.now();
   const { projectId, journalId, initiativeDocId, initiativeSlug, journalDisplayName, documentId, paperTitle, modelConfig, judgeModelConfig, gpu, emitEvent } = opts;
+  await Promise.all(Array.from(new Set([modelConfig, judgeModelConfig])).map(config =>
+    prepareProviderContext(config, message => emitEvent("reproduction-context", message))));
   const questioning = opts.agentId === "qP" ? new QuestioningState() : undefined;
   const tools = questioning ? [...TOOLS, QUESTIONING_TOOL, QUESTIONING_SETUP_TOOL].map(t => {
     if (t.name === "write_file") return { ...t, parameters: { ...t.parameters, properties: { ...(t.parameters as any).properties, reason: { type: "string", description: "Scientific justification linked to assessed claims" } } } };
@@ -707,6 +711,9 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         case "run_command": {
           const command = String(args.command || "");
           if (!command.trim()) return "Refused: empty command.";
+          const workingDirectory = args.working_directory;
+          if (workingDirectory !== undefined && (questioning || !["/work", "/work/materials"].includes(String(workingDirectory))))
+            return "Refused: working_directory must be /work or /work/materials for P. qP must omit it and execute in its sealed snapshot.";
           const refusal = session.validateCommand(command);
           if (refusal) return refusal;
           const requested = (Number(args.timeout_seconds) || 600) * 1000;
@@ -762,7 +769,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           }
           const result = await sandbox.exec(version
             ? isolatedQuestioningCommand({ snapshot: version.snapshot, output: `/work/qp-results/run-${questioning!.executions.length}`, argv: argv! })
-            : ["bash", "-lc", command], { timeoutMs: scientificTimeout, ...(version ? { workdir: version.snapshot } : {}) });
+            : ["bash", "-lc", command], { timeoutMs: scientificTimeout, ...(version ? { workdir: version.snapshot } : workingDirectory ? { workdir: String(workingDirectory) } : {}) });
           const formatted = fmtExec(result);
           if (version) { version.status = "executed"; questioning!.recordExecutionOutput(version, formatted); }
           return formatted;

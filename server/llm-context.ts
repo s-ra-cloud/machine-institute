@@ -1,5 +1,6 @@
 import type { ModelProviderConfig } from "./model-service";
 import { MANAGED_MODELS } from "../shared/model-catalog";
+import { verifiedProviderContext } from "./provider-context";
 
 // Routed endpoints may expose a smaller serving window than the advertised
 // model. Keep this separate from literature-review/model capability metadata.
@@ -297,7 +298,7 @@ export class RequestContextBudget {
     readonly config: ModelProviderConfig,
     readonly maxOutputTokens: number,
     readonly stage: string,
-    advertisedWindow = CONSERVATIVE_CONTEXT_LIMIT,
+    advertisedWindow = verifiedProviderContext(config) ?? CONSERVATIVE_CONTEXT_LIMIT,
     protectedInputFloor = 0,
   ) {
     const knownManaged = config.providerMode === "platform" && MANAGED_MODELS.some(m => m.provider === config.provider && m.model === config.modelName);
@@ -305,7 +306,8 @@ export class RequestContextBudget {
       (config.provider === "openai" && /^(?:openai\/)?gpt-(?:4o|5)(?:-|$)/.test(config.modelName))
       || (config.provider === "anthropic" && /^claude-(?:sonnet|opus|haiku)-/.test(config.modelName))
     );
-    this.limit = Math.min(advertisedWindow, knownDirect ? advertisedWindow : CONSERVATIVE_CONTEXT_LIMIT);
+    this.limit = Math.min(advertisedWindow, knownDirect ? advertisedWindow
+      : verifiedProviderContext(config) ?? CONSERVATIVE_CONTEXT_LIMIT);
     this.inputLimit = this.limit - maxOutputTokens - CONTEXT_SAFETY_TOKENS;
     this.protectedInputFloor = Math.max(0, Math.floor(protectedInputFloor));
   }

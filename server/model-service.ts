@@ -18,6 +18,7 @@ import {
   reportedContextLimit,
 } from "./llm-context";
 import { describeToolContext, fitToolContext, type ToolContextProtection } from "./tool-context";
+import { verifiedProviderContext } from "./provider-context";
 
 export interface ModelProviderConfig {
   providerMode: "platform" | "byoc";
@@ -55,6 +56,8 @@ export const READING_BUDGET = {
 
 // Resolve the total context window for a given model config.
 export function getContextWindow(config: ModelProviderConfig): number {
+  const verifiedWindow = verifiedProviderContext(config);
+  if (verifiedWindow !== undefined) return verifiedWindow;
   const modelName = resolveModelName(config);
   const platformMatch = PLATFORM_MODELS.find(m => m.model === modelName);
   if (platformMatch?.contextWindow) return platformMatch.contextWindow;

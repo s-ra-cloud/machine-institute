@@ -91,7 +91,8 @@ function stageResponder(scenario = "success") {
         ? packet.adaptationContract.planned_changes.map((change: any) => tool("write_file", {
           path: change.path, content: `# ${packet.adaptationContract.intended_changes}\nprint('measured_score=0.91')`, reason: change.reason,
         })) : []),
-      tool("run_command", { command: scenario === "display-only" ? "cat /work/materials/results.csv" : scenario.startsWith("qp-") ? "python materials/analyze.py" : "python /work/materials/analyze.py" }),
+      tool("run_command", { command: scenario === "display-only" ? "cat /work/materials/results.csv" : scenario.startsWith("qp-") ? "python materials/analyze.py" : "python /work/materials/analyze.py",
+        ...(scenario === "working-directory" ? { working_directory: "/work/materials" } : {}) }),
       ...(scenario === "mixed-evidence" ? [tool("run_command", { command: "cat /work/materials/results.csv" })] : []),
       ...(scenario === "analysis-chain" ? [
         tool("read_tool_result", {}),
@@ -124,6 +125,38 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("runs a standalone script with an explicit material working directory", async () => {
+    const sb = sandbox();
+    mock.create.mockResolvedValue(sb);
+    mock.complete.mockImplementation(stageResponder("working-directory"));
+    await runReproduction(options());
+    expect(sb.exec).toHaveBeenCalledWith(
+      ["bash", "-lc", "python /work/materials/analyze.py"],
+      expect.objectContaining({ workdir: "/work/materials" }),
+    );
+  });
+  it("rejects a piped planned experiment before dispatch and allows a corrected direct rerun", async () => {
+    const sb = sandbox();
+    mock.create.mockResolvedValue(sb);
+    const responder = stageResponder("working-directory");
+    let attempted = false;
+    mock.complete.mockImplementation((request: any) => {
+      if (!attempted && request.tools?.some((t: any) => t.function.name === "submit_for_assessment")) {
+        attempted = true;
+        return complete(null, [tool("run_command", {
+          command: "cd /work/materials && python analyze.py 2>&1 | tee /work/results/run.log",
+        })]);
+      }
+      return responder(request);
+    });
+    await runReproduction(options());
+    expect(attempted).toBe(true);
+    expect(sb.exec.mock.calls.some(call => JSON.stringify(call).includes("tee "))).toBe(false);
+    expect(sb.exec).toHaveBeenCalledWith(
+      ["bash", "-lc", "python /work/materials/analyze.py"],
+      expect.objectContaining({ workdir: "/work/materials" }),
+    );
+  });
   it("retains the session archive callback across stage-specific context overrides", async () => {
     mock.create.mockResolvedValue(sandbox());
     const archive = vi.spyOn(ReproductionSession.prototype, "archiveContext");

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isPlannedEntrypoint, rerunLaunchRefusal } from "./reproduction-entrypoint";
 import { runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolLoopOptions, type ToolLoopResult } from "./model-service";
 import { ReproductionController, renderAcceptedLogbook, type ExperimentPlan } from "./reproduction-controller";
 import type { ReproductionSession } from "./reproduction-session";
@@ -89,7 +90,7 @@ export async function runControlledReproduction(input: {
           // Execution needs the exact authorized contract, protected with the packet.
           adaptationContract: input.session.questioning?.assessment ?? null,
           instruction: phase === "planning" ? "Inspect relevant shipped materials, assess suitability for qP, then submit_plan."
-            : phase === "execution" ? "Perform the planned experiment. Retrieve old outputs rather than repeat commands. Then submit_for_assessment."
+            : phase === "execution" ? `Perform the planned experiment. For rerun evidence, launch a standalone planned script. ${input.session.questioning ? "For qP use python materials/analysis.py with the real planned filename; omit working_directory because the sealed snapshot determines it." : "For P use python /work/materials/analysis.py with the real planned filename, and working_directory=/work/materials if required."} Never wrap the script in cd, chaining, pipes, tee or redirection: stdout/stderr are retained automatically and its own exit status is required. Retrieve old outputs rather than repeat commands. Then submit_for_assessment.`
               : "Inspect existing outputs and record_result for this claim only with exact numbered evidence; request_plan_revision only if more experiments are needed.",
         });
         await save();
@@ -128,16 +129,16 @@ export async function runControlledReproduction(input: {
                 if (call.name !== "run_command" || !ids.includes(call.index) || call.error
                   || !/^exit code 0\b/.test(call.result) || excerpt.length < 4 || !value
                   || !excerpt.includes(value) || !call.result.includes(excerpt)) return false;
-                const match = /^(?:python3?|bash|sh|node|Rscript|julia)\s+((?:\/work\/)?materials\/[^\s"';&|<>`$]+)(?:\s|$)/.exec(String(call.args.command ?? ""));
-                const path = match?.[1].startsWith("/work/") ? match[1] : match ? `/work/${match[1]}` : "";
-                // Shell chaining is not a single source-entrypoint execution:
-                // its final exit code/output could belong to a CSV display.
-                const standalone = !/[;&|<>`$\r\n]/.test(String(call.args.command ?? ""));
-                return standalone && /\.(?:py|sh|js|mjs|r|jl)$/i.test(path) && plan.materialPaths.includes(path);
+                return isPlannedEntrypoint(String(call.args.command ?? ""), plan.materialPaths);
               });
               if (!entrypointEvidence) return "Refused: the exact measurement excerpt and reproduced value must come from the SAME cited successful standalone planned source-entrypoint execution. Failed scripts, unrelated successful commands and supplied CSV displays cannot be combined into rerun evidence. Use an inspected source file, or revise the method.";
             }
             if (name === "run_command") {
+              const plan = controller.plans.get(initial.id);
+              if (plan?.method === "rerun") {
+                const refusal = rerunLaunchRefusal(String(args.command ?? ""), plan.materialPaths, Boolean(input.session.questioning));
+                if (refusal) return refusal;
+              }
               controller.commandDispatched();
               commandInFlight = true;
               // Persist BEFORE dispatch. A crash here is deliberately ambiguous.
