@@ -25,15 +25,21 @@ Share scientifically compatible experiment planning and execution across claims,
 
 Shared execution must explicitly account for every grouped measurement before handing off to assessment, using captured command evidence or an honest missing-measurement limitation.
 
-**Why:** A live grouped run executed only part of its promised measurements, so siblings individually returned to planning and exhausted the global allowance despite sharing a plan.
+**Why:** A live grouped run executed only part of its promised measurements, so siblings individually returned to planning and exhausted the global allowance despite sharing a plan. Requiring another manual transcription at the shared handoff then caused refusal loops even after successful execution.
 
-**How to apply:** Put all measurements in execution context and preserve each claim's handoff separately. Coverage is not a scientific verdict; assessment and independent judging must still reject unsupported measurements and copied precomputed summaries.
+**How to apply:** Put all measurements in execution context and preserve each claim's handoff separately, using original successful execution IDs or explicit limitations, not duplicate quotes. Rerun references must identify a planned source execution, not a command reprinting supplied values. Exact quotes belong to assessment. Coverage is not a scientific verdict; assessment and independent judging must still reject unsupported measurements and copied precomputed summaries.
 
 Validate raw-input eligibility and inspection when accepting a raw-data re-derivation plan, rather than first discovering missing provenance at result recording.
 
 **Why:** A live plan named only a Python source file and guessed at raw artifacts; execution became a model rerun, triggering method changes and repeated assessment repairs until the global allowance ran out.
 
 **How to apply:** Use the same supported-input format rule in planning and final evidence validation. Preserve original file-read IDs and paths through grouped plans and assessment. File eligibility and inspection do not establish that supplied values are raw observations; independent scientific judgment remains required.
+
+Provide an explicit verbatim-copy operation for compound measurement text rather than relying only on repeated instructions about literal substring matching.
+
+**Why:** A live experiment completed, but assessment repeatedly failed literal-value validation for a multi-metric claim until its allowance expired. Stronger wording alone did not recover.
+
+**How to apply:** Copy only on an explicit request, reject conflicting supplied values, and keep exact-output provenance, method validation and independent judging unchanged. Copying an excerpt is formatting, not scientific verification.
 
 Stage-controlled planning needs its own recovery instructions, not the legacy finalization handoff.
 

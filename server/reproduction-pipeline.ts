@@ -21,12 +21,11 @@ const controls: ToolSpec[] = [
           required: ["claimId", "measurement"], properties: { claimId: { type: "string" },
             measurement: { type: "string", minLength: 1, maxLength: 2000 } } } },
       } } },
-  { name: "submit_for_assessment", description: "Finish execution. For a shared experiment, measurements must account for EVERY grouped claim with an exact command-output excerpt or an explicit missing-measurement limitation. No verdict is granted.",
+  { name: "submit_for_assessment", description: "Finish execution. For a shared experiment, measurements must account for EVERY grouped claim with its ORIGINAL successful run_command evidence_tool_call_id or an explicit missing-measurement limitation. Do NOT transcribe output, reconstruct tables or run print commands to satisfy this handoff. For rerun, cite the planned source execution. Exact excerpts are checked during assessment; no verdict is granted here.",
     parameters: { type: "object", properties: {
       measurements: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false,
         required: ["claimId"], properties: {
           claimId: { type: "string" }, evidence_tool_call_id: { type: "integer" },
-          evidence_excerpt: { type: "string", minLength: 8, maxLength: 2000 },
           limitation: { type: "string", minLength: 1, maxLength: 2000 },
         } } },
     }, additionalProperties: false } },
@@ -153,6 +152,8 @@ export async function runControlledReproduction(input: {
             properties.status = { type: "string", enum: ["verified", "falsified", "toy", "inconclusive"] };
             properties.reproduced_value = { type: "string",
               description: "Copy a literal contiguous measurement substring from evidence_excerpt. Do not round, relabel, or join separated values. Put comparisons and interpretation in notes." };
+            properties.copy_excerpt_to_reproduced_value = { type: "boolean", enum: [true],
+              description: "For a compound measurement or table, set true and OMIT reproduced_value. The application copies evidence_excerpt verbatim as the measurement text. This never infers values, changes the verdict, or bypasses evidence/provenance checks." };
             properties.evidence_excerpt = { type: "string",
               description: "Exact captured output containing reproduced_value literally; not reconstructed prose. Scientific validation remains mandatory." };
             if (method === "raw-data-rederived") {
@@ -199,7 +200,9 @@ export async function runControlledReproduction(input: {
             }
             if (name === "submit_for_assessment") {
               const ids = [initial.id, ...(controller.plans.get(initial.id)?.relatedClaims ?? []).map(c => c.claimId)];
-              const issue = sharedMeasurementIssue(ids, args.measurements, input.session.toolCalls);
+              const plan = controller.plans.get(initial.id);
+              const issue = sharedMeasurementIssue(ids, args.measurements, input.session.toolCalls,
+                plan?.method === "rerun" ? plan.materialPaths : undefined);
               if (issue) return `Refused: ${issue} This handoff never accepts a scientific verdict.`;
               if (Array.isArray(args.measurements))
                 for (const item of args.measurements) if (ids.includes(item.claimId)) measurementHandoffs.set(item.claimId, structuredClone(item));
@@ -216,6 +219,13 @@ export async function runControlledReproduction(input: {
             }
             if (name === "record_result" && (args.id !== initial.id || args.status === "pending"))
               return "Refused: finalize only the application's current claim; extraction is closed.";
+            if (name === "record_result" && args.copy_excerpt_to_reproduced_value === true) {
+              if (args.reproduced_value !== undefined)
+                return "Refused: omit reproduced_value when requesting an exact excerpt copy. Conflicting measurement text will not be overwritten.";
+              if (typeof args.evidence_excerpt !== "string" || !args.evidence_excerpt.trim() || args.evidence_excerpt.length > 6000)
+                return "Refused: provide a nonempty exact evidence_excerpt of at most 6000 characters to copy. No measurement is inferred.";
+              args = { ...args, reproduced_value: args.evidence_excerpt };
+            }
             if (name === "record_result" && args.method !== "blocked"
               && args.method !== controller.plans.get(initial.id)?.method) {
               const expected = controller.plans.get(initial.id)?.method;
@@ -227,7 +237,7 @@ export async function runControlledReproduction(input: {
             if (name === "record_result" && args.method === "rerun") {
               const plan = controller.plans.get(initial.id)!;
               const issue = rerunEvidenceIssue(input.session.toolCalls, plan.materialPaths, args);
-              if (issue) return `Refused: the exact measurement excerpt and reproduced value must come from the SAME cited successful standalone planned source-entrypoint execution. ${issue}`;
+              if (issue) return `Refused: the exact measurement excerpt and reproduced value must come from the SAME cited successful standalone planned source-entrypoint execution. ${issue} For a compound measurement/table, set copy_excerpt_to_reproduced_value=true and OMIT reproduced_value to use the exact excerpt verbatim. This cannot repair invented evidence or an invalid execution; all evidence checks still apply.`;
             }
             if (name === "run_command") {
               const plan = controller.plans.get(initial.id);

@@ -15,13 +15,23 @@ describe("shared measurement handoffs", () => {
     expect(sharedMeasurementIssue(["R1", "R2"], [entries[0], { claimId: "R2", limitation: "Raw observations unavailable." }], calls)).toBeUndefined();
   });
   it("rejects nonexistent, failed, read-only or invented measurement evidence", () => {
-    for (const altered of [
-      [{ ...calls[0], index: 8 }],
-      [{ ...calls[0], name: "read_file" }],
-      [{ ...calls[0], result: "exit code 137\ncondition_1=0.91" }],
-      [{ ...calls[0], error: true }],
-      [{ ...calls[0], result: "exit code 0\nunrelated output" }],
-    ]) expect(sharedMeasurementIssue(["R1", "R2"], entries, altered)).toContain("exact excerpt");
+    for (const [call, reason] of [
+      [{ ...calls[0], index: 8 }, "unknown original tool ID"],
+      [{ ...calls[0], name: "read_file" }, "not an execution"],
+      [{ ...calls[0], result: "exit code 137\ncondition_1=0.91" }, "did not succeed"],
+      [{ ...calls[0], error: true }, "did not succeed"],
+      [{ ...calls[0], result: "exit code 0\nunrelated output" }, "quote differs"],
+    ] as const) expect(sharedMeasurementIssue(["R1", "R2"], entries, [call])).toContain(reason);
+  });
+  it("hands off original references without copying tables, but rejects fabricated rerun evidence", () => {
+    const refs = entries.map(({ claimId, evidence_tool_call_id }) => ({ claimId, evidence_tool_call_id }));
+    const original = { ...calls[0], args: { command: "python /work/materials/analyze.py" } };
+    expect(sharedMeasurementIssue(["R1", "R2"], refs, [original], paths)).toBeUndefined();
+    expect(sharedMeasurementIssue(["R1", "R2"], refs,
+      [{ ...original, args: { command: "python -c \"print('condition_1=0.91')\"" } }], paths))
+      .toContain("not a standalone planned source execution");
+    expect(sharedMeasurementIssue(["R1", "R2"], refs, [{ ...original, name: "read_tool_result" }], paths))
+      .toContain("not an execution");
   });
 });
 const run = (index: number, result: string, command = "python /work/materials/analyze.py") => ({

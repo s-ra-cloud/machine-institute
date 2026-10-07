@@ -9,21 +9,33 @@ export function isSupportedRawInputPath(path: string): boolean {
 }
 
 /** Completeness of a shared handoff, not validation of a scientific verdict. */
-export function sharedMeasurementIssue(ids: string[], value: unknown, calls: readonly EvidenceCall[]): string | undefined {
+export function sharedMeasurementIssue(ids: string[], value: unknown, calls: readonly EvidenceCall[], rerunPaths?: string[]): string | undefined {
   if (ids.length < 2) return;
   if (!Array.isArray(value) || value.length !== ids.length)
-    return "Account for every grouped claim in measurements: cite a command's exact evidence_excerpt and evidence_tool_call_id, or state a limitation for its missing measurement.";
+    return "Account for every grouped claim in measurements: cite its original successful evidence_tool_call_id, or state a limitation for its missing measurement. Do not transcribe output in this handoff.";
+  const eligible = calls.filter(c => c.name === "run_command" && !c.error && /^exit code 0\b/.test(c.result)
+    && (!rerunPaths || isPlannedEntrypoint(String(c.args.command ?? ""), rerunPaths)));
+  const references = eligible.slice(-12).map(c => c.index).join(", ") || "none";
   const seen = new Set<string>();
   for (const item of value) {
     if (!item || !ids.includes(item.claimId) || seen.has(item.claimId))
       return "Measurement entries must name each grouped claim exactly once.";
     seen.add(item.claimId);
     if (typeof item.limitation === "string" && item.limitation.trim() && item.limitation.length <= 2000) continue;
-    const call = calls.find(c => c.index === item.evidence_tool_call_id && c.name === "run_command"
-      && !c.error && /^exit code 0\b/.test(c.result));
-    if (!call || typeof item.evidence_excerpt !== "string" || item.evidence_excerpt.trim().length < 8
+    const call = eligible.find(c => c.index === item.evidence_tool_call_id);
+    if (!call) {
+      const cited = calls.find(c => c.index === item.evidence_tool_call_id);
+      const reason = !cited ? "unknown original tool ID" : cited.name !== "run_command"
+        ? `${cited.name} is not an execution` : cited.error || !/^exit code 0\b/.test(cited.result)
+          ? "execution did not succeed" : "not a standalone planned source execution";
+      const supplied = Number.isSafeInteger(item.evidence_tool_call_id) ? item.evidence_tool_call_id : "missing or invalid";
+      return `Claim ${item.claimId}: ${reason} (supplied ID: ${supplied}). Eligible original execution IDs: ${references}. Cite one only if it covers this measurement, otherwise state a limitation. Reading or manually reprinting an output is not a new source experiment.`;
+    }
+    // Legacy callers can still supply a quote, but normal stage handoffs use
+    // original execution references only. Exact quotes belong to assessment.
+    if (item.evidence_excerpt !== undefined && (typeof item.evidence_excerpt !== "string" || item.evidence_excerpt.trim().length < 8
       || item.evidence_excerpt.length > 2000 || !call.result.includes(item.evidence_excerpt))
-      return `Claim ${item.claimId} needs an exact excerpt from a captured successful command, or an explicit missing-measurement limitation. File reads alone are not an experiment.`;
+    ) return `Claim ${item.claimId}: the supplied quote differs from original execution #${call.index}. Omit evidence_excerpt and hand off the original execution ID instead. Exact quotation and scientific validation remain required during assessment.`;
   }
 }
 

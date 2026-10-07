@@ -127,6 +127,63 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("repairs a compound measurement formatting rejection with an explicit, validated exact copy", async () => {
+    const excerpt = "measured_score=0.91\ncontrol_score=0.80";
+    const sb = sandbox();
+    sb.exec.mockResolvedValue({ exitCode: 0, stdout: excerpt, stderr: "", timedOut: false, durationMs: 1 });
+    mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    const record = vi.spyOn(ReproductionSession.prototype, "recordResult");
+    let attempts = 0, sawRepair = false;
+    mock.complete.mockImplementation(async (request: any) => {
+      const reply = await responder(request);
+      if (request.tools?.some((t: any) => t.function.name === "record_result")) {
+        sawRepair ||= request.messages.some((m: any) => String(m.content).includes("set copy_excerpt_to_reproduced_value=true"));
+        const call = reply.choices[0].message.tool_calls![0] as any;
+        const args = JSON.parse(call.function.arguments);
+        args.evidence_excerpt = excerpt;
+        if (attempts++ === 0) args.reproduced_value = "score: 0.910 (rounded)";
+        else {
+          delete args.reproduced_value;
+          args.copy_excerpt_to_reproduced_value = true;
+        }
+        call.function.arguments = JSON.stringify(args);
+      }
+      return reply;
+    });
+    const result = await runReproduction(options());
+    expect(sawRepair).toBe(true);
+    expect(attempts).toBe(2);
+    expect(record.mock.calls.some(([args]) => args.reproduced_value === excerpt)).toBe(true);
+    expect(result.results[0].verdict).toBe("verified");
+    record.mockRestore();
+  });
+  it.each(["invented", "conflicting"])("exact-copy requests cannot bypass evidence checks: %s", async failure => {
+    mock.create.mockResolvedValue(sandbox());
+    const responder = stageResponder();
+    let attempted = false, sawRefusal = false;
+    const record = vi.spyOn(ReproductionSession.prototype, "recordResult");
+    mock.complete.mockImplementation(async (request: any) => {
+      const reply = await responder(request);
+      if (request.tools?.some((t: any) => t.function.name === "record_result")) {
+        sawRefusal ||= request.messages.some((m: any) => String(m.content).includes(
+          failure === "invented" ? "evidence_excerpt must be copied exactly" : "Conflicting measurement text"));
+        if (!attempted) {
+          attempted = true;
+          const call = reply.choices[0].message.tool_calls![0] as any;
+          const args = JSON.parse(call.function.arguments);
+          args.copy_excerpt_to_reproduced_value = true;
+          if (failure === "invented") { delete args.reproduced_value; args.evidence_excerpt = "invented_score=0.999"; }
+          call.function.arguments = JSON.stringify(args);
+        }
+      }
+      return reply;
+    });
+    await runReproduction(options());
+    expect(sawRefusal).toBe(true);
+    expect(record.mock.calls.some(([args]) => args.copy_excerpt_to_reproduced_value === true)).toBe(false);
+    record.mockRestore();
+  });
   it("repairs an ungrounded raw-data plan before execution and preserves input provenance through reporting", async () => {
     const path = "/work/materials/rows.csv", csv = "value\n0.90\n0.92\n";
     mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [
@@ -309,8 +366,10 @@ describe("default reproduction stage-controller integration (offline only)", () 
           expect(request.messages.some((m: any) => String(m.content).includes("Account for every grouped claim"))).toBe(true);
           const output = request.messages.find((m: any) => m.role === "tool" && String(m.content).includes("exit code 0") && String(m.content).includes("condition_1=0.91"));
           const id = Number(String(output.content).match(/Tool call #(\d+)/)?.[1]);
-          return complete(null, [tool("submit_for_assessment", { measurements: packet.experimentMeasurements.map((c: any, i: number) => ({
-            claimId: c.claimId, evidence_tool_call_id: id, evidence_excerpt: `condition_${i + 1}=${observed(i)}`,
+          const handoff = request.tools.find((t: any) => t.function.name === "submit_for_assessment").function;
+          expect(handoff.parameters.properties.measurements.items.properties).not.toHaveProperty("evidence_excerpt");
+          return complete(null, [tool("submit_for_assessment", { measurements: packet.experimentMeasurements.map((c: any) => ({
+            claimId: c.claimId, evidence_tool_call_id: id,
           })) })]);
         }
         expect(packet.executionEvidence.some((e: any) => e.successful)).toBe(true);
