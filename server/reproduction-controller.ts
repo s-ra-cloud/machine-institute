@@ -1,5 +1,6 @@
 import type { RecordedResult } from "./prompts/reproduce";
 import type { ToolCallRecord } from "./model-service";
+import { isSupportedRawInputPath } from "./reproduction-stage-evidence";
 
 export type ReproductionPhase = "source" | "extraction" | "planning" | "execution" | "assessment" | "judging" | "reporting" | "failed" | "complete";
 export interface ExperimentPlan {
@@ -8,6 +9,7 @@ export interface ExperimentPlan {
   materialPaths: string[];
   measurement: string;
   rationale: string;
+  rawInputs?: Array<{ path: string; readToolCallId: number }>;
   relatedClaims?: Array<{ claimId: string; measurement: string }>;
 }
 const phaseTools: Record<ReproductionPhase, readonly string[]> = {
@@ -70,7 +72,8 @@ export class ReproductionController {
     if (!this.allowedTools.includes(name)) throw new Error(`${name} is unavailable during ${this.phase}`);
     if (this.awaitingCommand) throw new Error("Command completion is unknown; automatic re-execution is forbidden.");
   }
-  acceptPlan(plan: ExperimentPlan, shippedPaths: ReadonlySet<string>, registered: readonly RecordedResult[] = []) {
+  acceptPlan(plan: ExperimentPlan, shippedPaths: ReadonlySet<string>, registered: readonly RecordedResult[] = [],
+    evidence: readonly Pick<ToolCallRecord, "index" | "name" | "args" | "result" | "error">[] = []) {
     if (this.phase !== "planning" || plan.claimId !== this.claimId) throw new Error("Plan must belong to the current pending claim.");
     if (!["rerun", "raw-data-rederived", "toy", "blocked"].includes(plan.method)
       || typeof plan.measurement !== "string" || !plan.measurement.trim() || plan.measurement.length > 2000
@@ -78,6 +81,14 @@ export class ReproductionController {
       || !Array.isArray(plan.materialPaths) || plan.materialPaths.length > 30
       || plan.materialPaths.some(p => typeof p !== "string" || !shippedPaths.has(p))
       || (plan.method !== "blocked" && !plan.materialPaths.length)) throw new Error("Plan requires bounded measurement, rationale and verified shipped material paths.");
+    if (plan.method === "raw-data-rederived") {
+      if (!Array.isArray(plan.rawInputs) || !plan.rawInputs.length || plan.rawInputs.length > 30
+        || plan.rawInputs.some(raw => !raw || typeof raw.path !== "string" || !isSupportedRawInputPath(raw.path) || !plan.materialPaths.includes(raw.path)
+          || !Number.isSafeInteger(raw.readToolCallId)
+          || !evidence.some(call => call.index === raw.readToolCallId && call.name === "read_file"
+            && call.args.path === raw.path && !call.error && !call.result.startsWith("Refused:"))))
+        throw new Error("Raw-data re-derivation requires rawInputs naming inspected shipped inputs: path and original readToolCallId. Include these paths in materialPaths. A script or a guess about future output is not evidence of available raw observations. Inspect the input first or choose the actual method; precomputed summaries are not raw observations.");
+    }
     const related = plan.relatedClaims ?? [];
     if (!Array.isArray(related) || related.length > 11)
       throw new Error("A shared experiment may include at most eleven additional claims.");
@@ -96,6 +107,7 @@ export class ReproductionController {
     for (const member of related) this.plans.set(member.claimId, {
       claimId: member.claimId, measurement: member.measurement, method: plan.method,
       materialPaths: [...plan.materialPaths], rationale: plan.rationale,
+      ...(plan.rawInputs ? { rawInputs: structuredClone(plan.rawInputs) } : {}),
     });
     this.sharedExperiments.push({ claimIds: Array.from(ids), readyForAssessment: plan.method === "blocked" });
     this.activeExperiment = this.sharedExperiments.length - 1;

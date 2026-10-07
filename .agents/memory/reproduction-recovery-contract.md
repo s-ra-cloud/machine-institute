@@ -23,6 +23,18 @@ Share scientifically compatible experiment planning and execution across claims,
 
 **How to apply:** Require explicit per-claim measurements under the same method and materials, preserve individual revision paths, and keep suitability/adaptation scope binding for every grouped claim. Unrelated claims remain separate. Offline grouped-report tests do not establish live-model reliability.
 
+Shared execution must explicitly account for every grouped measurement before handing off to assessment, using captured command evidence or an honest missing-measurement limitation.
+
+**Why:** A live grouped run executed only part of its promised measurements, so siblings individually returned to planning and exhausted the global allowance despite sharing a plan.
+
+**How to apply:** Put all measurements in execution context and preserve each claim's handoff separately. Coverage is not a scientific verdict; assessment and independent judging must still reject unsupported measurements and copied precomputed summaries.
+
+Validate raw-input eligibility and inspection when accepting a raw-data re-derivation plan, rather than first discovering missing provenance at result recording.
+
+**Why:** A live plan named only a Python source file and guessed at raw artifacts; execution became a model rerun, triggering method changes and repeated assessment repairs until the global allowance ran out.
+
+**How to apply:** Use the same supported-input format rule in planning and final evidence validation. Preserve original file-read IDs and paths through grouped plans and assessment. File eligibility and inspection do not establish that supplied values are raw observations; independent scientific judgment remains required.
+
 Stage-controlled planning needs its own recovery instructions, not the legacy finalization handoff.
 
 **Why:** A live run retained twelve claims but exhausted planning on README/list repeats. The legacy handoff requests result recording, which is not permitted during planning; restoring that callback alone would just stop earlier.

@@ -10,6 +10,29 @@ const start = () => {
   c.startExtraction(); c.beginClaim(claim); return c;
 };
 describe("application-owned reproduction phases", () => {
+  it("requires inspected raw inputs before accepting a re-derivation plan, and retains them for siblings", () => {
+    const dataPath = "/work/materials/rows.csv";
+    const raw = { path: dataPath, readToolCallId: 7 };
+    const dataPlan = { ...plan, method: "raw-data-rederived" as const, materialPaths: [dataPath],
+      relatedClaims: [{ claimId: "R2", measurement: "second statistic" }], rawInputs: [raw] };
+    const claims = [claim, { ...claim, id: "R2" }];
+    const read = { index: 7, name: "read_file", args: { path: dataPath }, result: "observation,value\n1,0.91" };
+    for (const evidence of [[], [{ ...read, name: "run_command" }], [{ ...read, error: true }],
+      [{ ...read, args: { path: "/wrong.csv" } }], [{ ...read, result: "Refused: unavailable" }]]) {
+      const c = start();
+      expect(() => c.acceptPlan(dataPlan, new Set([dataPath]), claims, evidence)).toThrow("Raw-data re-derivation requires");
+      expect(c.plans.size).toBe(0);
+      expect(c.phase).toBe("planning");
+    }
+    const c = start();
+    expect(() => c.acceptPlan({ ...dataPlan, rawInputs: undefined }, new Set([dataPath]), claims, [read])).toThrow("rawInputs");
+    expect(() => c.acceptPlan({ ...dataPlan, materialPaths: plan.materialPaths,
+      rawInputs: [{ path: plan.materialPaths[0], readToolCallId: 7 }] }, paths, claims,
+      [{ ...read, args: { path: plan.materialPaths[0] } }])).toThrow("rawInputs");
+    c.acceptPlan(dataPlan, new Set([dataPath]), claims, [read]);
+    expect(c.plans.get("R2")?.rawInputs).toEqual([raw]);
+    expect(claims.every(c => c.status === "pending")).toBe(true);
+  });
   it("shares execution but not verdicts, and isolates revisions and unrelated claims", () => {
     const sibling = { ...claim, id: "R2" }, unrelated = { ...claim, id: "R3" };
     const c = start();

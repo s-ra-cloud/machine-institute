@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { rerunLaunchRefusal } from "./reproduction-entrypoint";
-import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue, repeatExecutionRefusal } from "./reproduction-stage-evidence";
+import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue, repeatExecutionRefusal, sharedMeasurementIssue } from "./reproduction-stage-evidence";
 import { runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolLoopOptions, type ToolLoopResult } from "./model-service";
 import { ReproductionController, renderAcceptedLogbook, type ExperimentPlan } from "./reproduction-controller";
 import type { ReproductionSession } from "./reproduction-session";
@@ -13,12 +13,23 @@ const controls: ToolSpec[] = [
     parameters: { type: "object", additionalProperties: false, required: ["claimId", "method", "materialPaths", "measurement", "rationale"],
       properties: { claimId: { type: "string" }, method: { type: "string", enum: ["rerun", "raw-data-rederived", "toy", "blocked"] },
         materialPaths: { type: "array", items: { type: "string" } }, measurement: { type: "string" }, rationale: { type: "string" },
+        rawInputs: { type: "array", minItems: 1, maxItems: 30,
+          description: "Required for raw-data-rederived: identify already inspected shipped raw observation files, not guessed artifacts or precomputed summaries. Copy original read_file tool IDs. Otherwise choose the actual method.",
+          items: { type: "object", additionalProperties: false, required: ["path", "readToolCallId"],
+            properties: { path: { type: "string" }, readToolCallId: { type: "integer" } } } },
         relatedClaims: { type: "array", maxItems: 11, items: { type: "object", additionalProperties: false,
           required: ["claimId", "measurement"], properties: { claimId: { type: "string" },
             measurement: { type: "string", minLength: 1, maxLength: 2000 } } } },
       } } },
-  { name: "submit_for_assessment", description: "Finish execution and assess the captured outputs. No verdict is granted by this transition.",
-    parameters: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "submit_for_assessment", description: "Finish execution. For a shared experiment, measurements must account for EVERY grouped claim with an exact command-output excerpt or an explicit missing-measurement limitation. No verdict is granted.",
+    parameters: { type: "object", properties: {
+      measurements: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false,
+        required: ["claimId"], properties: {
+          claimId: { type: "string" }, evidence_tool_call_id: { type: "integer" },
+          evidence_excerpt: { type: "string", minLength: 8, maxLength: 2000 },
+          limitation: { type: "string", minLength: 1, maxLength: 2000 },
+        } } },
+    }, additionalProperties: false } },
   { name: "request_plan_revision", description: "Return to planning with the reason and intended scientific method. No verdict is granted. At most two revisions per claim within the unchanged global budget.",
     parameters: { type: "object", required: ["reason", "method"], properties: {
       reason: { type: "string", minLength: 1, maxLength: 2000 },
@@ -48,6 +59,7 @@ export async function runControlledReproduction(input: {
   controller.calls = input.extractionCalls;
   let calls = input.extractionCalls;
   let rounds = 0;
+  const measurementHandoffs = new Map<string, unknown>();
   const started = input.session.toolCalls.length;
   const planningRecovery: NonNullable<PipelineCheckpoint["planningRecovery"]> = [];
   const revisions: NonNullable<PipelineCheckpoint["revisions"]> = [];
@@ -81,7 +93,7 @@ export async function runControlledReproduction(input: {
         const activeInstruction = () => recovery
           ? recovery.instruction(Math.max(0, 12 - stageCalls), Math.max(0, input.options.maxToolCalls - stageStartCalls - stageCalls), Boolean(input.session.questioning))
           : phase === "execution"
-            ? `EXECUTION: claim ${initial.id}. Follow the accepted plan. ${executionNavigationCalls >= 6
+            ? `EXECUTION: experiment led by ${initial.id}, covering ${[initial.id, ...(controller.plans.get(initial.id)?.relatedClaims ?? []).map(c => c.claimId)].join(", ")}. Produce ALL experimentMeasurements, not only the lead claim. For raw-data-rederived, independently compute from raw observations, print full input paths and label each computed measurement; copying precomputed summary values is not re-derivation. Account for missing measurements honestly in submit_for_assessment. ${executionNavigationCalls >= 6
               ? "Navigation allowance reached. Write or run the claim-specific analysis; if you cannot safely proceed, submit_for_assessment so assessment can request a bounded plan revision. Repeated command output is not progress; after repeated outputs, submit_for_assessment is required. Do not invent missing materials or results."
               : "Inspect only what the accepted experiment needs, then write/run it. Do not repeat directory orientation."} Only captured experimental output can support a result. Result recording and final logbooks belong to later stages.`
             : `ASSESSMENT: claim ${initial.id}. ${stageCalls >= 4
@@ -90,6 +102,12 @@ export async function runControlledReproduction(input: {
         const current = input.session.recorded.get(initial.id)!;
         const revision = [...revisions].reverse().find(r => r.claimId === initial.id);
         const packet = JSON.stringify({ stage: phase, claim: current, plan: controller.plans.get(initial.id),
+          experimentMeasurements: phase === "execution" ? [initial.id, ...(controller.plans.get(initial.id)?.relatedClaims ?? []).map(c => c.claimId)]
+            .map(id => ({ claimId: id, measurement: controller.plans.get(id)?.measurement })) : undefined,
+          measurementHandoff: measurementHandoffs.get(initial.id),
+          materialReads: input.session.toolCalls.filter(c => c.name === "read_file" && !c.error
+            && input.shippedPaths.has(String(c.args.path))).slice(-30)
+            .map(c => ({ path: c.args.path, readToolCallId: c.index })),
           // All candidate identities are application-owned. Grouping does not
           // rewrite claims, grant verdicts, or increase execution allowances.
           pendingClaims: phase === "planning" ? Array.from(input.session.recorded.values())
@@ -133,6 +151,14 @@ export async function runControlledReproduction(input: {
             const properties = Object.fromEntries(Object.entries(t.parameters.properties as Record<string, unknown>)
               .filter(([key]) => updateFields.has(key)));
             properties.status = { type: "string", enum: ["verified", "falsified", "toy", "inconclusive"] };
+            properties.reproduced_value = { type: "string",
+              description: "Copy a literal contiguous measurement substring from evidence_excerpt. Do not round, relabel, or join separated values. Put comparisons and interpretation in notes." };
+            properties.evidence_excerpt = { type: "string",
+              description: "Exact captured output containing reproduced_value literally; not reconstructed prose. Scientific validation remains mandatory." };
+            if (method === "raw-data-rederived") {
+              properties.raw_input_path = { type: "string", description: "Exact inspected raw input path from plan.rawInputs; the computation must identify this same path." };
+              properties.raw_input_tool_call_id = { type: "integer", description: "Original read_file ID for raw_input_path from plan.rawInputs, not the computation ID or a later read_tool_result ID." };
+            }
             return {
               ...t,
               description: `Assess the existing claim ${initial.id} using exact captured evidence. Claim text, original_value and source provenance are already registered and immutable: omit them, do not re-extract or resubmit them. Explicitly provide method. The accepted plan method is ${method}. If the experiment used another method, request_plan_revision first; never relabel an experiment to satisfy the plan.`,
@@ -167,13 +193,21 @@ export async function runControlledReproduction(input: {
                   && (suitability.decision !== "adapt" || suitability.planned_changes?.every(change => change.claim_ids.includes(id)))))
                   return "Refused: sharing a qP experiment requires every grouped claim to be covered by the immutable suitability assessment and, for adaptation, every planned change. Keep separately scoped claims in separate experiments; never extend authorization through grouping.";
               }
-              controller.acceptPlan(args as unknown as ExperimentPlan, input.shippedPaths, Array.from(input.session.recorded.values()));
+              controller.acceptPlan(args as unknown as ExperimentPlan, input.shippedPaths, Array.from(input.session.recorded.values()), input.session.toolCalls);
               await save();
               return "Plan accepted; application will start the next stage.";
             }
-            if (name === "submit_for_assessment") { controller.assess(); await save(); return "Execution stage ended."; }
+            if (name === "submit_for_assessment") {
+              const ids = [initial.id, ...(controller.plans.get(initial.id)?.relatedClaims ?? []).map(c => c.claimId)];
+              const issue = sharedMeasurementIssue(ids, args.measurements, input.session.toolCalls);
+              if (issue) return `Refused: ${issue} This handoff never accepts a scientific verdict.`;
+              if (Array.isArray(args.measurements))
+                for (const item of args.measurements) if (ids.includes(item.claimId)) measurementHandoffs.set(item.claimId, structuredClone(item));
+              controller.assess(); await save(); return "Execution stage ended.";
+            }
             if (name === "request_plan_revision") {
               controller.revisePlan();
+              measurementHandoffs.delete(initial.id);
               revisions.push({ claimId: initial.id, reason: args.reason as string,
                 method: args.method as ExperimentPlan["method"],
                 previousPlan: structuredClone(controller.plans.get(initial.id)) });

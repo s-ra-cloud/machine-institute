@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue, repeatExecutionRefusal } from "../reproduction-stage-evidence";
+import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue, repeatExecutionRefusal, sharedMeasurementIssue } from "../reproduction-stage-evidence";
 const paths = ["/work/materials/analyze.py"];
+describe("shared measurement handoffs", () => {
+  const calls = [{ index: 7, name: "run_command", args: {}, result: "exit code 0\ncondition_1=0.91\ncondition_2=0.90" }];
+  const entries = [
+    { claimId: "R1", evidence_tool_call_id: 7, evidence_excerpt: "condition_1=0.91" },
+    { claimId: "R2", evidence_tool_call_id: 7, evidence_excerpt: "condition_2=0.90" },
+  ];
+  it("requires every member without silently accepting missing measurements", () => {
+    expect(sharedMeasurementIssue(["R1"], undefined, calls)).toBeUndefined();
+    expect(sharedMeasurementIssue(["R1", "R2"], undefined, calls)).toContain("every grouped claim");
+    expect(sharedMeasurementIssue(["R1", "R2"], entries, calls)).toBeUndefined();
+    expect(sharedMeasurementIssue(["R1", "R2"], [entries[0], entries[0]], calls)).toContain("exactly once");
+    expect(sharedMeasurementIssue(["R1", "R2"], [entries[0], { claimId: "R2", limitation: "Raw observations unavailable." }], calls)).toBeUndefined();
+  });
+  it("rejects nonexistent, failed, read-only or invented measurement evidence", () => {
+    for (const altered of [
+      [{ ...calls[0], index: 8 }],
+      [{ ...calls[0], name: "read_file" }],
+      [{ ...calls[0], result: "exit code 137\ncondition_1=0.91" }],
+      [{ ...calls[0], error: true }],
+      [{ ...calls[0], result: "exit code 0\nunrelated output" }],
+    ]) expect(sharedMeasurementIssue(["R1", "R2"], entries, altered)).toContain("exact excerpt");
+  });
+});
 const run = (index: number, result: string, command = "python /work/materials/analyze.py") => ({
   index, name: "run_command", args: { command }, result,
 });

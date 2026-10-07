@@ -127,6 +127,53 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("repairs an ungrounded raw-data plan before execution and preserves input provenance through reporting", async () => {
+    const path = "/work/materials/rows.csv", csv = "value\n0.90\n0.92\n";
+    mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [
+      { name: "rows.csv", kind: "text", source: "additional", text: csv },
+    ], textFileCount: 1, binaryFileCount: 0 });
+    const sb = sandbox();
+    sb.exec.mockImplementation(async (command: any) => ({
+      exitCode: 0, stdout: JSON.stringify(command).includes("csv.DictReader")
+        ? `${path}\nmeasured_score=0.91` : csv, stderr: "", timedOut: false, durationMs: 1,
+    }));
+    mock.create.mockResolvedValue(sb);
+    let attempted = false, sawRefusal = false;
+    const base = stageResponder();
+    mock.complete.mockImplementation(async (request: any) => {
+      const packetMessage = request.messages.find((m: any) => m.role === "user" && String(m.content).startsWith('{"stage":'));
+      if (!packetMessage) return base(request);
+      const packet = JSON.parse(packetMessage.content);
+      if (packet.stage === "planning") {
+        const plan = { claimId: packet.claim.id, method: "raw-data-rederived", materialPaths: [path],
+          measurement: "Mean of the two raw observations", rationale: "Compute from observations, not a supplied summary." };
+        if (!attempted) { attempted = true; return complete(null, [tool("submit_plan", plan)]); }
+        sawRefusal ||= request.messages.some((m: any) => String(m.content).includes("Raw-data re-derivation requires"));
+        const read = request.messages.find((m: any) => m.role === "tool" && String(m.content).includes(csv.trim()));
+        if (!read) return complete(null, [tool("read_file", { path })]);
+        const id = Number(String(read.content).match(/Tool call #(\d+)/)?.[1]);
+        return complete(null, [tool("submit_plan", { ...plan, rawInputs: [{ path, readToolCallId: id }] })]);
+      }
+      if (packet.stage === "execution") return complete(null, [
+        tool("run_command", { command: `python -c "import csv; p='${path}'; rows=list(csv.DictReader(open(p))); print(p); print('measured_score='+str(sum(float(r['value']) for r in rows)/len(rows)))"` }),
+        tool("submit_for_assessment", {}),
+      ]);
+      const input = packet.plan.rawInputs[0];
+      expect(packet.materialReads).toContainEqual(input);
+      const evidence = packet.executionEvidence.find((e: any) => e.successful);
+      return complete(null, [tool("record_result", { id: packet.claim.id, status: "verified",
+        method: "raw-data-rederived", reproduced_value: "0.91", evidence_excerpt: "measured_score=0.91",
+        evidence: "Mean recomputed from shipped observations.", evidence_tool_call_ids: [evidence.id],
+        raw_input_path: input.path, raw_input_tool_call_id: input.readToolCallId,
+      })]);
+    });
+    const saved: PipelineCheckpoint[] = [];
+    const result = await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
+    expect(sawRefusal).toBe(true);
+    expect(result.results[0].verdict).toBe("verified");
+    expect(saved.at(-1)?.controller.phase).toBe("complete");
+    expect(sb.terminate).toHaveBeenCalledOnce();
+  });
   it.each(["suitable", "adapt"])("refuses grouping that expands immutable qP authorization: %s", async decision => {
     mock.create.mockResolvedValue(sandbox());
     const responder = stageResponder(`qp-${decision}`);
@@ -257,6 +304,15 @@ describe("default reproduction stage-controller integration (offline only)", () 
           executed = true;
           return complete(null, [tool("run_command", { command: "python /work/materials/analyze.py" }), tool("submit_for_assessment", {})]);
         }
+        if (shared) {
+          expect(packet.experimentMeasurements).toHaveLength(12);
+          expect(request.messages.some((m: any) => String(m.content).includes("Account for every grouped claim"))).toBe(true);
+          const output = request.messages.find((m: any) => m.role === "tool" && String(m.content).includes("exit code 0") && String(m.content).includes("condition_1=0.91"));
+          const id = Number(String(output.content).match(/Tool call #(\d+)/)?.[1]);
+          return complete(null, [tool("submit_for_assessment", { measurements: packet.experimentMeasurements.map((c: any, i: number) => ({
+            claimId: c.claimId, evidence_tool_call_id: id, evidence_excerpt: `condition_${i + 1}=${observed(i)}`,
+          })) })]);
+        }
         expect(packet.executionEvidence.some((e: any) => e.successful)).toBe(true);
         if (!duplicateAttempts.has(packet.claim.id)) {
           duplicateAttempts.add(packet.claim.id);
@@ -266,6 +322,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
         return complete(null, [tool("submit_for_assessment", {})]);
       }
       if (names.includes("record_result")) {
+        if (shared) expect(packet.measurementHandoff?.claimId).toBe(packet.claim.id);
         const evidence = packet.executionEvidence.find((e: any) => e.successful && e.command === "python /work/materials/analyze.py");
         expect(evidence).toBeDefined();
         if (!evidenceReads.has(packet.claim.id)) {

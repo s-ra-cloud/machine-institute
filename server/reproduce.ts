@@ -1,5 +1,6 @@
 import { getContextWindow, runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolCallRecord } from "./model-service";
 import { prepareProviderContext } from "./provider-context";
+import { isSupportedRawInputPath } from "./reproduction-stage-evidence";
 import { loadPaperContext } from "./ethics-review";
 import { ReproductionRecovery } from "./reproduction-recovery";
 import { extractReproductionClaims, describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
@@ -199,7 +200,7 @@ export function getReproductionClaimIssues(input: {
           && call.name === "read_file"
           && String(call.args?.path || "") === rawPath,
         );
-        const rawExtension = /\.(?:csv|tsv|jsonl?|parquet|arrow|npy|npz|pt|pkl|pickle)$/i.test(rawPath);
+        const rawExtension = isSupportedRawInputPath(rawPath);
         const computationNamesInput = referencedCalls.some(call =>
           call.name === "run_command"
           && (
