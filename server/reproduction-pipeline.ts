@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { isPlannedEntrypoint, rerunLaunchRefusal } from "./reproduction-entrypoint";
+import { rerunLaunchRefusal } from "./reproduction-entrypoint";
+import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue } from "./reproduction-stage-evidence";
 import { runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolLoopOptions, type ToolLoopResult } from "./model-service";
 import { ReproductionController, renderAcceptedLogbook, type ExperimentPlan } from "./reproduction-controller";
 import type { ReproductionSession } from "./reproduction-session";
@@ -14,10 +15,14 @@ const controls: ToolSpec[] = [
         materialPaths: { type: "array", items: { type: "string" } }, measurement: { type: "string" }, rationale: { type: "string" } } } },
   { name: "submit_for_assessment", description: "Finish execution and assess the captured outputs. No verdict is granted by this transition.",
     parameters: { type: "object", properties: {}, additionalProperties: false } },
-  { name: "request_plan_revision", description: "Return to planning if existing evidence is insufficient. At most two revisions per claim, within the unchanged global budget.",
-    parameters: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "request_plan_revision", description: "Return to planning with the reason and intended scientific method. No verdict is granted. At most two revisions per claim within the unchanged global budget.",
+    parameters: { type: "object", required: ["reason", "method"], properties: {
+      reason: { type: "string", minLength: 1, maxLength: 2000 },
+      method: { type: "string", enum: ["rerun", "raw-data-rederived", "toy", "blocked"] },
+    }, additionalProperties: false } },
 ];
 export interface PipelineCheckpoint {
+  revisions?: Array<{ claimId: string; reason: string; method: ExperimentPlan["method"]; previousPlan?: ExperimentPlan }>;
   planningRecovery?: Array<{ claimId: string; firstStallCall: number; aggregateCall: number; outcome: string }>;
   failure?: { phase: string; phaseCalls: number; aggregateCalls: number; reason: string };
   extraction?: ExtractionCoverage;
@@ -41,9 +46,11 @@ export async function runControlledReproduction(input: {
   let rounds = 0;
   const started = input.session.toolCalls.length;
   const planningRecovery: NonNullable<PipelineCheckpoint["planningRecovery"]> = [];
+  const revisions: NonNullable<PipelineCheckpoint["revisions"]> = [];
   let failure: PipelineCheckpoint["failure"];
   const save = async (limitation?: string) => {
     await input.checkpoint?.({
+      revisions: structuredClone(revisions),
       extraction: input.extraction,
       planningRecovery, failure,
       controller: controller.snapshot(),
@@ -77,7 +84,10 @@ export async function runControlledReproduction(input: {
               ? "Evidence browsing is closed. Use record_result only with evidence already obtained; otherwise request_plan_revision for missing experiments. Never turn source-code inspection into a measured result."
               : "Inspect only the evidence needed to assess this claim. If no experiment was performed, request_plan_revision rather than repeatedly reading source code."} No source re-extraction. Follow the supplied claim/plan packet.`;
         const current = input.session.recorded.get(initial.id)!;
+        const revision = [...revisions].reverse().find(r => r.claimId === initial.id);
         const packet = JSON.stringify({ stage: phase, claim: current, plan: controller.plans.get(initial.id),
+          revision,
+          executionEvidence: executionEvidenceIndex(input.session.toolCalls),
           materials: Array.from(input.shippedPaths),
           evidence: input.session.toolCalls.filter(c => ["run_command", "read_file", "list_files"].includes(c.name))
             // Navigation references, not duplicate canonical evidence. This packet
@@ -131,13 +141,22 @@ export async function runControlledReproduction(input: {
               && ["read_file", "read_tool_result", "list_files"].includes(name))
               return "Refused: execution navigation allowance reached. Write/run the accepted analysis, or submit_for_assessment for a bounded plan revision. No scientific result is inferred.";
             if (name === "submit_plan") {
+              if (revision && args.method !== revision.method)
+                return `Refused: this revision requested method=${revision.method} because: ${revision.reason}. Submit that scientific method; do not repeat the superseded ${revision.previousPlan?.method} plan or describe a fallback only in rationale. No result is accepted by this plan change.`;
               if (input.session.questioning && !input.session.questioning.assessment) return "Refused: qP requires assess_suitability before committing an experiment plan.";
               controller.acceptPlan(args as unknown as ExperimentPlan, input.shippedPaths);
               await save();
               return "Plan accepted; application will start the next stage.";
             }
             if (name === "submit_for_assessment") { controller.assess(); await save(); return "Execution stage ended."; }
-            if (name === "request_plan_revision") { controller.revisePlan(); await save(); return "Planning revision authorized."; }
+            if (name === "request_plan_revision") {
+              controller.revisePlan();
+              revisions.push({ claimId: initial.id, reason: args.reason as string,
+                method: args.method as ExperimentPlan["method"],
+                previousPlan: structuredClone(controller.plans.get(initial.id)) });
+              await save();
+              return "Planning revision authorized; the reason and requested method will be carried into the next stage. Existing evidence remains available; do not rerun merely to retrieve it.";
+            }
             if (name === "record_result" && (args.id !== initial.id || args.status === "pending"))
               return "Refused: finalize only the application's current claim; extraction is closed.";
             if (name === "record_result" && args.method !== "blocked"
@@ -150,16 +169,8 @@ export async function runControlledReproduction(input: {
             }
             if (name === "record_result" && args.method === "rerun") {
               const plan = controller.plans.get(initial.id)!;
-              const ids = Array.isArray(args.evidence_tool_call_ids) ? args.evidence_tool_call_ids : [];
-              const entrypointEvidence = input.session.toolCalls.some(call => {
-                const excerpt = typeof args.evidence_excerpt === "string" ? args.evidence_excerpt.trim() : "";
-                const value = typeof args.reproduced_value === "string" ? args.reproduced_value.trim() : "";
-                if (call.name !== "run_command" || !ids.includes(call.index) || call.error
-                  || !/^exit code 0\b/.test(call.result) || excerpt.length < 4 || !value
-                  || !excerpt.includes(value) || !call.result.includes(excerpt)) return false;
-                return isPlannedEntrypoint(String(call.args.command ?? ""), plan.materialPaths);
-              });
-              if (!entrypointEvidence) return "Refused: the exact measurement excerpt and reproduced value must come from the SAME cited successful standalone planned source-entrypoint execution. Failed scripts, unrelated successful commands and supplied CSV displays cannot be combined into rerun evidence. Use an inspected source file, or revise the method.";
+              const issue = rerunEvidenceIssue(input.session.toolCalls, plan.materialPaths, args);
+              if (issue) return `Refused: the exact measurement excerpt and reproduced value must come from the SAME cited successful standalone planned source-entrypoint execution. ${issue}`;
             }
             if (name === "run_command") {
               const plan = controller.plans.get(initial.id);
@@ -188,9 +199,9 @@ export async function runControlledReproduction(input: {
               : controller.allowedTools,
             getArgumentRepair: () => activeInstruction(),
             transformToolResult: (name, result, index) => {
-              // Legacy browsing hints request record_result/final logbooks, neither
-              // of which is legal during execution. Stage guidance owns recovery.
-              if (!recovery) return phase === "execution" ? result : input.options.transformToolResult?.(name, result, index) ?? result;
+              // Legacy single-loop browsing hints are not stage contracts.
+              // Preserve actual tool responses; this controller owns recovery.
+              if (!recovery) return result;
               recovery.observe(name, result, index, stageCalls + 1);
               return result;
             },
@@ -233,7 +244,7 @@ export async function runControlledReproduction(input: {
                     .slice(-2).map(call => ({
                       id: call.index, tool: call.name, error: call.error,
                       action: String(call.args.command ?? call.args.path ?? "").slice(0, 120),
-                      excerpt: call.result.slice(0, 400),
+                      excerpt: executionRecoveryExcerpt(call),
                       retrieve: `read_tool_result tool_call_id=${call.index}`,
                     })) : [] };
                 while (Buffer.byteLength(JSON.stringify(JSON.stringify(state))) > maxBytes

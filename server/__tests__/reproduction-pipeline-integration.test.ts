@@ -125,6 +125,142 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("carries a failed-run method revision into planning and completes without repeating the superseded plan", async () => {
+    const sb = sandbox();
+    sb.exec.mockImplementation(async (command: unknown) => ({
+      exitCode: JSON.stringify(command).includes("/materials/analyze.py") ? 137 : 0,
+      stdout: JSON.stringify(command).includes("/materials/analyze.py") ? "Full experiment stopped" : "measured_score=0.91",
+      stderr: "", timedOut: false, durationMs: 1,
+    }));
+    mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    let mismatched = false, triedOldPlan = false, judgeCalls = 0;
+    const reason = "Full rerun exited 137; perform a smaller toy experiment, not an original-result verification.";
+    mock.complete.mockImplementation(async (request: any) => {
+      const names = (request.tools ?? []).map((t: any) => t.function.name);
+      const message = request.messages.find((m: any) => m.role === "user" && String(m.content).startsWith('{"stage":'));
+      const packet = message ? JSON.parse(message.content) : undefined;
+      if (names.includes("submit_plan") && packet.revision) {
+        expect(packet.revision).toMatchObject({ reason, method: "toy", previousPlan: { method: "rerun" } });
+        const method = triedOldPlan ? "toy" : "rerun";
+        if (triedOldPlan) expect(request.messages.some((m: any) => String(m.content).includes("this revision requested method=toy"))).toBe(true);
+        triedOldPlan = true;
+        return complete(null, [tool("submit_plan", { claimId: "R1", method,
+          materialPaths: ["/work/materials/analyze.py"], measurement: "toy held-out score", rationale: reason })]);
+      }
+      if (names.includes("submit_for_assessment") && packet.plan.method === "toy") {
+        return complete(null, [
+          tool("write_file", { path: "/work/results/toy.py", content: "print('measured_score=0.91')" }),
+          tool("run_command", { command: "python /work/results/toy.py" }),
+          tool("submit_for_assessment", {}),
+        ]);
+      }
+      if (names.includes("record_result") && packet.plan.method === "rerun") {
+        if (!mismatched) {
+          mismatched = true;
+          return complete(null, [tool("record_result", { id: "R1", status: "toy", method: "toy" })]);
+        }
+        return complete(null, [tool("request_plan_revision", { reason, method: "toy" })]);
+      }
+      if (names.includes("record_result")) {
+        const evidence = packet.executionEvidence.find((e: any) => e.command === "python /work/results/toy.py");
+        return complete(null, [tool("record_result", { id: "R1", status: "toy", method: "toy",
+          reproduced_value: "0.91", evidence: "Toy output only; original experiment failed.",
+          evidence_excerpt: "measured_score=0.91", evidence_tool_call_ids: [evidence.id] })]);
+      }
+      if (!names.length && /judge/i.test(String(request.messages[0]?.content))) {
+        judgeCalls++;
+        return complete(JSON.stringify({ summary: "Only a toy experiment completed.", results: [{
+          id: "R1", claim: paper, verdict: "toy", original_value: "0.91", reproduced_value: "0.91",
+          evidence: "Toy output only; original experiment failed.",
+        }] }));
+      }
+      return responder(request);
+    });
+    const saved: PipelineCheckpoint[] = [];
+    const result = await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
+    expect(triedOldPlan).toBe(true);
+    expect(judgeCalls).toBe(1);
+    expect(result.results[0].verdict).toBe("toy");
+    expect(saved.at(-1)?.controller.phase).toBe("complete");
+    expect(saved.at(-1)?.revisions).toHaveLength(1);
+    expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("/materials/analyze.py"))).toHaveLength(1);
+    expect(sb.terminate).toHaveBeenCalledOnce();
+  });
+  it("completes a multi-claim report with mixed outcomes, reusing evidence through independent judging", async () => {
+    const claims = Array.from({ length: 5 }, (_, i) => ({
+      claim: `The measured score for condition ${i + 1} on the held-out evaluation is 0.91.`,
+      source_quote: `The measured score for condition ${i + 1} on the held-out evaluation is 0.91.`,
+      original_value: "0.91",
+    }));
+    const observed = (i: number) => i % 2 ? "0.90" : "0.91";
+    const output = claims.map((_, i) => `condition_${i + 1}=${observed(i)}`).join("\n");
+    const body = claims.map(c => c.claim).join("\n");
+    mock.context.mockResolvedValue({ title: "Multi-claim fixture", authors: "Fixture", date: "2026", abstract: body, fullText: body, fsAbstracts: [] });
+    mock.materials.mockResolvedValue({ paperMarkdown: body, files: [{
+      name: "analyze.py", kind: "text", source: "additional", text: `print(${JSON.stringify(output)})`,
+    }], textFileCount: 1, binaryFileCount: 0 });
+    const sb = sandbox();
+    sb.exec.mockResolvedValue({ exitCode: 0, stdout: output, stderr: "", timedOut: false, durationMs: 1 });
+    mock.create.mockResolvedValue(sb);
+    const plannedReads = new Set<string>(), evidenceReads = new Set<string>();
+    let executed = false, judgeCalls = 0;
+    mock.complete.mockImplementation(async (request: any) => {
+      const names = (request.tools ?? []).map((t: any) => t.function.name);
+      if (names.includes("submit_claims")) return complete(null, [tool("submit_claims", { claims })]);
+      const message = request.messages.find((m: any) => m.role === "user" && String(m.content).startsWith('{"stage":'));
+      const packet = message ? JSON.parse(message.content) : undefined;
+      if (names.includes("submit_plan")) {
+        if (!plannedReads.has(packet.claim.id)) {
+          plannedReads.add(packet.claim.id);
+          return complete(null, [tool("read_file", { path: "/work/materials/analyze.py" })]);
+        }
+        return complete(null, [tool("submit_plan", {
+          claimId: packet.claim.id, method: "rerun", materialPaths: ["/work/materials/analyze.py"],
+          measurement: packet.claim.claim, rationale: "The shipped script computes all five condition scores; reuse captured execution when available.",
+        })]);
+      }
+      if (names.includes("submit_for_assessment")) {
+        if (!executed) {
+          executed = true;
+          return complete(null, [tool("run_command", { command: "python /work/materials/analyze.py" }), tool("submit_for_assessment", {})]);
+        }
+        expect(packet.executionEvidence.some((e: any) => e.successful)).toBe(true);
+        return complete(null, [tool("submit_for_assessment", {})]);
+      }
+      if (names.includes("record_result")) {
+        const evidence = packet.executionEvidence.find((e: any) => e.successful && e.command === "python /work/materials/analyze.py");
+        expect(evidence).toBeDefined();
+        if (!evidenceReads.has(packet.claim.id)) {
+          evidenceReads.add(packet.claim.id);
+          return complete(null, [tool("read_tool_result", evidence.retrieveTail)]);
+        }
+        const i = Number(packet.claim.id.slice(1)) - 1;
+        return complete(null, [tool("record_result", {
+          id: packet.claim.id, status: i % 2 ? "falsified" : "verified", method: "rerun",
+          reproduced_value: observed(i), evidence_excerpt: `condition_${i + 1}=${observed(i)}`,
+          evidence_tool_call_ids: [evidence.id], evidence: "The original successful source execution contains this condition's measured score.",
+        })]);
+      }
+      if (!names.length && /judge/i.test(String(request.messages[0]?.content))) {
+        judgeCalls++;
+        return complete(JSON.stringify({ summary: "Offline fixture: three matching and two discrepant measurements.", results: claims.map((c, i) => ({
+          id: `R${i + 1}`, claim: c.claim, verdict: i % 2 ? "falsified" : "verified",
+          original_value: "0.91", reproduced_value: observed(i), evidence: `condition_${i + 1}=${observed(i)}`,
+        })) }));
+      }
+      return complete("");
+    });
+    const saved: PipelineCheckpoint[] = [];
+    const result = await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
+    expect(judgeCalls).toBe(1);
+    expect(result.results.map(r => r.verdict)).toEqual(["verified", "falsified", "verified", "falsified", "verified"]);
+    expect(saved.at(-1)?.controller.phase).toBe("complete");
+    expect(saved.at(-1)?.controller.calls).toBeLessThan(100);
+    expect(saved.at(-1)?.claims.every(c => c.status !== "pending")).toBe(true);
+    expect(sb.exec.mock.calls.filter(call => JSON.stringify(call).includes("python /work/materials/analyze.py"))).toHaveLength(1);
+    expect(sb.terminate).toHaveBeenCalledOnce();
+  });
   it("excludes immutable source fields from assessment and rejects an attempted rewrite before dispatch", async () => {
     mock.create.mockResolvedValue(sandbox());
     const record = vi.spyOn(ReproductionSession.prototype, "recordResult");

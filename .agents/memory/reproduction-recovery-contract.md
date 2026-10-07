@@ -11,11 +11,23 @@ Live reproduction-and-repair work must use exactly the website's normal workflow
 
 **How to apply:** Exercise the existing website orchestration and distinguish infrastructure/software failures from scientific non-reproduction. Obtain separate approval for model and Modal spending limits; do not substitute CPU-only or simulated execution.
 
+The user's objective is: “i just want to fix bugs until reports work completely.” Do not substitute partial-report handling for that goal.
+
+**Why:** The user clarified this when offered partial reports after budget exhaustion.
+
+**How to apply:** Continue repairing blockers to complete assessment, independent judging and final reporting. Respect the approved spending caps and distinguish offline end-to-end tests from a completed live reproduction.
+
 Stage-controlled planning needs its own recovery instructions, not the legacy finalization handoff.
 
 **Why:** A live run retained twelve claims but exhausted planning on README/list repeats. The legacy handoff requests result recording, which is not permitted during planning; restoring that callback alone would just stop earlier.
 
 **How to apply:** Keep repair within the current stage allowance, preserve inspected references and exact claim identity through compaction, and test a successful planning-to-execution replay as well as bounded failure. Never treat more browsing as scientific progress.
+
+Method-change recovery must preserve the assessment's intended method and reason across fresh planning transcripts; it must not merely tell the model to revise.
+
+**Why:** A live run repeatedly selected the same full-rerun plan while attempting to report raw-data re-derivation after execution failures. The empty revision handoff lost the decision that motivated replanning.
+
+**How to apply:** Treat a requested method change as an explicit workflow decision, not a scientific verdict. Preserve evidence and original source identity, require a matching plan, and test that a failed experiment can reach judging and complete reporting with an honestly limited outcome.
 
 Verbal planning-repair hints alone are not evidence of live recovery.
 
