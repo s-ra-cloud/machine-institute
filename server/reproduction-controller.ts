@@ -8,6 +8,7 @@ export interface ExperimentPlan {
   materialPaths: string[];
   measurement: string;
   rationale: string;
+  relatedClaims?: Array<{ claimId: string; measurement: string }>;
 }
 const phaseTools: Record<ReproductionPhase, readonly string[]> = {
   source: [], extraction: ["submit_claims"],
@@ -34,6 +35,9 @@ export class ReproductionController {
   private revisions = new Map<string, number>();
   private claimId?: string;
   private awaitingCommand = false;
+  private sharedAssessmentReady = new Set<string>();
+  private activeExperiment?: number;
+  private sharedExperiments: Array<{ claimIds: string[]; readyForAssessment: boolean }> = [];
 
   constructor(readonly deadline: number, readonly maxCalls = 100) {}
   private enter(phase: ReproductionPhase) {
@@ -50,7 +54,8 @@ export class ReproductionController {
       throw new Error("Cannot start a claim in the current phase.");
     if (claim.status !== "pending" || this.claimId === claim.id) throw new Error("Expected a new pending claim.");
     this.claimId = claim.id;
-    this.enter("planning");
+    this.activeExperiment = undefined;
+    this.enter(this.plans.has(claim.id) && this.sharedAssessmentReady.has(claim.id) ? "assessment" : "planning");
   }
   get activeClaimId() { return this.claimId; }
   get allowedTools() { return phaseTools[this.phase]; }
@@ -65,7 +70,7 @@ export class ReproductionController {
     if (!this.allowedTools.includes(name)) throw new Error(`${name} is unavailable during ${this.phase}`);
     if (this.awaitingCommand) throw new Error("Command completion is unknown; automatic re-execution is forbidden.");
   }
-  acceptPlan(plan: ExperimentPlan, shippedPaths: ReadonlySet<string>) {
+  acceptPlan(plan: ExperimentPlan, shippedPaths: ReadonlySet<string>, registered: readonly RecordedResult[] = []) {
     if (this.phase !== "planning" || plan.claimId !== this.claimId) throw new Error("Plan must belong to the current pending claim.");
     if (!["rerun", "raw-data-rederived", "toy", "blocked"].includes(plan.method)
       || typeof plan.measurement !== "string" || !plan.measurement.trim() || plan.measurement.length > 2000
@@ -73,7 +78,28 @@ export class ReproductionController {
       || !Array.isArray(plan.materialPaths) || plan.materialPaths.length > 30
       || plan.materialPaths.some(p => typeof p !== "string" || !shippedPaths.has(p))
       || (plan.method !== "blocked" && !plan.materialPaths.length)) throw new Error("Plan requires bounded measurement, rationale and verified shipped material paths.");
+    const related = plan.relatedClaims ?? [];
+    if (!Array.isArray(related) || related.length > 11)
+      throw new Error("A shared experiment may include at most eleven additional claims.");
+    const ids = new Set([plan.claimId]);
+    // Validate the entire group before changing state. A bad sibling must not
+    // partially enroll claims or overwrite an earlier experiment's contract.
+    for (const member of related) {
+      if (!member || typeof member.claimId !== "string" || ids.has(member.claimId)
+        || this.plans.has(member.claimId)
+        || !registered.some(c => c.id === member.claimId && c.status === "pending")
+        || typeof member.measurement !== "string" || !member.measurement.trim() || member.measurement.length > 2000)
+        throw new Error("Shared claims must be distinct, registered, pending, unplanned, and have individual measurements.");
+      ids.add(member.claimId);
+    }
     this.plans.set(plan.claimId, structuredClone(plan));
+    for (const member of related) this.plans.set(member.claimId, {
+      claimId: member.claimId, measurement: member.measurement, method: plan.method,
+      materialPaths: [...plan.materialPaths], rationale: plan.rationale,
+    });
+    this.sharedExperiments.push({ claimIds: Array.from(ids), readyForAssessment: plan.method === "blocked" });
+    this.activeExperiment = this.sharedExperiments.length - 1;
+    if (plan.method === "blocked") for (const id of Array.from(ids)) this.sharedAssessmentReady.add(id);
     this.enter(plan.method === "blocked" ? "assessment" : "execution");
   }
   commandDispatched() {
@@ -86,6 +112,11 @@ export class ReproductionController {
   }
   assess() {
     if (this.phase !== "execution" || this.awaitingCommand) throw new Error("Cannot assess an unfinished execution.");
+    if (this.activeExperiment !== undefined) {
+      const group = this.sharedExperiments[this.activeExperiment];
+      group.readyForAssessment = true;
+      for (const id of group.claimIds) this.sharedAssessmentReady.add(id);
+    }
     this.enter("assessment");
   }
   revisePlan() {
@@ -93,6 +124,10 @@ export class ReproductionController {
     const count = this.revisions.get(this.claimId) ?? 0;
     if (count >= 2) throw new Error("Claim plan revision allowance exhausted.");
     this.revisions.set(this.claimId, count + 1);
+    // Repair only this claim; other group members retain their original plan
+    // and must still independently validate the shared experiment's evidence.
+    this.sharedAssessmentReady.delete(this.claimId);
+    this.activeExperiment = undefined;
     this.enter("planning");
   }
   judge(claims: readonly RecordedResult[]) {
@@ -117,6 +152,7 @@ export class ReproductionController {
   snapshot() {
     return { version: 1, phase: this.phase, calls: this.calls, phaseCalls: this.phaseCalls,
       activeClaimId: this.claimId, commandCompletionUnknown: this.awaitingCommand,
+      sharedExperiments: structuredClone(this.sharedExperiments),
       plans: Array.from(this.plans.values()), milestones: [...this.milestones] };
   }
 }

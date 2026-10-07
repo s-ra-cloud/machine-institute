@@ -9,10 +9,14 @@ import { describeExtractionCoverage, type ExtractionCoverage } from "./reproduct
 import { PlanningRecovery } from "./reproduction-planning-recovery";
 
 const controls: ToolSpec[] = [
-  { name: "submit_plan", description: "Commit a claim-specific plan using actual shipped paths. Code controls the next stage; qP assessment is additionally required.",
+  { name: "submit_plan", description: "Plan an experiment for the current claim and related pending claims that the SAME method and materials can measure. Supply an individual measurement for each. Execute once, then assess each claim separately. qP suitability remains required.",
     parameters: { type: "object", additionalProperties: false, required: ["claimId", "method", "materialPaths", "measurement", "rationale"],
       properties: { claimId: { type: "string" }, method: { type: "string", enum: ["rerun", "raw-data-rederived", "toy", "blocked"] },
-        materialPaths: { type: "array", items: { type: "string" } }, measurement: { type: "string" }, rationale: { type: "string" } } } },
+        materialPaths: { type: "array", items: { type: "string" } }, measurement: { type: "string" }, rationale: { type: "string" },
+        relatedClaims: { type: "array", maxItems: 11, items: { type: "object", additionalProperties: false,
+          required: ["claimId", "measurement"], properties: { claimId: { type: "string" },
+            measurement: { type: "string", minLength: 1, maxLength: 2000 } } } },
+      } } },
   { name: "submit_for_assessment", description: "Finish execution and assess the captured outputs. No verdict is granted by this transition.",
     parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "request_plan_revision", description: "Return to planning with the reason and intended scientific method. No verdict is granted. At most two revisions per claim within the unchanged global budget.",
@@ -86,6 +90,11 @@ export async function runControlledReproduction(input: {
         const current = input.session.recorded.get(initial.id)!;
         const revision = [...revisions].reverse().find(r => r.claimId === initial.id);
         const packet = JSON.stringify({ stage: phase, claim: current, plan: controller.plans.get(initial.id),
+          // All candidate identities are application-owned. Grouping does not
+          // rewrite claims, grant verdicts, or increase execution allowances.
+          pendingClaims: phase === "planning" ? Array.from(input.session.recorded.values())
+            .filter(c => c.status === "pending" && (c.id === initial.id || !controller.plans.has(c.id)))
+            .map(c => ({ id: c.id, claim: c.claim, original_value: c.originalValue })) : undefined,
           revision,
           executionEvidence: executionEvidenceIndex(input.session.toolCalls),
           materials: Array.from(input.shippedPaths),
@@ -99,7 +108,7 @@ export async function runControlledReproduction(input: {
           // The judge summary deliberately clips/omits adaptation instructions.
           // Execution needs the exact authorized contract, protected with the packet.
           adaptationContract: input.session.questioning?.assessment ?? null,
-          instruction: phase === "planning" ? "Inspect relevant shipped materials, assess suitability for qP, then submit_plan."
+          instruction: phase === "planning" ? "Review pendingClaims together before choosing an experiment. Include relatedClaims in submit_plan when the same method/materials cover their individual measurements. Do not group unrelated experiments or omit claims to fit the budget. Inspect relevant shipped materials and assess suitability for qP first. Grouped claims share execution, never verdicts."
             : phase === "execution" ? `Perform the planned experiment. For rerun evidence, launch a standalone planned script. ${input.session.questioning ? "For qP use python materials/analysis.py with the real planned filename; omit working_directory because the sealed snapshot determines it." : "For P use python /work/materials/analysis.py with the real planned filename, and working_directory=/work/materials if required."} Never wrap the script in cd, chaining, pipes, tee or redirection: stdout/stderr are retained automatically and its own exit status is required. Retrieve old outputs rather than repeat commands. Then submit_for_assessment.`
               : "Inspect existing outputs and record_result for this claim only with exact numbered evidence; request_plan_revision only if more experiments are needed.",
         });
@@ -151,7 +160,14 @@ export async function runControlledReproduction(input: {
               if (revision && args.method !== revision.method)
                 return `Refused: this revision requested method=${revision.method} because: ${revision.reason}. Submit that scientific method; do not repeat the superseded ${revision.previousPlan?.method} plan or describe a fallback only in rationale. No result is accepted by this plan change.`;
               if (input.session.questioning && !input.session.questioning.assessment) return "Refused: qP requires assess_suitability before committing an experiment plan.";
-              controller.acceptPlan(args as unknown as ExperimentPlan, input.shippedPaths);
+              const suitability = input.session.questioning?.assessment;
+              if (suitability && Array.isArray(args.relatedClaims) && args.relatedClaims.length) {
+                const members = [initial.id, ...args.relatedClaims.map((c: { claimId: string }) => c.claimId)];
+                if (!members.every(id => suitability.claim_ids.includes(id)
+                  && (suitability.decision !== "adapt" || suitability.planned_changes?.every(change => change.claim_ids.includes(id)))))
+                  return "Refused: sharing a qP experiment requires every grouped claim to be covered by the immutable suitability assessment and, for adaptation, every planned change. Keep separately scoped claims in separate experiments; never extend authorization through grouping.";
+              }
+              controller.acceptPlan(args as unknown as ExperimentPlan, input.shippedPaths, Array.from(input.session.recorded.values()));
               await save();
               return "Plan accepted; application will start the next stage.";
             }

@@ -17,6 +17,12 @@ The user's objective is: “i just want to fix bugs until reports work completel
 
 **How to apply:** Continue repairing blockers to complete assessment, independent judging and final reporting. Respect the approved spending caps and distinguish offline end-to-end tests from a completed live reproduction.
 
+Share scientifically compatible experiment planning and execution across claims, but never merge their source identities, evidence assessments, or verdicts.
+
+**Why:** The user approved refactoring the website's shared workflow after repeated per-claim planning exhausted the global allowance before judging. This approval does not justify silently caching experiments or extending qP authorization.
+
+**How to apply:** Require explicit per-claim measurements under the same method and materials, preserve individual revision paths, and keep suitability/adaptation scope binding for every grouped claim. Unrelated claims remain separate. Offline grouped-report tests do not establish live-model reliability.
+
 Stage-controlled planning needs its own recovery instructions, not the legacy finalization handoff.
 
 **Why:** A live run retained twelve claims but exhausted planning on README/list repeats. The legacy handoff requests result recording, which is not permitted during planning; restoring that callback alone would just stop earlier.

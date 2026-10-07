@@ -10,6 +10,59 @@ const start = () => {
   c.startExtraction(); c.beginClaim(claim); return c;
 };
 describe("application-owned reproduction phases", () => {
+  it("shares execution but not verdicts, and isolates revisions and unrelated claims", () => {
+    const sibling = { ...claim, id: "R2" }, unrelated = { ...claim, id: "R3" };
+    const c = start();
+    c.acceptPlan({ ...plan, relatedClaims: [{ claimId: "R2", measurement: "second score" }] }, paths, [claim, sibling, unrelated]);
+    expect(c.plans.get("R2")).toMatchObject({ method: "rerun", measurement: "second score" });
+    c.commandDispatched();
+    expect(() => c.beginClaim(sibling)).toThrow();
+    expect(() => c.assess()).toThrow("unfinished");
+    c.commandReturned(); c.assess();
+    expect(sibling.status).toBe("pending");
+    c.revisePlan();
+    c.acceptPlan({ ...plan, method: "toy" }, paths, [claim, sibling, unrelated]);
+    c.assess();
+    c.beginClaim(sibling);
+    expect(c.phase).toBe("assessment");
+    expect(c.plans.get("R2")?.method).toBe("rerun");
+    expect(() => c.judge([claim, sibling])).toThrow("unfinished");
+    c.beginClaim(unrelated);
+    expect(c.phase).toBe("planning");
+    expect(c.snapshot().sharedExperiments[0].claimIds).toEqual(["R1", "R2"]);
+  });
+  it("rejects invalid groups atomically without silently dropping claims", () => {
+    for (const relatedClaims of [
+      [{ claimId: "R999", measurement: "score" }],
+      [{ claimId: "R1", measurement: "score" }],
+      [{ claimId: "R2", measurement: "score" }, { claimId: "R2", measurement: "score" }],
+      [{ claimId: "R2", measurement: "" }],
+    ]) {
+      const c = start();
+      expect(() => c.acceptPlan({ ...plan, relatedClaims }, paths, [claim, { ...claim, id: "R2" }])).toThrow("Shared claims");
+      expect(c.plans.size).toBe(0);
+      expect(c.phase).toBe("planning");
+    }
+    const c = start();
+    expect(() => c.acceptPlan({ ...plan, relatedClaims: [{ claimId: "R2", measurement: "score" }] },
+      paths, [claim, { ...claim, id: "R2", status: "verified" }])).toThrow("Shared claims");
+    const sibling = { ...claim, id: "R2" };
+    c.acceptPlan({ ...plan, relatedClaims: [{ claimId: "R2", measurement: "score" }] }, paths, [claim, sibling]);
+    c.assess(); c.revisePlan();
+    expect(() => c.acceptPlan({ ...plan, method: "toy", relatedClaims: [{ claimId: "R2", measurement: "different score" }] },
+      paths, [claim, sibling])).toThrow("Shared claims");
+    expect(c.plans.get("R1")?.method).toBe("rerun");
+    expect(c.plans.get("R2")?.measurement).toBe("score");
+  });
+  it("does not turn blocked group plans into accepted scientific outcomes", () => {
+    const sibling = { ...claim, id: "R2" }, c = start();
+    c.acceptPlan({ ...plan, method: "blocked", materialPaths: [],
+      relatedClaims: [{ claimId: "R2", measurement: "score" }] }, paths, [claim, sibling]);
+    expect(c.phase).toBe("assessment");
+    c.beginClaim(sibling);
+    expect(c.phase).toBe("assessment");
+    expect(() => c.judge([claim, sibling])).toThrow("unfinished");
+  });
   it("never authorizes arbitrary execution during planning or assessment", () => {
     const c = start();
     expect(() => c.charge("run_command")).toThrow("unavailable");

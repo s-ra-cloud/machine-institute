@@ -127,6 +127,31 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it.each(["suitable", "adapt"])("refuses grouping that expands immutable qP authorization: %s", async decision => {
+    mock.create.mockResolvedValue(sandbox());
+    const responder = stageResponder(`qp-${decision}`);
+    let attempted = false, sawRefusal = false;
+    mock.complete.mockImplementation(async (request: any) => {
+      sawRefusal ||= request.messages.some((m: any) => String(m.content).includes("sharing a qP experiment requires"));
+      const response = await responder(request);
+      for (const call of response.choices[0].message.tool_calls ?? []) {
+        const t = call as any;
+        if (t.function.name === "submit_plan" && !attempted) {
+          attempted = true;
+          t.function.arguments = JSON.stringify({ ...JSON.parse(t.function.arguments),
+            relatedClaims: [{ claimId: "R999", measurement: "Unauthorized adapted claim" }] });
+        }
+      }
+      return response;
+    });
+    const saved: PipelineCheckpoint[] = [];
+    await runReproduction({ ...options(), agentId: "qP",
+      reproducerPrompt: getReproducerPrompt("qP"), judgePrompt: getJudgePrompt("qP"),
+      onCheckpoint: async value => { saved.push(structuredClone(value)); } });
+    expect(attempted && sawRefusal).toBe(true);
+    expect(saved.at(-1)?.controller.phase).toBe("complete");
+    expect(saved.at(-1)?.controller.sharedExperiments.every(g => !g.claimIds.includes("R999"))).toBe(true);
+  });
   it("carries a failed-run method revision into planning and completes without repeating the superseded plan", async () => {
     const sb = sandbox();
     sb.exec.mockImplementation(async (command: unknown) => ({
@@ -189,15 +214,16 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("/materials/analyze.py"))).toHaveLength(1);
     expect(sb.terminate).toHaveBeenCalledOnce();
   });
-  it("completes a multi-claim report with mixed outcomes, reusing evidence through independent judging", async () => {
-    const claims = Array.from({ length: 5 }, (_, i) => ({
+  it.each([false, true])("completes a mixed-outcome report through independent judging; shared planning=%s", async shared => {
+    const claims = Array.from({ length: shared ? 12 : 5 }, (_, i) => ({
       claim: `The measured score for condition ${i + 1} on the held-out evaluation is 0.91.`,
       source_quote: `The measured score for condition ${i + 1} on the held-out evaluation is 0.91.`,
       original_value: "0.91",
     }));
     const observed = (i: number) => i % 2 ? "0.90" : "0.91";
     const output = claims.map((_, i) => `condition_${i + 1}=${observed(i)}`).join("\n");
-    const body = claims.map(c => c.claim).join("\n");
+    const body = shared ? [0, 5, 10].map(start => claims.slice(start, start + 5).map(c => c.claim).join("\n").padEnd(5400, " ")).join("")
+      : claims.map(c => c.claim).join("\n");
     mock.context.mockResolvedValue({ title: "Multi-claim fixture", authors: "Fixture", date: "2026", abstract: body, fullText: body, fsAbstracts: [] });
     mock.materials.mockResolvedValue({ paperMarkdown: body, files: [{
       name: "analyze.py", kind: "text", source: "additional", text: `print(${JSON.stringify(output)})`,
@@ -206,10 +232,12 @@ describe("default reproduction stage-controller integration (offline only)", () 
     sb.exec.mockResolvedValue({ exitCode: 0, stdout: output, stderr: "", timedOut: false, durationMs: 1 });
     mock.create.mockResolvedValue(sb);
     const plannedReads = new Set<string>(), evidenceReads = new Set<string>(), duplicateAttempts = new Set<string>();
-    let executed = false, judgeCalls = 0;
+    let executed = false, judgeCalls = 0, extractionPacket = 0;
     mock.complete.mockImplementation(async (request: any) => {
       const names = (request.tools ?? []).map((t: any) => t.function.name);
-      if (names.includes("submit_claims")) return complete(null, [tool("submit_claims", { claims })]);
+      if (names.includes("submit_claims")) return complete(null, [tool("submit_claims", {
+        claims: claims.slice(extractionPacket * 5, ++extractionPacket * 5),
+      })]);
       const message = request.messages.find((m: any) => m.role === "user" && String(m.content).startsWith('{"stage":'));
       const packet = message ? JSON.parse(message.content) : undefined;
       if (names.includes("submit_plan")) {
@@ -219,6 +247,8 @@ describe("default reproduction stage-controller integration (offline only)", () 
         }
         return complete(null, [tool("submit_plan", {
           claimId: packet.claim.id, method: "rerun", materialPaths: ["/work/materials/analyze.py"],
+          ...(shared ? { relatedClaims: packet.pendingClaims.filter((c: any) => c.id !== packet.claim.id)
+            .map((c: any) => ({ claimId: c.id, measurement: c.claim })) } : {}),
           measurement: packet.claim.claim, rationale: "The shipped script computes all five condition scores; reuse captured execution when available.",
         })]);
       }
@@ -261,8 +291,10 @@ describe("default reproduction stage-controller integration (offline only)", () 
     const saved: PipelineCheckpoint[] = [];
     const result = await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
     expect(judgeCalls).toBe(1);
-    expect(duplicateAttempts.size).toBe(4);
-    expect(result.results.map(r => r.verdict)).toEqual(["verified", "falsified", "verified", "falsified", "verified"]);
+    expect(duplicateAttempts.size).toBe(shared ? 0 : 4);
+    expect(result.results.map(r => r.verdict)).toEqual(claims.map((_, i) => i % 2 ? "falsified" : "verified"));
+    expect(plannedReads.size).toBe(shared ? 1 : 5);
+    expect(saved.at(-1)?.controller.milestones.filter(m => m.phase === "execution")).toHaveLength(shared ? 1 : 5);
     expect(saved.at(-1)?.controller.phase).toBe("complete");
     expect(saved.at(-1)?.controller.calls).toBeLessThan(100);
     expect(saved.at(-1)?.claims.every(c => c.status !== "pending")).toBe(true);
