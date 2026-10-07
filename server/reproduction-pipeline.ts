@@ -95,8 +95,22 @@ export async function runControlledReproduction(input: {
         });
         await save();
         let commandInFlight = false;
+        const stageTools = [...input.tools, ...controls]
+          .filter(t => controller.allowedTools.includes(t.name))
+          .map(t => {
+            if (phase !== "assessment" || t.name !== "record_result") return t;
+            const method = controller.plans.get(initial.id)?.method;
+            return {
+              ...t,
+              description: `${t.description} Explicitly provide method. The accepted plan method is ${method}. If the experiment used another method, request_plan_revision first; never relabel an experiment to satisfy the plan.`,
+              parameters: {
+                ...t.parameters,
+                required: Array.from(new Set([...(Array.isArray(t.parameters.required) ? t.parameters.required : []), "method"])),
+              },
+            };
+          });
         const outcome = await runToolLoop(input.config, `${input.instructions}\n\nApplication-owned workflow: follow ONLY the current stage packet and permitted tools. Claims have already been extracted; do not register new claims or manage source identifiers. Stage control replaces any older workflow instructions, but all custom scientific instructions and qP safety gates remain binding.`, packet,
-          [...input.tools, ...controls].filter(t => controller.allowedTools.includes(t.name)),
+          stageTools,
           async (name, args) => {
             controller.charge(name);
             if (phase === "assessment" && stageCalls >= 4
@@ -118,8 +132,13 @@ export async function runControlledReproduction(input: {
             if (name === "record_result" && (args.id !== initial.id || args.status === "pending"))
               return "Refused: finalize only the application's current claim; extraction is closed.";
             if (name === "record_result" && args.method !== "blocked"
-              && args.method !== controller.plans.get(initial.id)?.method)
-              return "Refused: scientific method differs from the accepted plan. Request a bounded plan revision.";
+              && args.method !== controller.plans.get(initial.id)?.method) {
+              const expected = controller.plans.get(initial.id)?.method;
+              if (args.method === undefined)
+                return `Refused: missing scientific method. Explicitly supply method=${expected} only if that is what was actually executed; otherwise request_plan_revision.`;
+              const received = ["rerun", "raw-data-rederived", "toy"].includes(String(args.method)) ? args.method : "invalid";
+              return `Refused: scientific method differs from the accepted plan (received=${received}; planned=${expected}). Use request_plan_revision before changing methods. Never relabel the actual experiment just to satisfy this gate.`;
+            }
             if (name === "record_result" && args.method === "rerun") {
               const plan = controller.plans.get(initial.id)!;
               const ids = Array.isArray(args.evidence_tool_call_ids) ? args.evidence_tool_call_ids : [];

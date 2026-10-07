@@ -125,6 +125,33 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("requires an explicit assessment method and recovers from an omitted method", async () => {
+    mock.create.mockResolvedValue(sandbox());
+    const responder = stageResponder();
+    let omitted = false;
+    mock.complete.mockImplementation(async (request: any) => {
+      const recording = request.tools?.find((t: any) => t.function.name === "record_result");
+      const reply = await responder(request);
+      if (recording) {
+        expect(recording.function.parameters.required).toContain("method");
+        expect(recording.function.description).toContain("never relabel");
+        if (!omitted) {
+          omitted = true;
+          const call = reply.choices[0].message.tool_calls![0] as any;
+          const args = JSON.parse(call.function.arguments);
+          delete args.method;
+          call.function.arguments = JSON.stringify(args);
+        }
+      }
+      return reply;
+    });
+    await runReproduction(options());
+    expect(omitted).toBe(true);
+    expect(mock.complete.mock.calls.some(([request]) =>
+      request.messages.some((message: any) => message.role === "tool"
+        && String(message.content).includes("method")
+        && String(message.content).includes("Resubmit this tool")))).toBe(true);
+  });
   it("runs a standalone script with an explicit material working directory", async () => {
     const sb = sandbox();
     mock.create.mockResolvedValue(sb);
