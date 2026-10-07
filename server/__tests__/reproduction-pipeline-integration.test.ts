@@ -92,6 +92,8 @@ function stageResponder(scenario = "success") {
           path: change.path, content: `# ${packet.adaptationContract.intended_changes}\nprint('measured_score=0.91')`, reason: change.reason,
         })) : []),
       tool("run_command", { command: scenario === "display-only" ? "cat /work/materials/results.csv" : scenario.startsWith("qp-") ? "python materials/analyze.py" : "python /work/materials/analyze.py",
+        ...(packet.executionEvidence?.some((e: any) => e.successful && e.command === "python /work/materials/analyze.py")
+          ? { repeat_reason: "Independent replicate for this fixture's next claim." } : {}),
         ...(scenario === "working-directory" ? { working_directory: "/work/materials" } : {}) }),
       ...(scenario === "mixed-evidence" ? [tool("run_command", { command: "cat /work/materials/results.csv" })] : []),
       ...(scenario === "analysis-chain" ? [
@@ -203,7 +205,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
     const sb = sandbox();
     sb.exec.mockResolvedValue({ exitCode: 0, stdout: output, stderr: "", timedOut: false, durationMs: 1 });
     mock.create.mockResolvedValue(sb);
-    const plannedReads = new Set<string>(), evidenceReads = new Set<string>();
+    const plannedReads = new Set<string>(), evidenceReads = new Set<string>(), duplicateAttempts = new Set<string>();
     let executed = false, judgeCalls = 0;
     mock.complete.mockImplementation(async (request: any) => {
       const names = (request.tools ?? []).map((t: any) => t.function.name);
@@ -226,6 +228,11 @@ describe("default reproduction stage-controller integration (offline only)", () 
           return complete(null, [tool("run_command", { command: "python /work/materials/analyze.py" }), tool("submit_for_assessment", {})]);
         }
         expect(packet.executionEvidence.some((e: any) => e.successful)).toBe(true);
+        if (!duplicateAttempts.has(packet.claim.id)) {
+          duplicateAttempts.add(packet.claim.id);
+          return complete(null, [tool("run_command", { command: "python /work/materials/analyze.py" })]);
+        }
+        expect(request.messages.some((m: any) => String(m.content).includes("Refused duplicate execution"))).toBe(true);
         return complete(null, [tool("submit_for_assessment", {})]);
       }
       if (names.includes("record_result")) {
@@ -254,6 +261,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
     const saved: PipelineCheckpoint[] = [];
     const result = await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
     expect(judgeCalls).toBe(1);
+    expect(duplicateAttempts.size).toBe(4);
     expect(result.results.map(r => r.verdict)).toEqual(["verified", "falsified", "verified", "falsified", "verified"]);
     expect(saved.at(-1)?.controller.phase).toBe("complete");
     expect(saved.at(-1)?.controller.calls).toBeLessThan(100);

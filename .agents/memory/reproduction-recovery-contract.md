@@ -51,6 +51,12 @@ Keep immutable stage handoffs limited to required scientific state and compact e
 
 Do not treat any successful shell call as progress or rely on pre-execution evidence references after compaction.
 
+Do not silently cache scientific executions. Repeating a successful planned command should first prompt evidence retrieval or an explicit reason for a fresh execution.
+
+**Why:** Live runs repeated successful analyses across claims, but identical commands can also represent legitimate independent replicates or changed inputs. Automatic reuse would risk changing the experiment.
+
+**How to apply:** Keep original evidence IDs and let the model justify deliberate repetition. A reuse hint grants no verdict and must never be presented as a newly executed experiment.
+
 **Why:** A live run moved past directory browsing but repeatedly ran the same grep/sed inspections; resetting navigation after every command let this continue until the execution allowance ended. The immutable stage packet also predated those commands.
 
 **How to apply:** Compare captured outputs without transient duration text, preserve compact current command references in bounded state, and move persistent no-progress execution to assessment/revision. This is loop control, never evidence of scientific reproduction.

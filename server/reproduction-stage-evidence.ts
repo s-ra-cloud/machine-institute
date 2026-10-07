@@ -3,6 +3,19 @@ import { isPlannedEntrypoint } from "./reproduction-entrypoint";
 
 type EvidenceCall = Pick<ToolCallRecord, "index" | "name" | "args" | "result" | "error">;
 
+/** A reuse hint, never a cached execution result or a scientific verdict. */
+export function repeatExecutionRefusal(calls: readonly EvidenceCall[], paths: string[], args: Record<string, unknown>): string | undefined {
+  if (typeof args.repeat_reason === "string" && args.repeat_reason.trim()) return;
+  const command = String(args.command ?? "").trim();
+  if (!isPlannedEntrypoint(command, paths)) return;
+  const previous = [...calls].reverse().find(call => call.name === "run_command" && !call.error
+    && /^exit code 0\b/.test(call.result)
+    && String(call.args.command ?? "").trim() === command
+    && (call.args.working_directory ?? "/work") === (args.working_directory ?? "/work"));
+  if (!previous) return;
+  return `Refused duplicate execution: this command already succeeded in original tool call #${previous.index}. Use read_tool_result tool_call_id=${previous.index} to inspect whether that output covers this claim, then submit_for_assessment if sufficient. This does not verify the claim or assert unchanged inputs. If a fresh experiment is necessary (changed code/inputs, independent repetition, or missing measurements), resubmit run_command with repeat_reason explaining why. Never relabel retrieved output as a new execution.`;
+}
+
 /** Navigation only: original tool results remain the authoritative evidence. */
 export function executionEvidenceIndex(calls: readonly EvidenceCall[]) {
   return calls.filter(call => call.name === "run_command").slice(-12).map(call => ({

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { rerunLaunchRefusal } from "./reproduction-entrypoint";
-import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue } from "./reproduction-stage-evidence";
+import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue, repeatExecutionRefusal } from "./reproduction-stage-evidence";
 import { runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolLoopOptions, type ToolLoopResult } from "./model-service";
 import { ReproductionController, renderAcceptedLogbook, type ExperimentPlan } from "./reproduction-controller";
 import type { ReproductionSession } from "./reproduction-session";
@@ -108,6 +108,13 @@ export async function runControlledReproduction(input: {
         const stageTools = [...input.tools, ...controls]
           .filter(t => controller.allowedTools.includes(t.name))
           .map(t => {
+            if (phase === "execution" && t.name === "run_command") return {
+              ...t, parameters: { ...t.parameters, properties: {
+                ...t.parameters.properties as Record<string, unknown>,
+                repeat_reason: { type: "string", minLength: 1, maxLength: 1000,
+                  description: "Why a fresh execution is needed if this exact command already succeeded. Otherwise retrieve its original output." },
+              } },
+            };
             if (phase !== "assessment" || t.name !== "record_result") return t;
             const method = controller.plans.get(initial.id)?.method;
             // Extraction owns source identity and reported values. Assessment
@@ -177,6 +184,8 @@ export async function runControlledReproduction(input: {
               if (plan?.method === "rerun") {
                 const refusal = rerunLaunchRefusal(String(args.command ?? ""), plan.materialPaths, Boolean(input.session.questioning));
                 if (refusal) return refusal;
+                const repeat = repeatExecutionRefusal(input.session.toolCalls, plan.materialPaths, args);
+                if (repeat) return repeat;
               }
               controller.commandDispatched();
               commandInFlight = true;

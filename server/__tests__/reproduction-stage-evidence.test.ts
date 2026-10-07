@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue } from "../reproduction-stage-evidence";
+import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue, repeatExecutionRefusal } from "../reproduction-stage-evidence";
 const paths = ["/work/materials/analyze.py"];
 const run = (index: number, result: string, command = "python /work/materials/analyze.py") => ({
   index, name: "run_command", args: { command }, result,
 });
 const args = { evidence_tool_call_ids: [1], evidence_excerpt: "score=0.966667", reproduced_value: "0.966667" };
 describe("stage evidence handoff", () => {
+  it("requires an explicit reason for repeating a successful source execution without inventing evidence", () => {
+    const previous = run(17, "exit code 0\nscore=0.966667");
+    expect(repeatExecutionRefusal([previous], paths, previous.args)).toContain("original tool call #17");
+    expect(repeatExecutionRefusal([previous], paths, { ...previous.args, repeat_reason: " " })).toContain("Refused");
+    expect(repeatExecutionRefusal([previous], paths, { ...previous.args, repeat_reason: "An independent replicate is required." })).toBeUndefined();
+    expect(repeatExecutionRefusal([previous], paths, { ...previous.args, repeat_reason: "Input data changed." })).toBeUndefined();
+    expect(repeatExecutionRefusal([run(17, "exit code 137")], paths, previous.args)).toBeUndefined();
+    expect(repeatExecutionRefusal([{ ...previous, error: true }], paths, previous.args)).toBeUndefined();
+    expect(repeatExecutionRefusal([previous], paths, { command: `${previous.args.command} --seed 9` })).toBeUndefined();
+    expect(repeatExecutionRefusal([previous], paths, { ...previous.args, working_directory: "/work/materials" })).toBeUndefined();
+    expect(repeatExecutionRefusal([run(17, "exit code 0", "cat results.csv")], paths, { command: "cat results.csv" })).toBeUndefined();
+  });
   it("keeps execution references after subsequent file reads without copying bulk output", () => {
     const source = run(1, `exit code 0\n${"noise".repeat(2000)}\nscore=0.966667`);
     const reads = Array.from({ length: 20 }, (_, n) => ({ index: n + 2, name: "read_file", args: {}, result: "source code" }));
