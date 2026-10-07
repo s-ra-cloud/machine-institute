@@ -100,12 +100,21 @@ export async function runControlledReproduction(input: {
           .map(t => {
             if (phase !== "assessment" || t.name !== "record_result") return t;
             const method = controller.plans.get(initial.id)?.method;
+            // Extraction owns source identity and reported values. Assessment
+            // must not ask the model to reconstruct those immutable fields.
+            const updateFields = new Set(["id", "status", "reproduced_value", "evidence", "notes", "method",
+              "evidence_tool_call_ids", "evidence_excerpt", "blocker_kind", "raw_input_tool_call_id", "raw_input_path"]);
+            const properties = Object.fromEntries(Object.entries(t.parameters.properties as Record<string, unknown>)
+              .filter(([key]) => updateFields.has(key)));
+            properties.status = { type: "string", enum: ["verified", "falsified", "toy", "inconclusive"] };
             return {
               ...t,
-              description: `${t.description} Explicitly provide method. The accepted plan method is ${method}. If the experiment used another method, request_plan_revision first; never relabel an experiment to satisfy the plan.`,
+              description: `Assess the existing claim ${initial.id} using exact captured evidence. Claim text, original_value and source provenance are already registered and immutable: omit them, do not re-extract or resubmit them. Explicitly provide method. The accepted plan method is ${method}. If the experiment used another method, request_plan_revision first; never relabel an experiment to satisfy the plan.`,
               parameters: {
                 ...t.parameters,
-                required: Array.from(new Set([...(Array.isArray(t.parameters.required) ? t.parameters.required : []), "method"])),
+                properties,
+                additionalProperties: false,
+                required: ["id", "status", "method"],
               },
             };
           });

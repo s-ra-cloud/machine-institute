@@ -125,6 +125,39 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("excludes immutable source fields from assessment and rejects an attempted rewrite before dispatch", async () => {
+    mock.create.mockResolvedValue(sandbox());
+    const record = vi.spyOn(ReproductionSession.prototype, "recordResult");
+    const responder = stageResponder();
+    let attempted = false;
+    mock.complete.mockImplementation(async (request: any) => {
+      const recording = request.tools?.find((t: any) => t.function.name === "record_result");
+      const reply = await responder(request);
+      if (recording) {
+        const schema = recording.function.parameters;
+        expect(schema.additionalProperties).toBe(false);
+        for (const field of ["claim", "original_value", "source_quote", "source_location", "source_tool_call_id", "required_material"])
+          expect(schema.properties).not.toHaveProperty(field);
+        expect(schema.properties.status.enum).not.toContain("pending");
+        if (!attempted) {
+          attempted = true;
+          const call = reply.choices[0].message.tool_calls![0] as any;
+          call.function.arguments = JSON.stringify({
+            ...JSON.parse(call.function.arguments), original_value: "0.99", claim: "A rewritten claim",
+          });
+        }
+      }
+      return reply;
+    });
+    try {
+      await runReproduction(options());
+      expect(attempted).toBe(true);
+      expect(record.mock.calls.some(([args]) => args.original_value === "0.99" || args.claim === "A rewritten claim")).toBe(false);
+      expect(record.mock.calls.some(([args]) => args.status === "verified" && args.method === "rerun")).toBe(true);
+    } finally {
+      record.mockRestore();
+    }
+  });
   it("requires an explicit assessment method and recovers from an omitted method", async () => {
     mock.create.mockResolvedValue(sandbox());
     const responder = stageResponder();

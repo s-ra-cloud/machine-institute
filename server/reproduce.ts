@@ -386,20 +386,20 @@ const TOOLS: ToolSpec[] = [
   },
   {
     name: "run_command",
-    description: "Run a bash command in the sandbox and return its exit code, stdout and stderr (automatically retained). For scientific reruns, use a standalone planned source entrypoint, not cd/chaining/pipes/tee/redirection. Use working_directory for relative input files. The GPU is available; HF_TOKEN is set. Commands are killed at timeout_seconds (max 900).",
+    description: "Run bash; returns exit status and retained stdout/stderr. Rerun planned scripts standalone: no cd/chaining/pipes/tee/redirection. Use working_directory for relative files. GPU/HF_TOKEN available. Timeout max 900s.",
     parameters: {
       type: "object",
       properties: {
         command: { type: "string" },
-        working_directory: { type: "string", enum: ["/work", "/work/materials"], description: "P only: working directory, default /work. qP always uses its sealed snapshot; omit this field for qP." },
-        timeout_seconds: { type: "integer", description: "Kill the command after this many seconds (default 600, max 900)." },
+        working_directory: { type: "string", enum: ["/work", "/work/materials"], description: "P: default /work. qP: omit; sealed snapshot controls cwd." },
+        timeout_seconds: { type: "integer", description: "Timeout: default 600s, max 900s." },
       },
       required: ["command"],
     },
   },
   {
     name: "record_result",
-    description: "Register or update one of the paper's core results and its reproduction status. Call once per result with status 'pending' during extraction, then again with the final status. Every result must end with a non-pending status.",
+    description: "Register a grounded claim as pending; update it with evidence and a final non-pending status.",
     parameters: {
       type: "object",
       properties: {
