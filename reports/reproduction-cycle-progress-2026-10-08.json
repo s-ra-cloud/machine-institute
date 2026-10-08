@@ -1,6 +1,6 @@
 {
   "asOf": "2026-10-08",
-  "scope": "All saved website-run attempts through the interrupted 09:02 UTC cycle",
+  "scope": "Saved attempts through the completed 09:22 UTC cycle",
   "fixes": [
     [
       "Shared website workflow",
@@ -321,12 +321,27 @@
       "calls": 5,
       "report": false,
       "stop": "Workspace restart interrupted the runner; only extraction checkpoint survived. Orphaned Modal sandbox identified and terminated; no automatic replay."
+    },
+    {
+      "run": "website-1791451344876",
+      "date": "2026-10-08T09:22:24.876Z",
+      "recorded": 7,
+      "total": 12,
+      "calls": 100,
+      "report": false,
+      "stop": "Stopped during R8 execution at the global 100-tool-call limit; seven provisional results retained. No independently judged final report. Sandbox terminated."
     }
   ],
   "latestCycle": {
-    "status": "interrupted",
-    "modelAccounted": 0.11477281999999997,
-    "modalReserved": 5,
+    "run": "website-1791451344876",
+    "status": "stopped",
+    "reason": "global tool budget",
+    "recordedClaims": 7,
+    "totalClaims": 12,
+    "modelAccountedDollars": 1.3991313120000004,
+    "requests": 78,
+    "settled": 78,
+    "modalReservedDollars": 5,
     "sandboxTerminated": true
   }
 }
