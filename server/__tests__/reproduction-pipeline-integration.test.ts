@@ -127,6 +127,57 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("blocks a mkdir-only repair, then allows a restored file to be inspected before a successful retry", async () => {
+    const sb = sandbox();
+    let experiments = 0, step = 0, sawRefusal = false;
+    sb.exec.mockImplementation(async (...args: any[]) => {
+      const experiment = JSON.stringify(args).includes("python /work/materials/analyze.py");
+      const failed = experiment && ++experiments === 1;
+      return { exitCode: failed ? 1 : 0, stdout: failed ? "" : "measured_score=0.91",
+        stderr: failed ? "FileNotFoundError: [Errno 2] No such file or directory: '/work/data/history.json'" : "",
+        timedOut: false, durationMs: 1 };
+    });
+    mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    mock.complete.mockImplementation(async (request: any) => {
+      if (request.tools?.some((t: any) => t.function.name === "submit_for_assessment")) {
+        sawRefusal ||= request.messages.some((m: any) => String(m.content).includes("mkdir alone does not restore a file"));
+        const run = tool("run_command", { command: "python /work/materials/analyze.py" });
+        if (step++ === 0) return complete(null, [run]);
+        if (step === 2) return complete(null, [tool("run_command", { command: "mkdir -p /work/data" }), run]);
+        if (step === 3) return complete(null, [
+          tool("write_file", { path: "/work/data/history.json", content: "{}" }),
+          tool("read_file", { path: "/work/data/history.json" }),
+        ]);
+        return complete(null, [run, tool("submit_for_assessment", {})]);
+      }
+      return responder(request);
+    });
+    const result = await runReproduction(options());
+    expect(sawRefusal).toBe(true);
+    expect(experiments).toBe(2);
+    expect(result.results[0].verdict).toBe("verified");
+  });
+  it("rejects unknown reuse evidence before accepting a plan, then completes normally", async () => {
+    mock.create.mockResolvedValue(sandbox());
+    const responder = stageResponder();
+    let attempted = false, refused = false;
+    mock.complete.mockImplementation(async (request: any) => {
+      const reply = await responder(request);
+      if (request.tools?.some((t: any) => t.function.name === "submit_plan")) {
+        refused ||= request.messages.some((m: any) => String(m.content).includes("reuse requires an original successful"));
+        const call = reply.choices[0].message.tool_calls?.find((t: any) => t.function.name === "submit_plan");
+        if (call && !attempted) {
+          attempted = true;
+          call.function.arguments = JSON.stringify({ ...JSON.parse(call.function.arguments), reuse_evidence_tool_call_id: 999 });
+        }
+      }
+      return reply;
+    });
+    const result = await runReproduction(options());
+    expect(refused).toBe(true);
+    expect(result.results[0].verdict).toBe("verified");
+  });
   it("rejects a different material script before sandbox dispatch and recovers with the accepted plan", async () => {
     const sb = sandbox();
     mock.create.mockResolvedValue(sb);
@@ -375,7 +426,8 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("/materials/analyze.py"))).toHaveLength(1);
     expect(sb.terminate).toHaveBeenCalledOnce();
   });
-  it.each([false, true])("completes a mixed-outcome report through independent judging; shared planning=%s", async shared => {
+  it.each(["individual", "shared", "reuse"])("completes a mixed-outcome report through independent judging; planning=%s", async mode => {
+    const shared = mode === "shared", reuse = mode === "reuse";
     const claims = Array.from({ length: shared ? 12 : 5 }, (_, i) => ({
       claim: `The measured score for condition ${i + 1} on the held-out evaluation is 0.91.`,
       source_quote: `The measured score for condition ${i + 1} on the held-out evaluation is 0.91.`,
@@ -408,6 +460,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
         }
         return complete(null, [tool("submit_plan", {
           claimId: packet.claim.id, method: "rerun", materialPaths: ["/work/materials/analyze.py"],
+          ...(reuse && executed ? { reuse_evidence_tool_call_id: packet.executionEvidence.find((e: any) => e.successful && e.command === "python /work/materials/analyze.py").id } : {}),
           ...(shared ? { relatedClaims: packet.pendingClaims.filter((c: any) => c.id !== packet.claim.id)
             .map((c: any) => ({ claimId: c.id, measurement: c.claim })) } : {}),
           measurement: packet.claim.claim, rationale: "The shipped script computes all five condition scores; reuse captured execution when available.",
@@ -438,6 +491,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
         return complete(null, [tool("submit_for_assessment", {})]);
       }
       if (names.includes("record_result")) {
+        if (reuse && packet.claim.id !== "R1") expect(packet.measurementHandoff?.reused).toBe(true);
         if (shared) expect(packet.measurementHandoff?.claimId).toBe(packet.claim.id);
         const evidence = packet.executionEvidence.find((e: any) => e.successful && e.command === "python /work/materials/analyze.py");
         expect(evidence).toBeDefined();
@@ -464,7 +518,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
     const saved: PipelineCheckpoint[] = [];
     const result = await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
     expect(judgeCalls).toBe(1);
-    expect(duplicateAttempts.size).toBe(shared ? 0 : 4);
+    expect(duplicateAttempts.size).toBe(shared || reuse ? 0 : 4);
     expect(result.results.map(r => r.verdict)).toEqual(claims.map((_, i) => i % 2 ? "falsified" : "verified"));
     expect(plannedReads.size).toBe(shared ? 1 : 5);
     expect(saved.at(-1)?.controller.milestones.filter(m => m.phase === "execution")).toHaveLength(shared ? 1 : 5);

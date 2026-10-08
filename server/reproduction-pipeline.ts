@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { rerunLaunchRefusal } from "./reproduction-entrypoint";
+import { isPlannedEntrypoint, rerunLaunchRefusal } from "./reproduction-entrypoint";
+import { missingFileRepairIssue } from "./reproduction-repair-check";
 import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue, repeatExecutionRefusal, sharedMeasurementIssue } from "./reproduction-stage-evidence";
 import { runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolLoopOptions, type ToolLoopResult } from "./model-service";
 import { ReproductionController, renderAcceptedLogbook, type ExperimentPlan } from "./reproduction-controller";
@@ -13,6 +14,7 @@ const controls: ToolSpec[] = [
     parameters: { type: "object", additionalProperties: false, required: ["claimId", "method", "materialPaths", "measurement", "rationale"],
       properties: { claimId: { type: "string" }, method: { type: "string", enum: ["rerun", "raw-data-rederived", "toy", "blocked"] },
         materialPaths: { type: "array", items: { type: "string" } }, measurement: { type: "string" }, rationale: { type: "string" },
+        reuse_evidence_tool_call_id: { type: "integer", description: "For rerun only: explicitly reuse an original successful planned-script execution already in executionEvidence. The application skips execution and opens assessment; this does NOT verify any claim, assert unchanged inputs, or count as an independent replicate. Explain why the existing experiment covers the measurement in rationale. Omit when new execution is needed." },
         rawInputs: { type: "array", minItems: 1, maxItems: 30,
           description: "Required for raw-data-rederived: identify already inspected shipped raw observation files, not guessed artifacts or precomputed summaries. Copy original read_file tool IDs. Otherwise choose the actual method.",
           items: { type: "object", additionalProperties: false, required: ["path", "readToolCallId"],
@@ -114,6 +116,15 @@ export async function runControlledReproduction(input: {
             .map(c => ({ id: c.id, claim: c.claim, original_value: c.originalValue })) : undefined,
           revision,
           executionEvidence: executionEvidenceIndex(input.session.toolCalls),
+          reusableExecutions: phase === "planning" ? executionEvidenceIndex(input.session.toolCalls.filter(c =>
+            c.name === "run_command" && !c.error && /^exit code 0\b/.test(c.result)
+            && isPlannedEntrypoint(String(c.args.command ?? ""), Array.from(input.shippedPaths)))) : undefined,
+          recentExecutionFailures: input.session.toolCalls.filter(c => c.name === "run_command"
+            && (c.error || !/^exit code 0\b/.test(c.result))).slice(-3).map(c => ({
+              id: c.index, command: String(c.args.command ?? "").slice(0, 180),
+              errorTail: executionRecoveryExcerpt(c),
+              instruction: "Inspect the failing source operation and cheaply check the proposed repair before another full experiment. Creating a parent directory does not restore a missing file being read. Never invent missing scientific inputs. Original output remains authoritative.",
+            })),
           materials: Array.from(input.shippedPaths),
           evidence: input.session.toolCalls.filter(c => ["run_command", "read_file", "list_files"].includes(c.name))
             // Navigation references, not duplicate canonical evidence. This packet
@@ -125,7 +136,7 @@ export async function runControlledReproduction(input: {
           // The judge summary deliberately clips/omits adaptation instructions.
           // Execution needs the exact authorized contract, protected with the packet.
           adaptationContract: input.session.questioning?.assessment ?? null,
-          instruction: phase === "planning" ? "Review pendingClaims together before choosing an experiment. Include relatedClaims in submit_plan when the same method/materials cover their individual measurements. Do not group unrelated experiments or omit claims to fit the budget. Inspect relevant shipped materials and assess suitability for qP first. Grouped claims share execution, never verdicts."
+          instruction: phase === "planning" ? "Review pendingClaims and reusableExecutions before choosing an experiment. If an existing successful experiment covers the intended measurement, submit_plan with reuse_evidence_tool_call_id to proceed directly to assessment, not another execution stage. This is explicit evidence reuse, never a fresh replicate or an assumption of unchanged inputs. Include relatedClaims when the same method/materials cover their individual measurements. Do not group unrelated experiments or omit claims to fit the budget. Inspect relevant shipped materials and assess suitability for qP first. Grouped claims share execution, never verdicts."
             : phase === "execution" ? `Perform the planned experiment. For rerun evidence, launch a standalone planned script. ${input.session.questioning ? "For qP use python materials/analysis.py with the real planned filename; omit working_directory because the sealed snapshot determines it." : "For P use python /work/materials/analysis.py with the real planned filename, and working_directory=/work/materials if required."} Never wrap the script in cd, chaining, pipes, tee or redirection: stdout/stderr are retained automatically and its own exit status is required. Retrieve old outputs rather than repeat commands. Then submit_for_assessment.`
               : "Inspect existing outputs and record_result for this claim only with exact numbered evidence; request_plan_revision only if more experiments are needed.",
         });
@@ -184,6 +195,13 @@ export async function runControlledReproduction(input: {
               && ["read_file", "read_tool_result", "list_files"].includes(name))
               return "Refused: execution navigation allowance reached. Write/run the accepted analysis, or submit_for_assessment for a bounded plan revision. No scientific result is inferred.";
             if (name === "submit_plan") {
+              const reused = args.reuse_evidence_tool_call_id === undefined ? undefined
+                : input.session.toolCalls.find(c => c.index === args.reuse_evidence_tool_call_id
+                  && c.name === "run_command" && !c.error && /^exit code 0\b/.test(c.result)
+                  && Array.isArray(args.materialPaths) && args.materialPaths.every(p => typeof p === "string")
+                  && isPlannedEntrypoint(String(c.args.command ?? ""), args.materialPaths as string[]));
+              if (args.reuse_evidence_tool_call_id !== undefined && (args.method !== "rerun" || !reused))
+                return "Refused: reuse requires an original successful standalone execution of this plan's material script, with method=rerun. A file read, failed command, or different script is not eligible. No plan or verdict was accepted.";
               if (revision && args.method !== revision.method)
                 return `Refused: this revision requested method=${revision.method} because: ${revision.reason}. Submit that scientific method; do not repeat the superseded ${revision.previousPlan?.method} plan or describe a fallback only in rationale. No result is accepted by this plan change.`;
               if (input.session.questioning && !input.session.questioning.assessment) return "Refused: qP requires assess_suitability before committing an experiment plan.";
@@ -195,8 +213,15 @@ export async function runControlledReproduction(input: {
                   return "Refused: sharing a qP experiment requires every grouped claim to be covered by the immutable suitability assessment and, for adaptation, every planned change. Keep separately scoped claims in separate experiments; never extend authorization through grouping.";
               }
               controller.acceptPlan(args as unknown as ExperimentPlan, input.shippedPaths, Array.from(input.session.recorded.values()), input.session.toolCalls);
+              if (reused) {
+                for (const id of [initial.id, ...(controller.plans.get(initial.id)?.relatedClaims ?? []).map(c => c.claimId)])
+                  measurementHandoffs.set(id, { claimId: id, evidence_tool_call_id: reused.index,
+                    reused: true, notice: "Coverage must be independently assessed; this is a prior execution, not a fresh replicate." });
+                controller.assess();
+              }
               await save();
-              return "Plan accepted; application will start the next stage.";
+              return reused ? `Plan accepted; original execution #${reused.index} retained. Starting individual assessment without rerunning. Verify measurement coverage and provenance; no scientific verdict is inferred.`
+                : "Plan accepted; application will start the next stage.";
             }
             if (name === "submit_for_assessment") {
               const ids = [initial.id, ...(controller.plans.get(initial.id)?.relatedClaims ?? []).map(c => c.claimId)];
@@ -246,6 +271,8 @@ export async function runControlledReproduction(input: {
               if (plan?.method === "rerun") {
                 const refusal = rerunLaunchRefusal(String(args.command ?? ""), plan.materialPaths, Boolean(input.session.questioning));
                 if (refusal) return refusal;
+                const repairIssue = missingFileRepairIssue(input.session.toolCalls, plan.materialPaths, args);
+                if (repairIssue) return repairIssue;
                 const repeat = repeatExecutionRefusal(input.session.toolCalls, plan.materialPaths, args);
                 if (repeat) return repeat;
               }
