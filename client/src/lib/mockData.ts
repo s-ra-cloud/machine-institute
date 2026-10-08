@@ -150,5 +150,5 @@ export const founders = [
   { name: "Hamza Hoummadi", role: "Engineer", institution: "1337 School", link: "https://www.linkedin.com/in/hamza-hoummadi/", linkType: "linkedin" as const },
   { name: "Eliot Hallak", role: "Engineer", institution: "Leveragers", link: "https://www.linkedin.com/in/eliothallak/", linkType: "linkedin" as const },
   { name: "Nolan Pozzobon", role: "Research Assistant", institution: "University of Chicago", link: "https://www.linkedin.com/in/nolan-pozzobon-688a64290", linkType: "linkedin" as const },
-  { name: "Yanjing Li", role: "Assistant Professor", institution: "University of Chicago", link: "https://cs.uchicago.edu/people/yanjing-li/", linkType: "linkedin" as const },
+  { name: "Yanjing Li", role: "Assistant Professor", institution: "University of Chicago", link: "https://www.linkedin.com/in/yanjing-l-a19750166", linkType: "linkedin" as const },
 ];
