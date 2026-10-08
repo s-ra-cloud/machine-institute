@@ -127,6 +127,28 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("rejects a different material script before sandbox dispatch and recovers with the accepted plan", async () => {
+    const sb = sandbox();
+    mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    let attempted = false, sawRefusal = false;
+    mock.complete.mockImplementation(async (request: any) => {
+      if (request.tools?.some((t: any) => t.function.name === "submit_for_assessment")) {
+        sawRefusal ||= request.messages.some((m: any) => String(m.content).includes("not a source entrypoint in the accepted rerun plan"));
+        if (!attempted) {
+          attempted = true;
+          return complete(null, [tool("run_command", { command: "python /work/materials/unplanned.py" })]);
+        }
+      }
+      return responder(request);
+    });
+    const result = await runReproduction(options());
+    expect(attempted).toBe(true);
+    expect(sawRefusal).toBe(true);
+    expect(sb.exec.mock.calls.some(call => JSON.stringify(call).includes("unplanned.py"))).toBe(false);
+    expect(sb.exec.mock.calls.some(call => JSON.stringify(call).includes("python /work/materials/analyze.py"))).toBe(true);
+    expect(result.results[0].verdict).toBe("verified");
+  });
   it("repairs a compound measurement formatting rejection with an explicit, validated exact copy", async () => {
     const excerpt = "measured_score=0.91\ncontrol_score=0.80";
     const sb = sandbox();
@@ -155,6 +177,41 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(sawRepair).toBe(true);
     expect(attempts).toBe(2);
     expect(record.mock.calls.some(([args]) => args.reproduced_value === excerpt)).toBe(true);
+    expect(result.results[0].verdict).toBe("verified");
+    record.mockRestore();
+  });
+  it.each(["missing", "blank", "oversized"])("repairs an invalid explicit-copy excerpt without inferring evidence: %s", async failure => {
+    mock.create.mockResolvedValue(sandbox());
+    const responder = stageResponder();
+    let attempts = 0, sawRefusal = false;
+    const record = vi.spyOn(ReproductionSession.prototype, "recordResult");
+    mock.complete.mockImplementation(async (request: any) => {
+      const reply = await responder(request);
+      const schema = request.tools?.find((t: any) => t.function.name === "record_result")?.function.parameters;
+      if (schema) {
+        expect(schema.required).toContain("evidence_excerpt");
+        expect(schema.properties.evidence_excerpt).toMatchObject({ minLength: 1, maxLength: 6000 });
+        sawRefusal ||= request.messages.some((m: any) => String(m.content).includes(
+          failure === "oversized" ? "6001 characters; maximum is 6000"
+            : failure === "missing" ? "evidence_excerpt is required" : "missing, blank, or not a string"));
+        const call = reply.choices[0].message.tool_calls![0] as any;
+        const args = JSON.parse(call.function.arguments);
+        delete args.reproduced_value;
+        args.copy_excerpt_to_reproduced_value = true;
+        if (attempts++ === 0) {
+          if (failure === "missing") delete args.evidence_excerpt;
+          else args.evidence_excerpt = failure === "blank" ? "  " : "x".repeat(6001);
+        }
+        call.function.arguments = JSON.stringify(args);
+      }
+      return reply;
+    });
+    const result = await runReproduction(options());
+    expect(attempts).toBe(2);
+    expect(sawRefusal).toBe(true);
+    const copied = record.mock.calls.filter(([args]) => args.copy_excerpt_to_reproduced_value === true);
+    expect(copied).toHaveLength(1);
+    expect(copied[0][0].reproduced_value).toBe(copied[0][0].evidence_excerpt);
     expect(result.results[0].verdict).toBe("verified");
     record.mockRestore();
   });

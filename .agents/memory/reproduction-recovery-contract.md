@@ -41,6 +41,12 @@ Provide an explicit verbatim-copy operation for compound measurement text rather
 
 **How to apply:** Copy only on an explicit request, reject conflicting supplied values, and keep exact-output provenance, method validation and independent judging unchanged. Copying an excerpt is formatting, not scientific verification.
 
+Explicit-copy tool schemas must require the source excerpt and state its size bound; a copy flag must never imply automatic evidence retrieval.
+
+**Why:** A live assessment repeatedly requested copying an invalid excerpt until its stage budget expired. The generic error did not distinguish missing/blank input from excessive length, so the retained trace cannot establish which occurred.
+
+**How to apply:** Align schema requirements with runtime validation, report the specific shape or length failure without exposing full arguments, and test missing, blank and oversized excerpt recovery separately. Never manufacture a measurement to repair formatting.
+
 Stage-controlled planning needs its own recovery instructions, not the legacy finalization handoff.
 
 **Why:** A live run retained twelve claims but exhausted planning on README/list repeats. The legacy handoff requests result recording, which is not permitted during planning; restoring that callback alone would just stop earlier.
@@ -195,11 +201,11 @@ Distinguish unknown routed-model limits from verified exact-model catalogue meta
 
 **How to apply:** Resolve exact-model metadata on the normal server reproduction path, preserve conservative fallback with a visible notice when unavailable, and let provider-reported smaller limits tighten each request budget. Metadata must not come from untrusted config fields; paid-run spending caps remain independent of available context.
 
-Reject incompatible planned-script launch formats before paying to execute them, rather than discovering the mismatch only when recording evidence.
+Reject incompatible planned-script launch formats and direct launches of unplanned material scripts before paying to execute them, rather than discovering the mismatch only when recording evidence.
 
-**Why:** A live baseline was launched through `cd ... && python ... | tee ...`; the pipeline exit status could belong to tee, so the strict standalone-source evidence check correctly refused it. Repeated attempts to record that output cannot repair its provenance.
+**Why:** A live baseline was launched through `cd ... && python ... | tee ...`; the pipeline exit status could belong to tee, so the strict standalone-source evidence check correctly refused it. Repeated attempts to record that output cannot repair its provenance. Another live run dispatched a different material script than its accepted plan, spent fifteen minutes on it, and exhausted the global allowance without completing the report.
 
-**How to apply:** Keep the standalone evidence check strict. Align the execution instructions and pre-dispatch guard with it, offer an explicit working directory for P instead of shell chaining, and preserve qP's sealed-snapshot working directory. A terminated wrapper reporting zero is not a certified successful experiment.
+**How to apply:** Keep the standalone evidence check strict. Align the execution instructions and pre-dispatch guard with it, offer an explicit working directory for P instead of shell chaining, and preserve qP's sealed-snapshot working directory. A different material experiment requires a plan revision, not just rejection of its output afterward. Keep ordinary setup and evidence retrieval available. A terminated wrapper reporting zero is not a certified successful experiment.
 
 Persist local spending-stop reasons before passing through provider SDK error handling.
 

@@ -17,9 +17,20 @@ describe("planned rerun launch contract", () => {
     expect(rerunLaunchRefusal(command, paths)).toBeUndefined();
   });
   it("does not certify CSV displays, setup commands or unrelated sources", () => {
-    for (const command of ["cat /work/materials/results.csv", "python -c \"import torch\"", "python materials/unplanned.py"]) {
+    for (const command of ["cat /work/materials/results.csv", "python -c \"import torch\""]) {
       expect(isPlannedEntrypoint(command, paths)).toBe(false);
       expect(rerunLaunchRefusal(command, paths)).toBeUndefined();
     }
+  });
+  it.each([
+    "python /work/materials/analysis3_early_state_patching.py",
+    "python3 materials/unplanned.py",
+    "python '/work/materials/unplanned.py'",
+    "cd /work && python materials/unplanned.py",
+    "node materials/unplanned.mjs",
+  ])("rejects an unplanned material script before paying for execution: %s", command => {
+    expect(isPlannedEntrypoint(command, paths)).toBe(false);
+    expect(rerunLaunchRefusal(command, paths)).toContain("not a source entrypoint in the accepted rerun plan");
+    expect(rerunLaunchRefusal(command, paths, true)).toContain("request_plan_revision");
   });
 });

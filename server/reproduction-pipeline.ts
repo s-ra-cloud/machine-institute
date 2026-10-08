@@ -154,8 +154,8 @@ export async function runControlledReproduction(input: {
               description: "Copy a literal contiguous measurement substring from evidence_excerpt. Do not round, relabel, or join separated values. Put comparisons and interpretation in notes." };
             properties.copy_excerpt_to_reproduced_value = { type: "boolean", enum: [true],
               description: "For a compound measurement or table, set true and OMIT reproduced_value. The application copies evidence_excerpt verbatim as the measurement text. This never infers values, changes the verdict, or bypasses evidence/provenance checks." };
-            properties.evidence_excerpt = { type: "string",
-              description: "Exact captured output containing reproduced_value literally; not reconstructed prose. Scientific validation remains mandatory." };
+            properties.evidence_excerpt = { type: "string", minLength: 1, maxLength: 6000,
+              description: "Required even when copy_excerpt_to_reproduced_value=true: supply a nonempty exact contiguous quote of at most 6000 characters from original captured evidence. The copy flag copies THIS supplied excerpt into reproduced_value; it does not fetch output automatically. Retrieve the measurement with read_tool_result if needed; omit surrounding output rather than paraphrasing or joining separated lines. Scientific validation remains mandatory." };
             if (method === "raw-data-rederived") {
               properties.raw_input_path = { type: "string", description: "Exact inspected raw input path from plan.rawInputs; the computation must identify this same path." };
               properties.raw_input_tool_call_id = { type: "integer", description: "Original read_file ID for raw_input_path from plan.rawInputs, not the computation ID or a later read_tool_result ID." };
@@ -167,7 +167,7 @@ export async function runControlledReproduction(input: {
                 ...t.parameters,
                 properties,
                 additionalProperties: false,
-                required: ["id", "status", "method"],
+                required: ["id", "status", "method", "evidence_excerpt"],
               },
             };
           });
@@ -222,8 +222,10 @@ export async function runControlledReproduction(input: {
             if (name === "record_result" && args.copy_excerpt_to_reproduced_value === true) {
               if (args.reproduced_value !== undefined)
                 return "Refused: omit reproduced_value when requesting an exact excerpt copy. Conflicting measurement text will not be overwritten.";
-              if (typeof args.evidence_excerpt !== "string" || !args.evidence_excerpt.trim() || args.evidence_excerpt.length > 6000)
-                return "Refused: provide a nonempty exact evidence_excerpt of at most 6000 characters to copy. No measurement is inferred.";
+              if (typeof args.evidence_excerpt !== "string" || !args.evidence_excerpt.trim())
+                return "Refused: evidence_excerpt is missing, blank, or not a string. The copy flag does not retrieve evidence: supply evidence_excerpt explicitly using an exact quote from the cited original output (read_tool_result can retrieve it), and omit reproduced_value. No measurement is inferred.";
+              if (args.evidence_excerpt.length > 6000)
+                return `Refused: evidence_excerpt contains ${args.evidence_excerpt.length} characters; maximum is 6000. Select a shorter contiguous measurement excerpt from the same original output, not the entire log or table. Do not paraphrase or concatenate separate passages. Keep the original evidence IDs and omit reproduced_value.`;
               args = { ...args, reproduced_value: args.evidence_excerpt };
             }
             if (name === "record_result" && args.method !== "blocked"
