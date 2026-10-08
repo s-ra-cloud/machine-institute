@@ -127,6 +127,36 @@ beforeEach(() => {
   mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
 });
 describe("default reproduction stage-controller integration (offline only)", () => {
+  it("reads a late material function by query through the website entrypoint and completes judging", async () => {
+    const prefix = "# unrelated initialization\n".repeat(2000);
+    mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{
+      name: "analyze.py", kind: "text", source: "additional",
+      text: prefix + "def measure():\n    print('measured_score=0.91')\nmeasure()\n",
+    }], textFileCount: 1, binaryFileCount: 0 });
+    mock.create.mockResolvedValue(sandbox());
+    const responder = stageResponder();
+    let sawTargetedPage = false, requestedPage = false;
+    mock.complete.mockImplementation(async (request: any) => {
+      sawTargetedPage ||= request.messages.some((m: any) => m.role === "tool"
+        && String(m.content).includes(`Returned characters: ${prefix.length}-`)
+        && String(m.content).includes("def measure():"));
+      if (!requestedPage && request.tools?.some((t: any) => t.function.name === "submit_plan")) {
+        requestedPage = true;
+        return complete(null, [tool("read_file", { path: "/work/materials/analyze.py", query: "def measure", max_chars: 500 })]);
+      }
+      const reply = await responder(request);
+      for (const call of reply.choices[0].message.tool_calls ?? []) {
+        if (call.function.name !== "read_file") continue;
+        const args = JSON.parse(call.function.arguments);
+        if (args.path === "/work/materials/analyze.py")
+          call.function.arguments = JSON.stringify({ ...args, query: "def measure", max_chars: 500 });
+      }
+      return reply;
+    });
+    const result = await runReproduction(options());
+    expect(sawTargetedPage).toBe(true);
+    expect(result.results[0].verdict).toBe("verified");
+  });
   it("blocks a mkdir-only repair, then allows a restored file to be inspected before a successful retry", async () => {
     const sb = sandbox();
     let experiments = 0, step = 0, sawRefusal = false;

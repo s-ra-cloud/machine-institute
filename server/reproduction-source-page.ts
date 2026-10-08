@@ -6,6 +6,24 @@
 const PAGE_SERIALIZED_BYTE_LIMIT = 9_000;
 const MAX_REQUESTED_CHARS = 40_000;
 
+/** A targeted read is still a literal, contiguous source page, not a summary. */
+export function readTargetedSourcePage(path: string, text: string, args: Record<string, unknown>): string {
+  const offset = args.offset === undefined ? 0 : args.offset;
+  const max = args.max_chars === undefined ? 12_000 : args.max_chars;
+  if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0
+    || offset > text.length || splitsSurrogate(text, offset))
+    return "Refused: offset must be a valid canonical character offset at a Unicode character boundary.";
+  if (typeof max !== "number" || !Number.isSafeInteger(max) || max < 1)
+    return "Refused: max_chars must be a positive integer.";
+  if (args.query === undefined) return renderSourcePage(path, text, offset, max);
+  if (typeof args.query !== "string" || !args.query.trim() || args.query.length > 128)
+    return "Refused: query must be a nonblank literal string of at most 128 characters.";
+  const match = text.indexOf(args.query, offset);
+  if (match < 0)
+    return `No literal match at or after offset ${offset}. This is navigation feedback, not evidence that a scientific material or result is missing. Try another exact symbol or read_file without query.`;
+  return renderSourcePage(path, text, match, max);
+}
+
 function splitsSurrogate(text: string, index: number): boolean {
   return index > 0 && index < text.length
     && text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff

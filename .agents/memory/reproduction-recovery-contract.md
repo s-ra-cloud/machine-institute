@@ -159,6 +159,12 @@ Distinguish provider-reported context constraints from local retry targets and o
 
 **How to apply:** Use explicit total/input limits and provider token counts when available, keep unknown-limit retries bounded, and account for the protected request floor without overriding genuine provider limits. Preserve only numeric/allowlisted error metadata, never raw provider bodies. Keep source-grounding/schema additions within default-prompt preflight headroom.
 
+Even a small retrieval feature can exceed the default small-window preflight allowance if its schema descriptions and runtime guidance repeat themselves. A targeted-read change triggered this before sandbox startup in recovery replays.
+
+**Why:** Fixed instructions and schemas consume the headroom reserved for evidence; adding explanatory prose can make an otherwise valid tool unusable before the experiment begins.
+
+**How to apply:** Keep descriptions concise and test default-prompt preflight plus full recovery replays when extending tools. Do not weaken context safety limits to fit redundant guidance.
+
 Source-reading progress must be measured against the page actually visible to the model, not the full underlying file response.
 
 **Why:** The tool loop can shorten a large response in the middle before the model sees it. Counting the declared original range as delivered falsely directs the agent past unread text, while the original full result can remain separately available for evidence validation.
@@ -184,6 +190,12 @@ Separate recovery preparation, bounded analysis, and reserved finalization rathe
 **How to apply:** Never renew analysis for each command or retrieval. Preserve time for evidence retrieval and record repair after experiments close, keep overall budgets authoritative, and leave unsupported claims unresolved rather than inventing a blocker or verdict.
 
 Treat historical scripted replay tests as a baseline, not evidence of real-model workflow reliability.
+
+Keep a bounded required-tool correction separate from earlier general premature-stop reminders.
+
+**Why:** A provider can return ordinary prose despite explicit function tool choice. A general reminder consumed during browsing must not eliminate the first opportunity to correct a missing required stage transition.
+
+**How to apply:** Permit one correction per required tool in a stage loop, without renewing it on browsing. Preserve deadlines, spending and tool limits, evidence validation, and unresolved status if the model still omits the call. An offline replay verifies recovery mechanics, not live-model completion reliability.
 
 **Why:** Successive instruction and recovery fixes passed prescribed-turn mocks while live runs stalled at different workflow transitions. A successful scripted path only establishes that the application permits that sequence. Even successful assessment-to-plan revision returned to source inspection without an experiment; moving the failure to another stage is not end-to-end progress.
 

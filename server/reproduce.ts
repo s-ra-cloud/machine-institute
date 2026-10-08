@@ -29,7 +29,7 @@ import {
 import { deriveContributionKeywords } from "./prompts/peer-review";
 import { ReproductionSession } from "./reproduction-session";
 import { ReproductionReadGuard } from "./reproduction-read-guard";
-import { renderSourcePage, searchPaperSource } from "./reproduction-source-page";
+import { readTargetedSourcePage, renderSourcePage, searchPaperSource } from "./reproduction-source-page";
 import { QuestioningState, QUESTIONING_TOOL, QUESTIONING_SETUP_TOOL, questioningSetupCommand } from "./reproduction-questioning";
 import { cleanQuestioningEnvironment, isolatedQuestioningCommand, QUESTIONING_MANIFEST_SCRIPT, QUESTIONING_LINK_SNAPSHOT_SCRIPT } from "./reproduction-isolation";
 import { QuestioningProvenanceLimitError } from "./reproduction-provenance-store";
@@ -369,13 +369,14 @@ const TOOLS: ToolSpec[] = [
   },
   {
     name: "read_file",
-    description: "Read sandbox text with verified path/range. Pages fit 9000 serialized bytes; follow the returned continuation offset.",
+    description: "Read verified source. query jumps to a literal; omit it to continue paging.",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string" },
-        max_chars: { type: "integer", description: "Character cap (default 12000); byte limit may return fewer." },
-        offset: { type: "integer", description: "Source character offset (default 0); invalid offsets refused." },
+        query: { type: "string", description: "Case-sensitive literal, max 128 chars." },
+        max_chars: { type: "integer", description: "Character cap, default 12000; byte-bounded." },
+        offset: { type: "integer", description: "Start offset, default 0." },
       },
       required: ["path"],
     },
@@ -696,7 +697,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           if (!Number.isSafeInteger(max) || max < 1) return "Refused: max_chars must be a positive integer.";
           const text = questioning ? questioning.readKnownSource(path) : await sandbox.readText(path);
           if (text === undefined) return "Refused: qP inspection can read only uploaded originals, working source and recorded immutable snapshots. Host paths, symlinks, proc/environment and mutable execution results are not exposed. Retrieve captured execution output with read_tool_result.";
-          return renderSourcePage(path, text, offset, max);
+          return readTargetedSourcePage(path, text, args);
         }
         case "write_file": {
           const path = String(args.path || "");

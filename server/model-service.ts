@@ -596,6 +596,7 @@ export async function runToolLoop(
   let stoppedBy: ToolLoopResult["stoppedBy"] = "model";
   let forceFinal = false;
   let prematureStopRecoveries = 0;
+  const missingRequiredToolRecoveries = new Set<string>();
   let recoveryProgressHighWater: number | undefined;
   const observe = async (event: ToolLoopOutcome): Promise<void> => {
     try { await options.onOutcome?.(event); } catch { /* Diagnostics cannot break a run. */ }
@@ -831,6 +832,20 @@ export async function runToolLoop(
       if (!forceFinal && Date.now() >= options.deadlineMs) {
         forceFinal = true;
         stoppedBy = "deadline";
+      }
+      // A provider can return prose even with an explicit function tool_choice.
+      // Give each required transition one correction independently of earlier
+      // general reminders. Never renew this allowance on browsing activity.
+      if (!forceFinal && requiredTool) {
+        if (!missingRequiredToolRecoveries.has(requiredTool)) {
+          missingRequiredToolRecoveries.add(requiredTool);
+          messages.push({ role: "user", content:
+            `The required ${requiredTool} tool call was missing. The stage is still incomplete. Call ${requiredTool} using the existing evidence and its declared schema. Do not invent evidence or repeat completed experiments.` });
+          continue;
+        }
+        stoppedBy = "no-progress";
+        await observe({ kind: "stop", round, callCount: toolCalls.length, finishReason, stopReason: stoppedBy });
+        return { content: "", toolCalls, rounds: round, stoppedBy, finishReason };
       }
       const incomplete = finishReason === "length" || finishReason === "content_filter" || finishReason === "tool_calls";
       const continuation = !forceFinal

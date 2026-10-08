@@ -79,7 +79,16 @@ ReproductionSandbox.create = async opts => {
   // only be reconciled using verified termination and conservative cost bounds.
   spendingGuard.check("Modal", ledger.modalReserved ?? 0, 5, 10);
   ledger.modalReserved = (ledger.modalReserved ?? 0) + 5; saveLedger();
-  return create({ ...opts, resourceLimits: { cpu: 2, memoryMiB: 8192 } });
+  const sandbox = await create({ ...opts, resourceLimits: { cpu: 2, memoryMiB: 8192 } });
+  try {
+    // Remote GPU allocation can outlive this process and its temporary log.
+    save("sandbox", { sandboxId: sandbox.sandboxId, allocatedAt: new Date().toISOString() });
+  } catch (error) {
+    try { await sandbox.terminate(); }
+    catch { console.error(`Cleanup required for sandbox ${sandbox.sandboxId}: allocation record could not be saved.`); }
+    throw error;
+  }
+  return sandbox;
 };
 try {
   const config = { providerMode: "byoc" as const, provider: "openrouter", modelName, apiKey: process.env.OPENROUTER_API_KEY };

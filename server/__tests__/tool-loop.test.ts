@@ -29,6 +29,40 @@ function assistantFinal(content: string) {
 const platform = { providerMode: "platform" as const, provider: "openai", modelName: "openai/gpt-4o" };
 
 describe("runToolLoop", () => {
+  it("repairs a missing required call after the general premature-stop reminder was used", async () => {
+    createMock
+      .mockResolvedValueOnce(assistantFinal("still inspecting"))
+      .mockResolvedValueOnce(assistantToolCall("browse", "inspection"))
+      .mockResolvedValueOnce(assistantFinal("I have a plan"))
+      .mockResolvedValueOnce(assistantToolCall("plan", "accepted"));
+    let executions = 0;
+    const execute = vi.fn(async () => { executions++; return "ok"; });
+    const result = await runToolLoop(platform, "sys", "user", tools, execute, {
+      maxToolCalls: 8, deadlineMs: Date.now() + 60_000,
+      onPrematureStop: () => "Use the tools.", maxPrematureStopRecoveries: 1,
+      getRequiredTool: () => executions === 1 ? "echo" : undefined,
+      isStageComplete: () => executions === 2,
+    });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(result.toolCalls).toHaveLength(2);
+    expect(createMock).toHaveBeenCalledTimes(4);
+    expect(createMock.mock.calls[3][0].tool_choice).toEqual({ type: "function", function: { name: "echo" } });
+  });
+
+  it("stops unresolved after one required-call correction rather than returning prose as completion", async () => {
+    createMock.mockResolvedValue(assistantFinal("done without the tool"));
+    const execute = vi.fn();
+    const result = await runToolLoop(platform, "sys", "user", tools, execute, {
+      maxToolCalls: 8, deadlineMs: Date.now() + 60_000,
+      getRequiredTool: () => "echo",
+      onPrematureStop: () => "Continue", maxPrematureStopRecoveries: 20,
+    });
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.stoppedBy).toBe("no-progress");
+    expect(result.content).toBe("");
+  });
+
   beforeEach(() => {
     createMock.mockReset();
     constructorOptions.mockReset();
