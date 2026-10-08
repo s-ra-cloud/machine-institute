@@ -14,3 +14,17 @@ mtime_ms = 1790618431464
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:7fca964b-5ad6-43c0-92eb-ec6b89d6f2b8/b0148759-fd6c-42e6-b328-6daf3809c35a/8a49f0ba-ed3f-4bcd-af67-6d93e1263138"
 storage_version_token = "1790618441665914"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "xbHMYco0OS5hyar7qyj91"
+uri = "file://reports/reproduction-cycle-progress-2026-10-08.html"
+type = "html"
+title = "Reproduction cycle progress tracker"
+description = "Fix inventory, all 26 saved attempts, live outcomes, remaining problems and budget distinctions."
+logical_id = "5db36a11-1e1d-4db7-a990-0e9e76768a98"
+content_hash = "sha256:935ca775c88a0c6422914fa769d8dab6d54e5fa61ddd1048479a01e39a9fe102"
+size = 13185
+mtime_ms = 1791450125345
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:7fca964b-5ad6-43c0-92eb-ec6b89d6f2b8/5db36a11-1e1d-4db7-a990-0e9e76768a98/2cbda482-ce1a-4a52-ad83-3d154adf8c8a"
+storage_version_token = "1791450146374751"
+content_type = "text/html"

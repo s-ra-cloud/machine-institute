@@ -1,0 +1,332 @@
+{
+  "asOf": "2026-10-08",
+  "scope": "All saved website-run attempts through the interrupted 09:02 UTC cycle",
+  "fixes": [
+    [
+      "Shared website workflow",
+      "Runner invokes the website runReproduction entrypoint, normal prompts, Modal GPU and independent judge. No substitute reproduction procedure.",
+      "In code; live exercised"
+    ],
+    [
+      "Spending controls",
+      "Pre-request model-price checks and reservations; bounded Modal allocations; prior ledgers preserved; local budget stops retained despite provider error sanitization.",
+      "Active; reservations are not provider invoices"
+    ],
+    [
+      "Canonical extraction",
+      "Paper packets, source offsets and bounded paper search preserve grounded claim identities. Extraction failures stop before GPU allocation.",
+      "Live runs consistently register 12 claims on the current paper"
+    ],
+    [
+      "Stage controller",
+      "Separate planning, execution and assessment, scoped tools, bounded revisions and explicit execution handoffs.",
+      "In code; restrictive stage limits remain a completion risk"
+    ],
+    [
+      "Context recovery",
+      "Bounded prompts and generated state; preservation of recent tool observations and retrieved evidence; provider-context diagnostics.",
+      "Improved; output-length failures remain"
+    ],
+    [
+      "Evidence provenance",
+      "Original tool IDs, successful execution checks, planned script identity, raw-input inspection and literal measurement validation.",
+      "In code; scientific judging still required"
+    ],
+    [
+      "Evidence repair",
+      "Retrieve original outputs without rerunning; explicit verbatim copy operation; clearer missing, conflicting or oversized excerpt errors.",
+      "Latest R4 formatting refusal recovered on the next action"
+    ],
+    [
+      "Shared experiments",
+      "Related claims can share a plan/execution while retaining individual measurements, evidence and verdicts.",
+      "Latest R2/R3 shared one successful experiment"
+    ],
+    [
+      "Explicit execution reuse",
+      "Planner can reference a prior successful planned execution and go straight to individual assessment. Not an automatic cache or fresh replicate.",
+      "Latest later claims reused existing execution evidence"
+    ],
+    [
+      "Execution guards",
+      "Refuse accidental duplicate successful commands unless an explicit repeat is requested; reject incompatible/unplanned material-script launches before dispatch.",
+      "In code; guards are not a universal shell security parser"
+    ],
+    [
+      "Missing-file repair check",
+      "A recognized missing-file retry requires inspection of the restored file or an authorized source repair; mkdir alone is insufficient.",
+      "Live guard blocked a premature retry; subsequent baseline completed"
+    ],
+    [
+      "Cross-stage error context",
+      "Recent failed command details remain visible across stage transitions.",
+      "In code; does not provide restart-safe recovery"
+    ],
+    [
+      "qP authorization",
+      "Keep immutable suitability, adaptation scope and source provenance binding for related claims and repairs.",
+      "Covered offline; latest live runs are P, not qP"
+    ],
+    [
+      "Diagnostics and checkpoints",
+      "Redacted bounded failure traces, phase/call counts, claim state and evidence hashes retained.",
+      "Saved artifacts available; metadata-only checkpoints cannot resume complete sessions"
+    ],
+    [
+      "Regression tests",
+      "Offline tests cover recovery, grouped/reused experiments, independent judging and mixed scientific outcomes.",
+      "Last full run: 787 passed, 2 skipped; not proof of live completion"
+    ]
+  ],
+  "runs": [
+    {
+      "run": "website-1791300531720",
+      "date": "2026-10-06T15:28:51.720Z",
+      "recorded": 0,
+      "total": 5,
+      "calls": 18,
+      "report": false,
+      "stop": "Pipeline planning failed for R1: planning-stall (local planning allowance exhausted, not global budget); accepted evidence retained."
+    },
+    {
+      "run": "website-1791300938668",
+      "date": "2026-10-06T15:35:38.668Z",
+      "recorded": 0,
+      "total": 0,
+      "calls": 0,
+      "report": false,
+      "stop": "Checkpoint only; no final result saved"
+    },
+    {
+      "run": "website-1791301071920",
+      "date": "2026-10-06T15:37:51.920Z",
+      "recorded": 0,
+      "total": 0,
+      "calls": 3,
+      "report": false,
+      "stop": "Extraction failed: no grounded claims accepted from 6/6 packets. No GPU allocated."
+    },
+    {
+      "run": "website-1791301387940",
+      "date": "2026-10-06T15:43:07.940Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 46,
+      "report": false,
+      "stop": "Pipeline execution failed for R1: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791301957239",
+      "date": "2026-10-06T15:52:37.239Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 15,
+      "report": false,
+      "stop": "Tool-loop request exceeds its irreducible context budget: fixed input (instructions and tool schemas) plus irreducible generated-state exceeds the limit; tool-loop: model=deepseek/deepseek-v4-pro-0813, estimated_input=23842, input_limit=23744, output_reserved=8000, context_limit=32768, safety=1024; staged_sizes=instructions=7756,schemas=2222,state=102,repair=12902,assistant=0,evidence=0,retrieval=0,other=0,protocol=124,total=23106"
+    },
+    {
+      "run": "website-1791304052769",
+      "date": "2026-10-06T16:27:32.769Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 47,
+      "report": false,
+      "stop": "Pipeline execution failed for R1: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791304571109",
+      "date": "2026-10-06T16:36:11.109Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 49,
+      "report": false,
+      "stop": "Pipeline assessment failed for R1: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791304960806",
+      "date": "2026-10-06T16:42:40.806Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 85,
+      "report": false,
+      "stop": "Pipeline execution failed for R1: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791310631208",
+      "date": "2026-10-06T18:17:11.208Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 34,
+      "report": false,
+      "stop": "Tool-loop request exceeds its irreducible context budget: the newest retrieval page is irreducible and was preserved intact; tool-loop: model=deepseek/deepseek-v4-pro-0813, estimated_input=23749, input_limit=23744, output_reserved=8000, context_limit=32768, safety=1024; staged_sizes=instructions=7756,schemas=2222,state=389,repair=295,assistant=334,evidence=0,retrieval=6580,other=5238,protocol=127,total=22941"
+    },
+    {
+      "run": "website-1791310969055",
+      "date": "2026-10-06T18:22:49.055Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 76,
+      "report": false,
+      "stop": "BYOK provider request failed (unknown). Check your provider account and key, then retry."
+    },
+    {
+      "run": "website-1791311646803",
+      "date": "2026-10-06T18:34:06.803Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 47,
+      "report": false,
+      "stop": "Pipeline execution failed for R1: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791312238817",
+      "date": "2026-10-06T18:43:58.817Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 33,
+      "report": false,
+      "stop": "Pipeline assessment failed for R1: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791351708385",
+      "date": "2026-10-07T05:41:48.385Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 29,
+      "report": false,
+      "stop": "Pipeline assessment failed for R1: no-progress; accepted evidence retained."
+    },
+    {
+      "run": "website-1791361989587",
+      "date": "2026-10-07T08:33:09.587Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 61,
+      "report": false,
+      "stop": "Pipeline assessment failed for R1: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791362986868",
+      "date": "2026-10-07T08:49:46.868Z",
+      "recorded": 3,
+      "total": 12,
+      "calls": 100,
+      "report": false,
+      "stop": "Pipeline stopped at the enforced global resource limit; unfinished claims are not scientific results."
+    },
+    {
+      "run": "website-1791365684952",
+      "date": "2026-10-07T09:34:44.952Z",
+      "recorded": 3,
+      "total": 12,
+      "calls": 100,
+      "report": false,
+      "stop": "Pipeline stopped at the enforced global resource limit; unfinished claims are not scientific results."
+    },
+    {
+      "run": "website-1791369276823",
+      "date": "2026-10-07T10:34:36.823Z",
+      "recorded": 5,
+      "total": 12,
+      "calls": 100,
+      "report": false,
+      "stop": "Pipeline stopped at the enforced global resource limit; unfinished claims are not scientific results."
+    },
+    {
+      "run": "website-1791370496877",
+      "date": "2026-10-07T10:54:56.877Z",
+      "recorded": 5,
+      "total": 12,
+      "calls": 100,
+      "report": false,
+      "stop": "Pipeline stopped at the enforced global resource limit; unfinished claims are not scientific results."
+    },
+    {
+      "run": "website-1791378852447",
+      "date": "2026-10-07T13:14:12.447Z",
+      "recorded": 4,
+      "total": 12,
+      "calls": 99,
+      "report": false,
+      "stop": "Pipeline stopped at the enforced global resource limit; unfinished claims are not scientific results."
+    },
+    {
+      "run": "website-1791379617604",
+      "date": "2026-10-07T13:26:57.604Z",
+      "recorded": 5,
+      "total": 12,
+      "calls": 100,
+      "report": false,
+      "stop": "Pipeline stopped at the enforced global resource limit; unfinished claims are not scientific results."
+    },
+    {
+      "run": "website-1791396427019",
+      "date": "2026-10-07T18:07:07.019Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 38,
+      "report": false,
+      "stop": "Pipeline assessment failed for R1: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791397489039",
+      "date": "2026-10-07T18:24:49.039Z",
+      "recorded": 1,
+      "total": 12,
+      "calls": 65,
+      "report": false,
+      "stop": "Pipeline execution failed for R2: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791435340223",
+      "date": "2026-10-08T04:55:40.223Z",
+      "recorded": null,
+      "total": null,
+      "calls": null,
+      "report": false,
+      "stop": "Interrupted or no checkpoint saved"
+    },
+    {
+      "run": "website-1791435439289",
+      "date": "2026-10-08T04:57:19.289Z",
+      "recorded": 3,
+      "total": 12,
+      "calls": 75,
+      "report": false,
+      "stop": "Pipeline assessment failed for R4: tool-budget; accepted evidence retained."
+    },
+    {
+      "run": "website-1791436496007",
+      "date": "2026-10-08T05:14:56.007Z",
+      "recorded": 3,
+      "total": 12,
+      "calls": 100,
+      "report": false,
+      "stop": "Pipeline stopped at the enforced global resource limit; unfinished claims are not scientific results."
+    },
+    {
+      "run": "website-1791447787549",
+      "date": "2026-10-08T08:23:07.549Z",
+      "recorded": 6,
+      "total": 12,
+      "calls": 96,
+      "report": false,
+      "stop": "Pipeline assessment failed for R7: no-progress; accepted evidence retained."
+    },
+    {
+      "run": "website-1791450165993",
+      "date": "2026-10-08T09:02:45.993Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 5,
+      "report": false,
+      "stop": "Workspace restart interrupted the runner; only extraction checkpoint survived. Orphaned Modal sandbox identified and terminated; no automatic replay."
+    }
+  ],
+  "latestCycle": {
+    "status": "interrupted",
+    "modelAccounted": 0.11477281999999997,
+    "modalReserved": 5,
+    "sandboxTerminated": true
+  }
+}

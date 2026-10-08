@@ -5,6 +5,12 @@ description: Why evidence enforcement must include live repair and runtime instr
 
 Evidence validation must provide a practical repair path while the sandbox remains alive; rejecting incomplete final reports alone is not a reliability fix.
 
+Persist remote sandbox identity immediately on allocation, independently of background stdout and phase checkpoints.
+
+**Why:** A workspace restart destroyed the runner and its output log while its Modal sandbox stayed active. The surviving extraction checkpoint did not identify the remote allocation; cleanup required matching the sole active reproduction sandbox to the uploaded paper.
+
+**How to apply:** Do not infer sandbox termination from a lost background task. Preserve reservations, inspect remote state and establish ownership before cleanup. Never automatically replay an interrupted command whose completion is unknown. This is a recovery requirement, not a claim that current checkpoints support resumption.
+
 Live reproduction-and-repair work must use exactly the website's normal workflow, including Modal GPU execution and judging, not a separate extraction-only or compatibility procedure.
 
 **Why:** The user explicitly rejected an alternative runner because the goal is to fix the usual process. “Not reproduced” is a valid scientific outcome; software fixes must not force a passing result.
