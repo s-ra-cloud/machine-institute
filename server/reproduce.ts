@@ -352,11 +352,12 @@ const TOOLS: ToolSpec[] = [
   },
   {
     name: "read_tool_result",
-    description: "Retrieve an earlier command/file output without rerunning it, even after context compaction. Omit tool_call_id to list prior evidence IDs. Cite the ORIGINAL evidence ID in record_result.",
+    description: "Retrieve original output without rerunning. Omit tool_call_id for the index. Cite the ORIGINAL ID. query jumps to a literal.",
     parameters: {
       type: "object",
       properties: {
         tool_call_id: { type: "integer" },
+        query: { type: "string", description: "Case-sensitive literal, max 128 chars." },
         offset: { type: "integer" },
         max_chars: { type: "integer", description: "Up to 8000 characters per page." },
       },

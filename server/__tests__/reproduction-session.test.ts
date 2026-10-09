@@ -241,6 +241,36 @@ describe("Reproduction session — immediate validation", () => {
     expect(s.toolCalls).toHaveLength(1);
   });
 
+  it("jumps to exact measurements while retaining canonical evidence and resizable offsets", () => {
+    const s = session();
+    const full = `exit code 0\n${"x".repeat(15000)}\nmetric=0.91\n${"y".repeat(15000)}`;
+    s.captureOutput("run_command", full);
+    s.observeToolCall(command(1, "truncated"));
+    const page = s.readToolResult({ tool_call_id: 1, query: "metric=", max_chars: 1000 });
+    expect(page).toContain(`characters ${full.indexOf("metric=")}-`);
+    expect(page).toContain("metric=0.91");
+    expect(page).toContain("Cite #1, not this retrieval call");
+    const resized = s.resizeRetrieval("read_tool_result", {}, page, 600);
+    expect(resized).toContain("metric=0.91");
+    expect(resized).toContain(`characters ${full.indexOf("metric=")}-`);
+    expect(s.toolCalls).toHaveLength(1);
+    expect(s.recordResult(verified)).toContain("evidence validated");
+  });
+
+  it("does not promote query misses or retrieval calls into scientific evidence", () => {
+    const s = session();
+    s.observeToolCall(command(1, "metric=0.91\nmetric=0.92"));
+    expect(s.readToolResult({ tool_call_id: 1, query: "metric=", offset: 1 })).toContain("metric=0.92");
+    expect(s.readToolResult({ tool_call_id: 1, query: "METRIC=" })).toContain("navigation feedback");
+    expect(s.readToolResult({ query: "metric=" })).toContain("Refused");
+    for (const query of ["", " ", 3, "x".repeat(129)]) {
+      expect(s.readToolResult({ tool_call_id: 1, query })).toContain("Refused");
+    }
+    expect(s.readToolResult({ tool_call_id: 1, query: "metric=", offset: -1 })).toContain("Refused");
+    s.observeToolCall({ ...command(2), name: "read_tool_result", result: s.readToolResult({ tool_call_id: 1, query: "metric=" }) });
+    expect(s.readToolResult({ tool_call_id: 2, query: "metric=" })).toContain("Refused");
+  });
+
   it("makes capture limits explicit and never reconstructs uncaptured numbers", () => {
     const s = session();
     s.observeToolCall(command(1, "exit code 0\nstart\n[... 20000 chars elided ...]\nend"));

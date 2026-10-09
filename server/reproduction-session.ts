@@ -650,7 +650,12 @@ export class ReproductionSession {
   }
 
   readToolResult(args: Record<string, unknown>): string {
+    if (args.query !== undefined && (typeof args.query !== "string"
+      || !args.query.trim() || args.query.length > 128))
+      return "Refused: query must be a nonblank literal string of at most 128 characters.";
     if (args.tool_call_id === undefined) {
+      if (args.query !== undefined)
+        return "Refused: query requires an original tool_call_id; use the index to choose one.";
       const index = this.toolCalls.filter(c => evidenceTools.has(c.name))
         .map(c => `[${c.index}] ${c.name} ${String(c.args.command ?? c.args.path ?? "").replace(/\s+/g, " ").slice(0, 70)}`)
         .join("\n") || "No prior evidence tools have run.";
@@ -662,7 +667,15 @@ export class ReproductionSession {
     const id = Number(args.tool_call_id);
     const call = this.toolCalls.find(c => c.index === id && evidenceTools.has(c.name));
     if (!Number.isInteger(id) || !call) return "Refused: tool_call_id must identify a prior command/file check.";
-    const offset = Math.max(0, finiteInteger(args.offset, 0));
+    let offset = Math.max(0, finiteInteger(args.offset, 0));
+    if (typeof args.query === "string") {
+      if (args.offset !== undefined && (typeof args.offset !== "number"
+        || !Number.isSafeInteger(args.offset) || args.offset < 0 || args.offset > call.result.length))
+        return "Refused: offset must be an integer within the original output.";
+      offset = call.result.indexOf(args.query, offset);
+      if (offset < 0)
+        return "No literal match in captured output at or after the requested offset. This is navigation feedback, not evidence of a missing scientific result.";
+    }
     const max = Math.min(8000, Math.max(1, finiteInteger(args.max_chars, 6000)));
     return boundedPage(call.result, offset, max, 6000, (chunk, end) =>
       `Original evidence tool call #${id} (${call.name}); characters ${Math.min(offset, call.result.length)}-${end} of ${call.result.length}. Cite #${id}, not this retrieval call. Sandbox capture elision markers mean uncaptured output; inspect saved output files for those portions.\n${chunk}${end < call.result.length ? `\n[Use offset=${end} to continue.]` : ""}`);
