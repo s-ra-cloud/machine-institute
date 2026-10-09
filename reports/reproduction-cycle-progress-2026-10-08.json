@@ -1,6 +1,6 @@
 {
-  "asOf": "2026-10-08",
-  "scope": "Saved attempts through the completed 09:22 UTC cycle",
+  "asOf": "2026-10-09",
+  "scope": "Saved attempts including the newly authorized 2026-10-09 cycle; snapshot, not live dashboard.",
   "fixes": [
     [
       "Shared website workflow",
@@ -75,7 +75,7 @@
     [
       "Regression tests",
       "Offline tests cover recovery, grouped/reused experiments, independent judging and mixed scientific outcomes.",
-      "Last full run: 787 passed, 2 skipped; not proof of live completion"
+      "807 passed, 2 skipped; all 62 test files passed with two workers."
     ],
     [
       "Targeted source reads",
@@ -86,6 +86,21 @@
       "Persistent sandbox identity",
       "Runner records remote allocation identity immediately for cleanup after workspace restart.",
       "Operational cleanup improvement, not full restart-safe resumption"
+    ],
+    [
+      "Required-tool recovery",
+      "One bounded correction when the model ignores a required stage tool, independent of earlier general reminders; unresolved on repeated failure.",
+      "Offline verified; awaiting live confirmation"
+    ],
+    [
+      "Targeted measurement retrieval",
+      "Literal search within original captured outputs retains canonical offsets and evidence IDs, supports context resizing, and cannot turn a search miss into scientific evidence.",
+      "Offline verified; awaiting live confirmation"
+    ],
+    [
+      "Missing-material assessment contract",
+      "Expose required_material during assessment while retaining immutable source identity and validation; rejected runtime-file diagnoses now explicitly direct repair through plan revision.",
+      "Offline verified after latest failed live attempt; no paid rerun."
     ]
   ],
   "runs": [
@@ -349,21 +364,29 @@
       "calls": 68,
       "report": false,
       "stop": "Planning stalled on R4: model ended without submitting a plan after 8 planning calls. Baseline repair succeeded; sandbox terminated."
+    },
+    {
+      "run": "website-1791536618164",
+      "date": "2026-10-09T09:03:38.164Z",
+      "recorded": 0,
+      "total": 12,
+      "calls": 32,
+      "report": false,
+      "stop": "R1 assessment exhausted its 8-call stage budget after repeated unsupported missing-material submissions; baseline failed on missing confidence_history.json; unplanned patched-script execution blocked; sandbox terminated."
     }
   ],
   "latestCycle": {
-    "run": "website-1791474133152",
+    "run": "website-1791536618164",
     "status": "stopped",
-    "recorded": 3,
+    "recorded": 0,
     "total": 12,
     "finalReport": false,
-    "reason": "Planning stalled on R4: model ended without submitting a plan after 8 planning calls. Baseline repair succeeded; sandbox terminated.",
-    "modelAccountedThisAttempt": 0.9157822815,
-    "modelAccountedBudgetWindow": 2.3149135935,
-    "modalReservedBudgetWindow": 10,
-    "modalCap": 10,
+    "modelAccountedBudgetWindow": 0.411675272,
+    "modelRequests": 27,
+    "modelSettled": 27,
+    "modalReservedBudgetWindow": 5,
     "modelCap": 5,
-    "budgetReset": false,
-    "note": "Modal values are reservations, not verified billed charges."
+    "modalCap": 10,
+    "note": "No automatic second allocation. Modal reservations are not verified billed spend."
   }
 }

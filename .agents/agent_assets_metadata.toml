@@ -28,3 +28,17 @@ mtime_ms = 1791475411459
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:7fca964b-5ad6-43c0-92eb-ec6b89d6f2b8/5db36a11-1e1d-4db7-a990-0e9e76768a98/bf185993-2f29-483d-a461-f9d4fd1ac27e"
 storage_version_token = "1791475412456258"
 content_type = "text/html"
+
+[[outputs]]
+id = "_63oJnbDk9GSW6X1KKfwd"
+uri = "file://reports/reproduction-cycle-progress-2026-10-09.html"
+type = "html"
+title = "Reproduction fixes and progress — October 9"
+description = "Full fix inventory, verified progress, remaining blockers, and the fresh cycle allowance."
+logical_id = "c5e07338-bbcc-42d2-8fad-7361a43ccd10"
+content_hash = "sha256:4475702dec486b4786b1f9df2082a45862f38e5571e763509c38e631ef81b003"
+size = 6525
+mtime_ms = 1791536646024
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:7fca964b-5ad6-43c0-92eb-ec6b89d6f2b8/c5e07338-bbcc-42d2-8fad-7361a43ccd10/650cbe89-92f8-4730-a9a2-de221e805667"
+storage_version_token = "1791536646726500"
+content_type = "text/html"

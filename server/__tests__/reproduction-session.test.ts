@@ -139,6 +139,14 @@ describe("Reproduction session — immediate validation", () => {
       ...command(4, "Verified directory: /work/materials/Atlas\n(empty directory or not found)"),
       name: "list_files", args: { path: "/work/materials/Atlas" },
     });
+    const rejected = s.recordResult({
+      id: "R1", status: "inconclusive", method: "blocked", blocker_kind: "missing-material",
+      required_material: "confidence_history.json", evidence: "A runtime file is missing.",
+      evidence_tool_call_ids: [2, 3, 4], evidence_excerpt: "(empty directory or not found)",
+    });
+    expect(rejected).toContain("request_plan_revision");
+    expect(rejected).toContain("Do not substitute an unrelated phrase");
+    expect(s.recorded.get("R1")?.status).toBe("pending");
     expect(s.recordResult({
       id: "R1", status: "inconclusive", method: "blocked", blocker_kind: "missing-material",
       required_material: "Atlas test set", evidence: "The Atlas test set was not shipped.",

@@ -330,7 +330,7 @@ export class ReproductionSession {
     if (candidate.method === "blocked" && candidate.blockerKind === "missing-material" && this.materialGrounding) {
       const required = candidate.requiredMaterial?.trim() || "";
       if (!required || !candidate.sourceQuote?.toLocaleLowerCase().includes(required.toLocaleLowerCase())) {
-        issues.push(`${id} missing-material blocker must name required_material using wording present in its verified paper source_quote`);
+        issues.push(`${id} missing-material blocker must name required_material using wording present in its verified paper source_quote. A missing bookkeeping/runtime file is not by itself missing scientific material. Do not substitute an unrelated phrase from the paper to satisfy this check. For a repairable execution failure, request_plan_revision with the diagnosed repair and the intended entrypoint; do not keep resubmitting this blocker`);
       }
       const inspected = new Set((candidate.evidenceToolCallIds || []).map(index =>
         this.toolCalls.find(call => call.index === index && call.name === "read_file"),

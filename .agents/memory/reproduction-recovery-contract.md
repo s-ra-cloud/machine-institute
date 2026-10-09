@@ -236,3 +236,9 @@ Validate execution provenance and numerical evidence against the same successful
 **Why:** Independent checks can accidentally join a failed planned script with successful CSV-display evidence. Likewise, a summary suitable for judging can omit the exact adaptation paths and instructions needed for execution.
 
 **How to apply:** Test mixed failed/successful evidence, not only individually invalid calls. Test qP stage handoffs with arbitrary authorized changes recovered exclusively from the application packet, never supplied to the execution mock through fixture state.
+
+Keep assessment repair fields available without reopening extraction-owned source identity.
+
+**Why:** Missing-material validation can demand a material label that extraction did not supply. Hiding that assessment field makes a legitimate correction impossible. Separately, repeated bookkeeping-file failures have been misclassified as missing scientific material.
+
+**How to apply:** Allow a required-material label to be supplied against the immutable verified source quote and inspected inventory. Do not relax grounding or fabricate labels for runtime files. Refusals should distinguish repairable execution failures and point to plan revision instead of encouraging repeated blocker submissions.

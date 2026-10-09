@@ -569,7 +569,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
       if (recording) {
         const schema = recording.function.parameters;
         expect(schema.additionalProperties).toBe(false);
-        for (const field of ["claim", "original_value", "source_quote", "source_location", "source_tool_call_id", "required_material"])
+        for (const field of ["claim", "original_value", "source_quote", "source_location", "source_tool_call_id"])
           expect(schema.properties).not.toHaveProperty(field);
         expect(schema.properties.status.enum).not.toContain("pending");
         if (!attempted) {
@@ -679,6 +679,10 @@ describe("default reproduction stage-controller integration (offline only)", () 
     mock.complete.mockImplementation((request: any) => {
       const names = request.tools?.map((t: any) => t.function.name) ?? [];
       if (names.includes("record_result")) {
+        const schema = request.tools.find((t: any) => t.function.name === "record_result").function.parameters;
+        expect(schema.properties.required_material.type).toBe("string");
+        expect(schema.properties.source_quote).toBeUndefined();
+        expect(schema.additionalProperties).toBe(false);
         if (reads++ < 4) return complete(null, [tool("read_tool_result", {})]);
         expect(names.sort()).toEqual(["record_result", "request_plan_revision"]);
         expect(request.tool_choice).toBe("auto");

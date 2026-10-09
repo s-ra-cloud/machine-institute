@@ -157,7 +157,7 @@ export async function runControlledReproduction(input: {
             // Extraction owns source identity and reported values. Assessment
             // must not ask the model to reconstruct those immutable fields.
             const updateFields = new Set(["id", "status", "reproduced_value", "evidence", "notes", "method",
-              "evidence_tool_call_ids", "evidence_excerpt", "blocker_kind", "raw_input_tool_call_id", "raw_input_path"]);
+              "evidence_tool_call_ids", "evidence_excerpt", "blocker_kind", "required_material", "raw_input_tool_call_id", "raw_input_path"]);
             const properties = Object.fromEntries(Object.entries(t.parameters.properties as Record<string, unknown>)
               .filter(([key]) => updateFields.has(key)));
             properties.status = { type: "string", enum: ["verified", "falsified", "toy", "inconclusive"] };
