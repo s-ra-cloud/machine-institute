@@ -1,4 +1,5 @@
 import { beforeEach, describe, it, expect, vi } from "vitest";
+import bookkeeping from "./fixtures/paper-bookkeeping.json";
 const mock = vi.hoisted(() => ({ complete: vi.fn(), create: vi.fn(), context: vi.fn(), materials: vi.fn() }));
 vi.mock("openai", () => ({ default: class { chat = { completions: { create: mock.complete } }; } }));
 vi.mock("../managed-adapter", () => ({
@@ -157,6 +158,35 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(sawTargetedPage).toBe(true);
     expect(result.results[0].verdict).toBe("verified");
   });
+  it("checks shipped bookkeeping preparation before dispatching the first expensive experiment", async () => {
+    const source = `ROOT_DIR = Path(__file__).resolve().parent.parent\n${bookkeeping.functionSource}\ndef main():\n    ${bookkeeping.initialization}\n    update_confidence(confidence_path, confidence, rationale)\n`;
+    mock.materials.mockResolvedValue({ paperMarkdown: paper, files: [{
+      name: "analyze.py", kind: "text", source: "additional", text: source,
+    }], textFileCount: 1, binaryFileCount: 0 });
+    const sb = sandbox();
+    mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    let step = 0;
+    mock.complete.mockImplementation(async (request: any) => {
+      if (request.tools?.some((t: any) => t.function.name === "submit_for_assessment")) {
+        if (step++ === 0) return complete(null, [tool("run_command", { command: "python /work/materials/analyze.py" })]);
+        if (step === 2) {
+          expect(request.messages.some((m: any) => String(m.content).includes("preparation check found update_confidence"))).toBe(true);
+          expect(sb.exec.mock.calls.some(c => JSON.stringify(c).includes("python /work/materials/analyze.py"))).toBe(false);
+          return complete(null, [tool("read_file", { path: "/work/materials/analyze.py", query: "def update_confidence" })]);
+        }
+        if (step === 3) return complete(null, [
+          tool("write_file", { path: "/work/data/confidence_history.json", content: "{}" }),
+          tool("read_file", { path: "/work/data/confidence_history.json" }),
+        ]);
+      }
+      return responder(request);
+    });
+    const result = await runReproduction(options());
+    expect(result.results[0].verdict).toBe("verified");
+    expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("python /work/materials/analyze.py"))).toHaveLength(1);
+  });
+
   it("blocks a mkdir-only repair, then allows a restored file to be inspected before a successful retry", async () => {
     const sb = sandbox();
     let experiments = 0, step = 0, sawRefusal = false;

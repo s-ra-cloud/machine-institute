@@ -1,0 +1,5 @@
+{
+  "sourceUrl": "https://future-science.org/uploads/analysis1_baseline_87fa7f3e19.py",
+  "functionSource": "def update_confidence(confidence_path: Path, new_confidence: float, rationale: str) -> None:\n    data = json.loads(confidence_path.read_text())\n    data[\"current_confidence\"] = new_confidence\n    history = data.setdefault(\"history\", [])\n    history = [entry for entry in history if entry.get(\"analysis\") != 1]\n    history.append(\n        {\n            \"analysis\": 1,\n            \"confidence\": new_confidence,\n            \"rationale\": rationale,\n        }\n    )\n    data[\"history\"] = history\n    confidence_path.write_text(json.dumps(data, indent=2) + \"\\n\")\n",
+  "initialization": "confidence_path = (ROOT_DIR / \"data\" / \"confidence_history.json\").resolve()"
+}

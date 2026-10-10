@@ -9,6 +9,8 @@ import { ReproductionController, renderAcceptedLogbook } from "./reproduction-co
 import { createHash } from "node:crypto";
 import { assertReproductionRuntimeProviderCredits } from "./provider-credit-preflight";
 import { fetchContributionMaterials, materialSandboxPath, formatMaterialsInventory } from "./fs-materials";
+import { preparationIssue } from "./reproduction-preparation";
+import { isPlannedEntrypoint } from "./reproduction-entrypoint";
 import { ReproductionSandbox, isModalConfigured, type GpuType } from "./modal-sandbox";
 import {
   verdictsFromRecordedResults,
@@ -719,6 +721,30 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
             return "Refused: working_directory must be /work or /work/materials for P. qP must omit it and execute in its sealed snapshot.";
           const refusal = session.validateCommand(command);
           if (refusal) return refusal;
+          const preparationSources = new Map(materials.files.filter(f => f.text)
+            .map(f => [materialSandboxPath(f), f.text!]));
+          for (const c of session.toolCalls) {
+            const path = String(c.args.path ?? "");
+            if (c.name === "write_file" && !c.error && !preparationSources.has(path)
+              && c.result === `Wrote ${String(c.args.content ?? "").length} chars to ${path}.`)
+              preparationSources.set(path, String(c.args.content));
+          }
+          for (const [path, originalSource] of Array.from(preparationSources)) {
+            if (!isPlannedEntrypoint(command, [path])) continue;
+            const written = [...session.toolCalls].reverse().find(c => c.name === "write_file"
+              && c.args.path === path && !c.error
+              && c.result === `Wrote ${String(c.args.content ?? "").length} chars to ${path}.`);
+            const source = questioning ? questioning.readKnownSource(path)
+              : written ? String(written.args.content) : originalSource;
+            if (source !== undefined) {
+              if (written && preparationIssue(path, originalSource, [])
+                && !session.toolCalls.some(c => c.index > written.index && c.name === "read_file"
+                  && !c.error && c.args.path === path && c.result.startsWith(`Verified file: ${path}\n`)))
+                return `Refused before execution: inspect the repaired source ${path} after its last write before rerunning. No dependency or scientific result is inferred.`;
+              const issue = preparationIssue(path, source, session.toolCalls);
+              if (issue) return issue;
+            }
+          }
           const requested = (Number(args.timeout_seconds) || 600) * 1000;
           const remainingMs = startTime + REPRODUCTION_BUDGET.wallClockMs - Date.now();
           if (remainingMs <= 0) return "Deadline exhausted — command was not executed.";

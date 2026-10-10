@@ -75,7 +75,7 @@
     [
       "Regression tests",
       "Offline tests cover recovery, grouped/reused experiments, independent judging and mixed scientific outcomes.",
-      "811 passed, 2 skipped across the full run and integration rerun after correcting the replay step counter."
+      "816 passed, 2 skipped across full run and targeted rerun; 63 test files. Existing 13 TypeScript errors remain, none in changed code."
     ],
     [
       "Targeted source reads",
@@ -111,6 +111,11 @@
       "Persistent retry preflight",
       "Ignore pre-dispatch refusals when finding the last actual execution; keep missing-file failure active across repeated rejected retries. Source repairs must match the retried entrypoint, not another script in its plan.",
       "Offline unit and website integration replay verified; no paid calls."
+    ],
+    [
+      "Source-based preparation preflight",
+      "Before a recognized Python read-modify-write dependency executes, require function/input inspection or inspected source repair. Uses source, not filename classification; never creates files automatically.",
+      "Website integration replay plus exact shipped bookkeeping-function isolation; no paid run. Narrow pattern coverage, not a universal dependency solver."
     ]
   ],
   "runs": [

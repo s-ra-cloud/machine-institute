@@ -254,3 +254,9 @@ Pre-dispatch refusals must never supersede the last actual execution for recover
 **Why:** A retry guard's own refusal can hide the original traceback when stored under the same command tool name. Checking only the newest command record then lets the next unchanged retry through.
 
 **How to apply:** Distinguish tool invocation from actual execution when selecting failure history. Test repeated refusals, not just one, and scope source-repair evidence to the entrypoint being retried rather than unrelated scripts in its plan.
+
+Preparation checks must not silently invent bookkeeping files or classify scientific inputs by filename.
+
+**Why:** The shipped baseline performs a read-modify-write of confidence history after GPU computation; a missing file wastes that computation. Isolating its exact function established that an object works and a list does not, but that does not establish a universal schema or permission to initialize other inputs.
+
+**How to apply:** Use narrowly recognized source patterns to require inspection before dispatch, preserve qP authorization, and leave initialization or source repair evidence-backed and explicit. Test the extracted shipped function with standard-library dependencies in a temporary directory, never by importing its model-loading entrypoint. This is preparation validation, not scientific reproduction or proof of complete dependency coverage.
