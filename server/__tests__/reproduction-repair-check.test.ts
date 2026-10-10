@@ -17,6 +17,21 @@ describe("missing-file retry preflight", () => {
   it("allows inspection of the restored exact file, without claiming scientific validity", () => {
     expect(missingFileRepairIssue([failed, read(2)], paths, { command })).toBeUndefined();
   });
+  it("retains the actual failure across repeated pre-dispatch refusals", () => {
+    const calls = [failed];
+    for (let i = 2; i < 6; i++) {
+      const refusal = missingFileRepairIssue(calls, paths, { command });
+      expect(refusal).toContain("failed execution #1");
+      calls.push(call(i, "run_command", { command }, refusal!));
+    }
+    expect(missingFileRepairIssue([...calls, read(6)], paths, { command })).toBeUndefined();
+  });
+  it("does not accept repair of another entrypoint in the same plan", () => {
+    const other = "/work/materials/other.py";
+    const calls = [failed, call(2, "write_file", { path: other, content: "pass" },
+      `Wrote 4 chars to ${other}.`), read(3, other)];
+    expect(missingFileRepairIssue(calls, [...paths, other], { command })).toContain("Refused before retrying");
+  });
   it.each([read(0), read(2, "/work/data/other.json"), read(2, missing, true)])("rejects stale, unrelated or failed inspection", evidence => {
     expect(missingFileRepairIssue([evidence, failed], paths, { command })).toContain("Refused before retrying");
   });

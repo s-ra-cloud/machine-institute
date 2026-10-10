@@ -175,7 +175,12 @@ describe("default reproduction stage-controller integration (offline only)", () 
         const run = tool("run_command", { command: "python /work/materials/analyze.py" });
         if (step++ === 0) return complete(null, [run]);
         if (step === 2) return complete(null, [tool("run_command", { command: "mkdir -p /work/data" }), run]);
-        if (step === 3) return complete(null, [
+        if (step === 3) {
+          expect(experiments).toBe(1);
+          return complete(null, [run]);
+        }
+        expect(experiments).toBe(1);
+        if (step === 4) return complete(null, [
           tool("write_file", { path: "/work/data/history.json", content: "{}" }),
           tool("read_file", { path: "/work/data/history.json" }),
         ]);

@@ -248,3 +248,9 @@ Repeated unsupported missing-material submissions need a controller-owned transi
 **Why:** A successful live baseline recovery requested a revision and inspected the bookkeeping dependency; a subsequent run never requested revision and spent its assessment allowance resubmitting the same invalid blocker. Merely having a recovery tool available was insufficient.
 
 **How to apply:** After two consecutive missing-material validation rejections within assessment, restrict the next action to a bounded plan revision. Preserve scientific validation, immutable qP authorization, revision limits, and global budgets. Never infer repair content or auto-create missing data. Test both a justified repair sequence and refusal to follow the transition; the latter must remain unresolved without a new execution.
+
+Pre-dispatch refusals must never supersede the last actual execution for recovery checks.
+
+**Why:** A retry guard's own refusal can hide the original traceback when stored under the same command tool name. Checking only the newest command record then lets the next unchanged retry through.
+
+**How to apply:** Distinguish tool invocation from actual execution when selecting failure history. Test repeated refusals, not just one, and scope source-repair evidence to the entrypoint being retried rather than unrelated scripts in its plan.
