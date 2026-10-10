@@ -242,3 +242,9 @@ Keep assessment repair fields available without reopening extraction-owned sourc
 **Why:** Missing-material validation can demand a material label that extraction did not supply. Hiding that assessment field makes a legitimate correction impossible. Separately, repeated bookkeeping-file failures have been misclassified as missing scientific material.
 
 **How to apply:** Allow a required-material label to be supplied against the immutable verified source quote and inspected inventory. Do not relax grounding or fabricate labels for runtime files. Refusals should distinguish repairable execution failures and point to plan revision instead of encouraging repeated blocker submissions.
+
+Repeated unsupported missing-material submissions need a controller-owned transition, not only stronger refusal prose.
+
+**Why:** A successful live baseline recovery requested a revision and inspected the bookkeeping dependency; a subsequent run never requested revision and spent its assessment allowance resubmitting the same invalid blocker. Merely having a recovery tool available was insufficient.
+
+**How to apply:** After two consecutive missing-material validation rejections within assessment, restrict the next action to a bounded plan revision. Preserve scientific validation, immutable qP authorization, revision limits, and global budgets. Never infer repair content or auto-create missing data. Test both a justified repair sequence and refusal to follow the transition; the latter must remain unresolved without a new execution.

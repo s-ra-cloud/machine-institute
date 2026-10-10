@@ -694,6 +694,70 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(restricted).toBe(true);
     expect(result.results[0].verdict).toBe("verified");
   });
+
+  it.each([false, true])("routes repeated runtime-file blocker rejections to bounded revision (ignores=%s)", async ignores => {
+    const sb = sandbox();
+    let experiments = 0;
+    sb.exec.mockImplementation(async (command: unknown) => {
+      const experiment = JSON.stringify(command).includes("/materials/analyze.py");
+      const failed = experiment && ++experiments === 1;
+      return { exitCode: failed ? 1 : 0, stdout: failed ? "" : "measured_score=0.91",
+        stderr: failed ? "FileNotFoundError: [Errno 2] No such file or directory: '/work/data/confidence_history.json'" : "",
+        timedOut: false, durationMs: 1 };
+    });
+    mock.create.mockResolvedValue(sb);
+    const responder = stageResponder();
+    let rejected = 0, forced = 0, repaired = false;
+    const saved: ReproductionCheckpoint[] = [];
+    const reason = "Inspect and repair the non-scientific bookkeeping dependency in the planned source, retaining the scientific computation.";
+    mock.complete.mockImplementation(async (request: any) => {
+      const names = (request.tools ?? []).map((t: any) => t.function.name);
+      const message = request.messages.find((m: any) => m.role === "user" && String(m.content).startsWith('{"stage":'));
+      const packet = message ? JSON.parse(message.content) : undefined;
+      if (names.length === 1 && names[0] === "request_plan_revision") {
+        forced++;
+        expect(request.tool_choice).toEqual({ type: "function", function: { name: "request_plan_revision" } });
+        expect(experiments).toBe(1);
+        return ignores ? complete("The material is missing.") :
+          complete(null, [tool("request_plan_revision", { reason, method: "rerun" })]);
+      }
+      if (names.includes("record_result") && !repaired) {
+        rejected++;
+        return complete(null, [tool("record_result", { id: "R1", status: "inconclusive",
+          method: "blocked", blocker_kind: "missing-material", required_material: "confidence_history.json",
+          evidence: "Missing runtime file", evidence_excerpt: "FileNotFoundError",
+          evidence_tool_call_ids: [packet.executionEvidence.find((e: any) => !e.successful).id] })]);
+      }
+      if (names.includes("submit_plan") && packet.revision) {
+        expect(packet.revision.reason).toBe(reason);
+        return complete(null, [tool("submit_plan", { claimId: "R1", method: "rerun",
+          materialPaths: ["/work/materials/analyze.py"], measurement: "held-out score", rationale: reason })]);
+      }
+      if (names.includes("submit_for_assessment") && packet.revision && !repaired) {
+        repaired = true;
+        return complete(null, [
+          tool("write_file", { path: "/work/materials/analyze.py", content: "# repaired fixture\nprint('measured_score=0.91')" }),
+          tool("read_file", { path: "/work/materials/analyze.py" }),
+        ]);
+      }
+      return responder(request);
+    });
+    const run = runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
+    if (ignores) {
+      await expect(run).rejects.toThrow("Pipeline assessment failed");
+      expect(experiments).toBe(1);
+      expect(forced).toBe(2);
+      expect(saved.at(-1)?.claims[0].status).toBe("pending");
+    } else {
+      const result = await run;
+      expect(result.results[0].verdict).toBe("verified");
+      expect(saved.at(-1)?.revisions).toHaveLength(1);
+      expect(experiments).toBe(2);
+      expect(forced).toBe(1);
+    }
+    expect(rejected).toBe(2);
+    expect(sb.terminate).toHaveBeenCalledOnce();
+  });
   for (const changed of [false, true]) it(`compares command output before resetting execution progress (changed=${changed})`, async () => {
     const sb = sandbox();
     if (changed) {

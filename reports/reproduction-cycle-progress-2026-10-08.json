@@ -75,7 +75,7 @@
     [
       "Regression tests",
       "Offline tests cover recovery, grouped/reused experiments, independent judging and mixed scientific outcomes.",
-      "807 passed, 2 skipped; all 62 test files passed with two workers."
+      "809 passed, 2 skipped; all 62 test files passed in one serial run."
     ],
     [
       "Targeted source reads",
@@ -101,6 +101,11 @@
       "Missing-material assessment contract",
       "Expose required_material during assessment while retaining immutable source identity and validation; rejected runtime-file diagnoses now explicitly direct repair through plan revision.",
       "Offline verified after latest failed live attempt; no paid rerun."
+    ],
+    [
+      "Controller-owned blocker recovery",
+      "After two consecutive unsupported missing-material submissions, require plan revision instead of allowing repeated submissions. No automatic repair, fabricated data or result. Revision/global limits remain authoritative.",
+      "Offline integration replays cover repaired completion and ignored-revision stop; live effectiveness not yet measured."
     ]
   ],
   "runs": [

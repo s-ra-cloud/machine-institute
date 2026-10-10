@@ -90,6 +90,7 @@ export async function runControlledReproduction(input: {
         let executionNavigationCalls = 0;
         const executionOutputs = new Set<string>();
         let repeatedExecutionOutputs = 0;
+        let rejectedMissingMaterial = 0;
         let recoveryRecord: (typeof planningRecovery)[number] | undefined;
         const activeInstruction = () => recovery
           ? recovery.instruction(Math.max(0, 12 - stageCalls), Math.max(0, input.options.maxToolCalls - stageStartCalls - stageCalls), Boolean(input.session.questioning))
@@ -282,15 +283,26 @@ export async function runControlledReproduction(input: {
               await save();
             }
             const result = await input.execute(name, args);
+            if (phase === "assessment" && name === "record_result") {
+              rejectedMissingMaterial = args.method === "blocked" && args.blocker_kind === "missing-material"
+                && result.startsWith("Refused") && result.includes("missing-material blocker")
+                ? rejectedMissingMaterial + 1 : 0;
+              if (rejectedMissingMaterial >= 2)
+                return `${result}\nRepeated unsupported missing-material submissions cannot advance this claim. Call request_plan_revision with a diagnosed, evidence-backed next approach. No material, repair, or verdict is inferred; original evidence and global limits remain unchanged.`;
+            }
             if (commandInFlight) { controller.commandReturned(); commandInFlight = false; }
             return result;
           }, {
             ...input.options,
-            getRequiredTool: () => phase === "planning" && stageCalls >= 8
+            getRequiredTool: () => phase === "assessment" && rejectedMissingMaterial >= 2
+              ? "request_plan_revision"
+              : phase === "planning" && stageCalls >= 8
               ? input.session.questioning && !input.session.questioning.assessment
                 ? "assess_suitability" : "submit_plan"
               : phase === "execution" && repeatedExecutionOutputs >= 2 ? "submit_for_assessment" : undefined,
-            getAvailableTools: () => phase === "execution" && executionNavigationCalls >= 6
+            getAvailableTools: () => phase === "assessment" && rejectedMissingMaterial >= 2
+              ? ["request_plan_revision"]
+              : phase === "execution" && executionNavigationCalls >= 6
               ? controller.allowedTools.filter(name => ["write_file", "run_command", "setup_environment", "submit_for_assessment"].includes(name))
               : phase === "assessment" && stageCalls >= 4
                 ? ["record_result", "request_plan_revision"]
