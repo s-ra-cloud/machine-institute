@@ -307,6 +307,8 @@ OpenRouter tool contracts should fail on unsupported routing rather than silentl
 
 **How to apply:** Preserve the exact requested model, billing mode and provider preferences when requiring parameter support. Do not add silent alternate-model or relaxed-parameter fallbacks. Keep the schema's claim-or-explicit-copy requirement aligned with local validation; retain independent canonical source checks.
 
+Live testing with required parameter-compatible routing still produced missing tool output, despite valid submissions elsewhere. Do not treat this flag or a stricter submission schema as a demonstrated cure for absent calls. They address distinct contract risks; absent output needs independent diagnosis.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.

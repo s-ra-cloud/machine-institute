@@ -198,3 +198,17 @@ BYOK OpenRouter requests carrying tools now require parameter-compatible routing
 Extraction's advertised schema now requires either `claim` or `copy_source_quote=true`. It also declares claim and quote length limits, including the 2000-character explicit-copy limit. The local schema validator supports these alternatives and string-length constraints before dispatch. Canonical quotation, word-count, explicit-copy conflict and source-grounding validation remain in place; malformed input is rejected, not silently repaired.
 
 Tests cover exact-model routing, preservation of provider preferences, request immutability, unchanged direct/text requests, missing claim/copy selection, false-copy selection, empty/oversized claims, oversized copied quotes, valid explicit claims/copies, and repair after a schema rejection. Full offline suite: 65 files passed, 859 tests passed, two skipped. TypeScript has no errors in the changed files; the existing project errors remain. No paid inference, GPU allocation, budget reset or live success claim.
+
+### Live test after parameter-compatible routing and stricter extraction
+
+User explicitly authorized a fresh $5 DeepSeek / $10 Modal accounting window and one new cycle. The previous ledger was archived, not erased; historical charges and the Replit usage limit are unchanged.
+
+Attempt: `.local/state/live-reproduction/website-1791822439872`.
+
+Outcome: extraction failed before GPU allocation. Four of six packets completed (previous attempt: three); 11 grounded claims remain pending (previous: eight). No experiments, judge pass or final report occurred. This is a modest observed extraction improvement, not proof that either change caused it and not end-to-end success.
+
+All five emitted submit_claims calls passed argument validation and had no unresolved candidate errors. The 10800–16800 packet returned one valid submission indicating more claims remained, then exhausted missing-call recovery. The 16200–22200 packet emitted no tool calls across three responses. Six responses still had null content, absent tool calls, reasoning metadata present and no refusal. Their reported completion tokens totalled 20,452, of which 1,356 were labelled reasoning; the unavailable output's contents cannot be inferred. Diagnostics reflect post-adapter response structure, not captured raw HTTP bodies.
+
+The stricter routing requirement did not eliminate the recurring missing-tool-output failure. Another identical retry or an increased retry ceiling is not an evidence-backed fix. Further diagnosis should distinguish provider response structure from SDK/adapter handling while retaining bounded, non-content diagnostics and the user's chosen model.
+
+Cost: $0.14843532 accounted DeepSeek spend, 11 requests all settled; $4.85156468 remaining. Modal: zero allocation/reservation in this window, full $10 allowance remaining. Run exited with code 1 and released its lock. No further paid cycle was launched.
