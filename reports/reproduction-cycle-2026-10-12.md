@@ -140,3 +140,11 @@ Incremental model accounting: $0.08360220. Cumulative window accounting: $1.5085
 The shared extraction workflow now opts into two bounded missing-tool corrections, with explicit small-batch guidance: submit one complete exact source quote, preserve `has_more` when further claims remain, and avoid duplicate text or a prose report. The generic loop still defaults to one correction. Retry counters do not renew after browsing; deadline, tool-call ceiling, source validation and complete-packet gating remain unchanged. Persistent missing calls still stop without allocating a GPU.
 
 Verification covered successful recovery from the observed length/empty sequence and persistent missing calls. The initial full suite had one expected assertion update (the retry ceiling changed from two requests to three) and one route-suite setup timeout. After updating that assertion, both affected suites passed on a targeted rerun with a 30-second hook timeout; the other 62 suites had passed already. Combined: 848 passing tests, two skipped. No further paid attempt or budget reset was performed.
+
+### Retry with bounded extraction recovery: same packet remains unresolved
+
+Evidence: `.local/state/live-reproduction/website-1791812743674`. Five of six packets were accepted, but characters 16200–22200 again produced no tool submissions. This time all three completion events reported `finish_reason=stop`, with no visible response excerpt. The additional correction was exercised and exhausted; it did not solve the live failure. Twelve grounded claims remained pending. No sandbox was allocated, no scientific execution ran, and no final report or independent judge result exists.
+
+Incremental model accounting: $0.11114268. Window total: $1.61965980, leaving $3.38034020. Modal reservation remains $5, with $5 reservation allowance remaining. No budget reset.
+
+The repeat is localized to the same source range across consecutive attempts. This supports investigating packet content/size and provider response handling, but does not establish a cause: the retained events do not explain why no tool call was returned. The execution-stage fixes remain untested in these two attempts. Another unchanged retry is not justified by demonstrated progress; further work should diagnose this packet offline rather than increase retry counts again.

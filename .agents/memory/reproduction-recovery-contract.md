@@ -285,6 +285,8 @@ Required-tool requests may return no tool calls even when the provider accepts f
 
 **How to apply:** Use small-batch correction guidance with a hard missing-call retry ceiling independent of the tool-call count. Keep failures unresolved after the ceiling, preserve packet coverage and validation, and do not assume an empty response means no claims remain. Do not increase general-stage retries merely because extraction needs this recovery.
 
+Increasing this ceiling alone did not resolve repeated live failures on the same packet, even with small-batch guidance. If this recurs, investigate packet-specific input and response handling rather than assume another reminder fixes the cause; passing mocked recovery tests establishes control flow, not model compliance.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.
