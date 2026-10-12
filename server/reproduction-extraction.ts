@@ -133,6 +133,8 @@ export async function extractReproductionClaims(input: {
         maxToolCalls: extractionCallLimit - calls - (packets.length - inspectedPackets - 1), deadlineMs: input.deadline, maxTokens: 8000,
         maxPrematureStopRecoveries: 1,
         getRequiredTool: () => "submit_claims",
+        maxRequiredToolRecoveries: 2,
+        requiredToolRecoveryInstruction: "Avoid another oversized answer: submit one complete core source_quote with copy_source_quote=true, omitting duplicate claim text and optional metadata. Set has_more=true if further claims remain. Use an empty list only if no claims actually remain; never discard remaining claims to finish the packet. No prose or report.",
         stopWithoutFinalResponse: true,
         onPrematureStop: () => "Submit claims through the declared tool using this same packet; prose is not an extraction.",
         isStageComplete: () => accepted,

@@ -279,6 +279,12 @@ Extraction's bounded global allowance should support productive continuation rat
 
 **How to apply:** Reserve visits to unprocessed packets and retain the global cap. Count consecutive invalid or non-progressing submissions separately from productive batches; otherwise a first late error gets no repair opportunity. Validated progress resets the stall counter, never the global allowance. Never mark a packet complete while it reports remaining claims.
 
+Required-tool requests may return no tool calls even when the provider accepts forced tool choice.
+
+**Why:** A live extraction packet returned output-length exhaustion followed by an empty stop; treating forced choice as a guarantee stranded an otherwise mostly extracted paper before GPU allocation.
+
+**How to apply:** Use small-batch correction guidance with a hard missing-call retry ceiling independent of the tool-call count. Keep failures unresolved after the ceiling, preserve packet coverage and validation, and do not assume an empty response means no claims remain. Do not increase general-stage retries merely because extraction needs this recovery.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.

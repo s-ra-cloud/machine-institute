@@ -130,3 +130,13 @@ The provenance refusal now explains the existing supported recovery: inspect a s
 Unique command output no longer resets execution navigation. This deliberately applies to all commands, without treating command syntax or output novelty as proof of scientific progress. A successful explicit write still reopens repair inspection; phase changes retain their stage-specific allowances. Repeated-output protection remains in place.
 
 Offline verification: all 64 test files passed, 846 tests passed and two skipped. Regression tests cover alternating file reads/new command output, successful versus refused/failed writes, and the existing generated-path inspection recovery. No paid run or budget reset occurred. Live improvement is not yet established.
+
+### Remaining-budget retry and extraction recovery
+
+Evidence: `.local/state/live-reproduction/website-1791811937137`. The user approved another normal-workflow attempt within the existing budget. Five of six packets were accepted; the fourth packet returned a tool-less response with `finish_reason=length`, followed by another empty response with `finish_reason=stop`. The required-tool recovery allowance was then exhausted. Twelve grounded claims stayed pending, and the run failed before sandbox allocation. Neither execution-stage fix was exercised.
+
+Incremental model accounting: $0.08360220. Cumulative window accounting: $1.50851712, leaving $3.49148288. Modal reservation stayed at $5; this attempt allocated no GPU and added no Modal reservation.
+
+The shared extraction workflow now opts into two bounded missing-tool corrections, with explicit small-batch guidance: submit one complete exact source quote, preserve `has_more` when further claims remain, and avoid duplicate text or a prose report. The generic loop still defaults to one correction. Retry counters do not renew after browsing; deadline, tool-call ceiling, source validation and complete-packet gating remain unchanged. Persistent missing calls still stop without allocating a GPU.
+
+Verification covered successful recovery from the observed length/empty sequence and persistent missing calls. The initial full suite had one expected assertion update (the retry ceiling changed from two requests to three) and one route-suite setup timeout. After updating that assertion, both affected suites passed on a targeted rerun with a 30-second hook timeout; the other 62 suites had passed already. Combined: 848 passing tests, two skipped. No further paid attempt or budget reset was performed.

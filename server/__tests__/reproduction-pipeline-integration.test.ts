@@ -1026,7 +1026,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
       expect(checkpoints.at(-1)?.extraction?.packets[0]).toMatchObject({ finishReason: "length" });
       expect(checkpoints.at(-1)?.claims).toHaveLength(0);
     } else expect((await run).results[0].verdict).toBe("verified");
-    expect(requests).toBe(2);
+    expect(requests).toBe(repeated ? 3 : 2);
   });
   it("does not request a paid final logbook when extraction tool allowance is exhausted", async () => {
     let requests = 0;

@@ -14,6 +14,7 @@ vi.mock("openai", () => ({
 
 import { runToolLoop, type ToolSpec } from "../model-service";
 import { ReproductionReadGuard } from "../reproduction-read-guard";
+import { extractReproductionClaims } from "../reproduction-extraction";
 
 const tools: ToolSpec[] = [
   { name: "echo", description: "echo", parameters: { type: "object", properties: { text: { type: "string" } } } },
@@ -29,6 +30,33 @@ function assistantFinal(content: string) {
 const platform = { providerMode: "platform" as const, provider: "openai", modelName: "openai/gpt-4o" };
 
 describe("runToolLoop", () => {
+  it.each([true, false])("bounds extraction recovery after length then empty stop (recovers=%s)", async recovers => {
+    const quote = "The measured evaluation score was 0.91.";
+    createMock
+      .mockResolvedValueOnce({ choices: [{ finish_reason: "length", message: { content: null, tool_calls: [] } }] })
+      .mockResolvedValueOnce(assistantFinal(""))
+      .mockResolvedValue(recovers
+        ? { choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [{
+          id: "recovered", type: "function", function: { name: "submit_claims",
+            arguments: JSON.stringify({ claims: [{ source_quote: quote, copy_source_quote: true }], has_more: false }) },
+        }] } }] }
+        : assistantFinal(""));
+    const onAccepted = vi.fn(async () => {});
+    const result = extractReproductionClaims({ paper: quote, instructions: "Extract grounded claims",
+      config: platform, deadline: Date.now() + 60_000, onAccepted });
+    if (recovers) {
+      expect((await result).coverage.termination).toBe("complete");
+      expect(onAccepted).toHaveBeenCalledTimes(1);
+    } else {
+      await expect(result).rejects.toThrow("no grounded claims");
+      expect(onAccepted).not.toHaveBeenCalled();
+    }
+    expect(createMock).toHaveBeenCalledTimes(3);
+    const last = createMock.mock.calls[2][0];
+    expect(last.tool_choice).toEqual({ type: "function", function: { name: "submit_claims" } });
+    expect(JSON.stringify(last.messages)).toContain("one complete core source_quote");
+  });
+
   it("repairs a missing required call after the general premature-stop reminder was used", async () => {
     createMock
       .mockResolvedValueOnce(assistantFinal("still inspecting"))

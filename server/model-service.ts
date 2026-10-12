@@ -289,6 +289,9 @@ export interface ToolLoopOptions {
   stopWithoutFinalResponse?: boolean;
   /** Host-owned stage transition; does not supply the model's scientific arguments. */
   getRequiredTool?: () => string | undefined;
+  /** Opt-in structured-stage retries; default one, hard ceiling two per tool. */
+  maxRequiredToolRecoveries?: 0 | 1 | 2;
+  requiredToolRecoveryInstruction?: string;
   /** Restrict the next request to host-authorized tools without adding calls. */
   getAvailableTools?: () => readonly string[];
   /** Stage contract check on the actual fitted request, before dispatch. */
@@ -598,7 +601,7 @@ export async function runToolLoop(
   let stoppedBy: ToolLoopResult["stoppedBy"] = "model";
   let forceFinal = false;
   let prematureStopRecoveries = 0;
-  const missingRequiredToolRecoveries = new Set<string>();
+  const missingRequiredToolRecoveries = new Map<string, number>();
   let recoveryProgressHighWater: number | undefined;
   const observe = async (event: ToolLoopOutcome): Promise<void> => {
     try { await options.onOutcome?.(event); } catch { /* Diagnostics cannot break a run. */ }
@@ -840,13 +843,16 @@ export async function runToolLoop(
         stoppedBy = "deadline";
       }
       // A provider can return prose even with an explicit function tool_choice.
-      // Give each required transition one correction independently of earlier
+      // Give each required transition bounded corrections independently of earlier
       // general reminders. Never renew this allowance on browsing activity.
       if (!forceFinal && requiredTool) {
-        if (!missingRequiredToolRecoveries.has(requiredTool)) {
-          missingRequiredToolRecoveries.add(requiredTool);
+        const used = missingRequiredToolRecoveries.get(requiredTool) ?? 0;
+        const configured = options.maxRequiredToolRecoveries;
+        const limit = configured === 0 || configured === 2 ? configured : 1;
+        if (used < limit) {
+          missingRequiredToolRecoveries.set(requiredTool, used + 1);
           messages.push({ role: "user", content:
-            `The required ${requiredTool} tool call was missing. The stage is still incomplete. Call ${requiredTool} using the existing evidence and its declared schema. Do not invent evidence or repeat completed experiments.` });
+            `The required ${requiredTool} tool call was missing (finish_reason=${finishReason}). The stage is still incomplete. Call ${requiredTool} using the existing evidence and its declared schema. Do not invent evidence or repeat completed experiments.${options.requiredToolRecoveryInstruction ? ` ${options.requiredToolRecoveryInstruction}` : ""}` });
           continue;
         }
         stoppedBy = "no-progress";
