@@ -15,6 +15,7 @@ vi.mock("openai", () => ({
 import { runToolLoop, type ToolSpec } from "../model-service";
 import { ReproductionReadGuard } from "../reproduction-read-guard";
 import { extractReproductionClaims } from "../reproduction-extraction";
+import { ReproductionDiagnostics } from "../reproduction-diagnostics";
 
 const tools: ToolSpec[] = [
   { name: "echo", description: "echo", parameters: { type: "object", properties: { text: { type: "string" } } } },
@@ -30,6 +31,28 @@ function assistantFinal(content: string) {
 const platform = { providerMode: "platform" as const, provider: "openai", modelName: "openai/gpt-4o" };
 
 describe("runToolLoop", () => {
+  it.each([
+    { label: "empty", message: { content: null, tool_calls: [] }, expected: { responseContentType: "null", responseReasoningPresent: 0, responseToolCallCount: 0 } },
+    { label: "reasoning only", message: { content: null, reasoning: "PRIVATE_REASONING", tool_calls: [] }, expected: { responseReasoningPresent: 1, responseToolCallCount: 0 } },
+    { label: "malformed calls", message: { content: null, tool_calls: { secret: "PRIVATE_SHAPE" } }, expected: { responseToolCallsType: "object" } },
+    { label: "unknown call type", message: { content: null, tool_calls: [{ type: "unexpected", payload: "PRIVATE_SHAPE" }] }, expected: { responseToolCallCount: 1, responseRecognizedToolCallCount: 0 } },
+    { label: "non-string content", message: { content: [{ text: "PRIVATE_CONTENT" }], tool_calls: [] }, expected: { responseContentType: "array" } },
+  ])("records $label structure without executing or inventing claims", async ({ message, expected }) => {
+    createMock.mockResolvedValue({ choices: [{ finish_reason: "stop", message }] });
+    const execute = vi.fn();
+    const diagnostics = new ReproductionDiagnostics();
+    const result = await runToolLoop(platform, "sys", "user", tools, execute, {
+      maxToolCalls: 8, deadlineMs: Date.now() + 60_000, getRequiredTool: () => "echo",
+      onOutcome: event => diagnostics.observe(event),
+    });
+    expect(result.stoppedBy).toBe("no-progress");
+    expect(result.content).toBe("");
+    expect(execute).not.toHaveBeenCalled();
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(diagnostics.snapshot().events.find(e => e.kind === "completion")).toMatchObject(expected);
+    expect(JSON.stringify(diagnostics.snapshot())).not.toContain("PRIVATE_");
+  });
+
   it.each([true, false])("bounds extraction recovery after length then empty stop (recovers=%s)", async recovers => {
     const quote = "The measured evaluation score was 0.91.";
     createMock

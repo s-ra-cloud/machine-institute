@@ -1,4 +1,5 @@
 import type { RecordedResult } from "./prompts/reproduce";
+import { sanitizeCompletionStructure, type CompletionStructure } from "./completion-structure";
 import type { ReproductionPagingDiagnostics } from "./reproduction-read-guard";
 
 const MAX_BYTES = 24_000;
@@ -86,7 +87,7 @@ export class ReproductionDiagnostics {
     };
   }
 
-  observe(event: {
+  observe(event: CompletionStructure & {
     kind: string; round?: number; callCount?: number; finishReason?: string | null;
     argumentParse?: string; toolName?: string; validationErrors?: readonly string[];
     responseExcerpt?: string; toolExcerpt?: string; stopReason?: string;
@@ -102,6 +103,7 @@ export class ReproductionDiagnostics {
     this.data.callCount = Math.max(this.data.callCount, safeNumber(event.callCount));
     if (event.stopReason) this.stop(event.stopReason);
     const safe: Record<string, string | number | string[]> = {
+      ...sanitizeCompletionStructure(event),
       kind: diagnosticExcerpt(event.kind, 100), round: safeNumber(event.round),
       callCount: safeNumber(event.callCount),
     };

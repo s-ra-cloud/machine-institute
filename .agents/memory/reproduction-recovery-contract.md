@@ -289,6 +289,12 @@ Increasing this ceiling alone did not resolve repeated live failures on the same
 
 Offline comparison found that the archived packet also succeeded in earlier runs, verified against source-envelope hashes. A missing response excerpt does not prove an empty raw provider response: structural fields and reasoning-presence indicators were not retained. Diagnose with allowlisted metadata rather than logging raw reasoning or assuming deterministic bad source content. Failed-packet offsets alone do not prove its text is unchanged.
 
+Structural diagnostics should report unknown usage as unknown, not zero, and identify whether they describe pre- or post-adapter responses.
+
+**Why:** The repeated missing-call failures could not be explained from excerpts alone. Retaining entire provider responses would expose reasoning and potentially sensitive payloads without being necessary to distinguish structural failure modes.
+
+**How to apply:** Keep counts, presence flags and enumerated types allowlisted at collection as well as generation. Do not infer a provider-side cause from normalized metadata or compensate for missing evidence by raising retry ceilings. Test absent and malformed response shapes without paid calls.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.

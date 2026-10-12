@@ -1,4 +1,5 @@
 import { MANAGED_MODELS } from "../shared/model-catalog";
+import { completionStructure, type CompletionStructure } from "./completion-structure";
 import { createByocChatClient, createManagedChatClient, type ManagedChatClient } from "./managed-adapter";
 import { BYOC_PROVIDERS, isSyntacticallyValidApiKey } from "./managed-models";
 import {
@@ -259,7 +260,7 @@ export interface ToolCallRecord {
   error: boolean;
 }
 
-export interface ToolLoopOutcome {
+export interface ToolLoopOutcome extends CompletionStructure {
   phase?: string;
   phaseCallCount?: number;
   kind: "completion" | "arguments" | "tool" | "stop" | "provider-error" | "context";
@@ -814,6 +815,7 @@ export async function runToolLoop(
     const finishReason = safeFinishReason(completion?.choices?.[0]?.finish_reason);
     await observe({
       kind: "completion", round, callCount: toolCalls.length, finishReason,
+      ...completionStructure(completion),
       responseExcerpt: typeof msg?.content === "string" ? msg.content.slice(0, 2000) : undefined,
     });
     if (!msg) {
@@ -825,7 +827,7 @@ export async function runToolLoop(
     }
 
     const calls: Array<{ id: string; function: { name: string; arguments: string } }> =
-      (msg.tool_calls || []).filter((c: any) => c?.type === "function" && c.function?.name);
+      (Array.isArray(msg.tool_calls) ? msg.tool_calls : []).filter((c: any) => c?.type === "function" && c.function?.name);
     const assistantText: string | null = typeof msg.content === "string" && msg.content.trim() ? msg.content : null;
     messages.push({
       role: "assistant",
@@ -1140,6 +1142,7 @@ export async function runToolLoop(
   const finalText = finalCompletion?.choices?.[0]?.message?.content;
   const finishReason = safeFinishReason(finalCompletion?.choices?.[0]?.finish_reason);
   await observe({ kind: "completion", round: maxRounds + 1, callCount: toolCalls.length, finishReason,
+    ...completionStructure(finalCompletion),
     responseExcerpt: typeof finalText === "string" ? finalText.slice(0, 2000) : undefined });
   await observe({ kind: "stop", round: maxRounds + 1, callCount: toolCalls.length, finishReason, stopReason: stoppedBy });
   return { content: finishReason !== "length" && finishReason !== "content_filter" && typeof finalText === "string" ? finalText : "", toolCalls, rounds: maxRounds + 1, stoppedBy, finishReason };

@@ -162,3 +162,13 @@ Tracing the BYOK adapter shows it forwards ordinary OpenAI-compatible tool calls
 The unresolved distinction is between an actually empty message, reasoning-only output, non-string content, and an unexpected/unrecognized tool-call shape. Current diagnostics save only normalized finish reason and a string-content excerpt for these completion events. They do not preserve raw tool-call counts/types, content type/length, reasoning-presence indicators or per-response usage counters. Consequently the saved evidence cannot establish the provider-side cause or rule out an unexpected response shape being ignored.
 
 Recommended next step: add allowlisted structural response diagnostics (counts, booleans, content type and token totals, not raw reasoning, secrets or entire responses) and regression tests for empty, reasoning-only and malformed-tool response shapes. Do not raise retry limits again. Consider bounded paragraph-aware splitting only as a separately tested mitigation, retaining canonical offsets, overlap, the global allowance and explicit incomplete-coverage failure.
+
+### Structural completion diagnostics implemented offline
+
+Shared website completion events now include allowlisted content type/string length, tool-call container type/count and recognized-call count, reasoning/refusal presence flags, and provider-supplied prompt/completion/reasoning token counts. Missing usage remains unknown rather than becoming zero. These describe the response after existing adapter normalization; they are not a raw HTTP response archive.
+
+The diagnostics collector independently filters these fields. It does not retain reasoning text, refusal text, tool arguments, arbitrary provider fields or credentials through the new metadata. Existing bounded excerpt behavior is unchanged. Both ordinary and final completion events receive structural metadata.
+
+A non-array tool-call field now follows the bounded missing-call path rather than crashing on `.filter`. It never executes a malformed call or supplies invented arguments. Retry ceilings, scientific validation, model selection, spend limits and GPU workflow are unchanged.
+
+Verification: 25 focused tests and 68 pipeline integration tests passed. Coverage includes empty messages, reasoning-only messages, unsupported tool-call shapes/types, non-string content, valid counts, invalid numeric metadata, and privacy filtering. Full-suite attempts timed out; a separate diagnostics API run also timed out in route-import setup before its 20 tests ran. This is not a claim that the whole suite passed. TypeScript reported the same 13 pre-existing errors, with none in changed files. No paid run or budget reset occurred.
