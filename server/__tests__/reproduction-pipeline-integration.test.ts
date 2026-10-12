@@ -391,6 +391,13 @@ describe("default reproduction stage-controller integration (offline only)", () 
       ]);
       const input = packet.plan.rawInputs[0];
       expect(packet.materialReads).toContainEqual(input);
+      expect(packet.inspectionNavigation.pages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path, readToolCallId: input.readToolCallId, start: 0 }),
+      ]));
+      expect(packet.completedExperimentNavigation.at(-1).claims).toEqual(expect.arrayContaining([
+        expect.objectContaining({ claimId: packet.claim.id, method: "raw-data-rederived" }),
+      ]));
+      expect(packet.completedExperimentNavigation.at(-1).notice).toContain("not scientifically verified");
       const evidence = packet.executionEvidence.find((e: any) => e.successful);
       return complete(null, [tool("record_result", { id: packet.claim.id, status: "verified",
         method: "raw-data-rederived", reproduced_value: "0.91", evidence_excerpt: "measured_score=0.91",

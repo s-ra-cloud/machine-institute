@@ -89,3 +89,9 @@ The checkpoint has 119 evidence records, but the first 32 are application-create
 ### Recommended next implementation
 
 First improve stage-to-stage inspection navigation: a bounded index of original successful reads with source path, inspected range, result identity and original retrieval ID, plus a concise association between completed experiments and their planned measurements. Preserve original evidence, explicit reuse, fresh-read availability for changed files, qP authorization and individual claim verdicts. Test multi-claim stage handoffs and changed-source cases offline before another paid cycle. This is a recommendation, not an implemented change or a promise that all claims will fit the current allowance.
+
+### Navigation indexes implemented and verified offline
+
+The shared website pipeline now supplies a bounded historical inspection index and completed-execution-stage navigation. Inspection entries distinguish captured ranges and page hashes, collapse identical captures to an original retrieval ID, and retain changed captures separately. Experiment entries retain planned measurements and explicit handoff references where supplied; recent execution pointers are labeled candidates, not proven measurement coverage. No automatic reuse, freshness assertion, verdict or authorization is introduced.
+
+Verification: full single-worker suite passed with 845 tests and 2 skipped across 64 files. Tests cover duplicate and changed pages, index bounds, failed/mismatched reads, and the execution-to-assessment handoff. Existing 13 unrelated TypeScript errors remain. No paid cycle or cost reset was performed. Live efficiency improvement remains unproven.

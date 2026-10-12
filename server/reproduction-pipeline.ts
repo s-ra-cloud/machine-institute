@@ -8,6 +8,7 @@ import type { ReproductionSession } from "./reproduction-session";
 import { ContextBudgetError, estimateRequestTokens } from "./llm-context";
 import { describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
 import { PlanningRecovery } from "./reproduction-planning-recovery";
+import { inspectionIndex } from "./reproduction-navigation";
 
 const controls: ToolSpec[] = [
   { name: "submit_plan", description: "Plan an experiment for the current claim and related pending claims that the SAME method and materials can measure. Supply an individual measurement for each. Execute once, then assess each claim separately. qP suitability remains required.",
@@ -61,6 +62,25 @@ export async function runControlledReproduction(input: {
   let calls = input.extractionCalls;
   let rounds = 0;
   const measurementHandoffs = new Map<string, unknown>();
+  const completedExperimentNavigation: Array<Record<string, unknown>> = [];
+  const rememberExperiment = (claimIds: string[]) => {
+    completedExperimentNavigation.push({
+      notice: "Execution stage handed off, not scientifically verified. Planned measurements are targets, not observed results. Recent executions are navigation candidates, not proof they cover these measurements. Retrieve original evidence and check suitability before explicit reuse.",
+      claims: claimIds.map(id => ({
+        claimId: id, method: controller.plans.get(id)?.method,
+        materialPaths: controller.plans.get(id)?.materialPaths.slice(0, 6),
+        plannedMeasurement: controller.plans.get(id)?.measurement.slice(0, 300),
+        handoff: (() => {
+          const handoff = measurementHandoffs.get(id) as Record<string, unknown> | undefined;
+          return handoff ? { evidence_tool_call_id: handoff.evidence_tool_call_id,
+            limitation: typeof handoff.limitation === "string" ? handoff.limitation.slice(0, 300) : undefined } : undefined;
+        })(),
+      })),
+      recentExecutions: executionEvidenceIndex(input.session.toolCalls).slice(-3),
+    });
+    while (completedExperimentNavigation.length > 8
+      || JSON.stringify(completedExperimentNavigation).length > 16000) completedExperimentNavigation.shift();
+  };
   const started = input.session.toolCalls.length;
   const planningRecovery: NonNullable<PipelineCheckpoint["planningRecovery"]> = [];
   const revisions: NonNullable<PipelineCheckpoint["revisions"]> = [];
@@ -107,6 +127,8 @@ export async function runControlledReproduction(input: {
           experimentMeasurements: phase === "execution" ? [initial.id, ...(controller.plans.get(initial.id)?.relatedClaims ?? []).map(c => c.claimId)]
             .map(id => ({ claimId: id, measurement: controller.plans.get(id)?.measurement })) : undefined,
           measurementHandoff: measurementHandoffs.get(initial.id),
+          inspectionNavigation: inspectionIndex(input.session.toolCalls),
+          completedExperimentNavigation,
           materialReads: input.session.toolCalls.filter(c => c.name === "read_file" && !c.error
             && input.shippedPaths.has(String(c.args.path))).slice(-30)
             .map(c => ({ path: c.args.path, readToolCallId: c.index })),
@@ -183,7 +205,7 @@ export async function runControlledReproduction(input: {
               },
             };
           });
-        const outcome = await runToolLoop(input.config, `${input.instructions}\n\nApplication-owned workflow: follow ONLY the current stage packet and permitted tools. Claims have already been extracted; do not register new claims or manage source identifiers. Stage control replaces any older workflow instructions, but all custom scientific instructions and qP safety gates remain binding.`, packet,
+        const outcome = await runToolLoop(input.config, `${input.instructions}\n\nApplication-owned workflow: follow ONLY the current stage packet and permitted tools. Consult inspectionNavigation for historical pages and completedExperimentNavigation for prior planned measurements before repeating orientation. Retrieve original tool output when appropriate; read files again when current contents are needed. These bounded indexes may omit history and never establish freshness, scientific coverage, authorization or a verdict. Claims have already been extracted; do not register new claims or manage source identifiers. Stage control replaces any older workflow instructions, but all custom scientific instructions and qP safety gates remain binding.`, packet,
           stageTools,
           async (name, args) => {
             controller.charge(name);
@@ -219,6 +241,7 @@ export async function runControlledReproduction(input: {
                   measurementHandoffs.set(id, { claimId: id, evidence_tool_call_id: reused.index,
                     reused: true, notice: "Coverage must be independently assessed; this is a prior execution, not a fresh replicate." });
                 controller.assess();
+                rememberExperiment([initial.id, ...(controller.plans.get(initial.id)?.relatedClaims ?? []).map(c => c.claimId)]);
               }
               await save();
               return reused ? `Plan accepted; original execution #${reused.index} retained. Starting individual assessment without rerunning. Verify measurement coverage and provenance; no scientific verdict is inferred.`
@@ -232,7 +255,7 @@ export async function runControlledReproduction(input: {
               if (issue) return `Refused: ${issue} This handoff never accepts a scientific verdict.`;
               if (Array.isArray(args.measurements))
                 for (const item of args.measurements) if (ids.includes(item.claimId)) measurementHandoffs.set(item.claimId, structuredClone(item));
-              controller.assess(); await save(); return "Execution stage ended.";
+              controller.assess(); rememberExperiment(ids); await save(); return "Execution stage ended.";
             }
             if (name === "request_plan_revision") {
               controller.revisePlan();

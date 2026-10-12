@@ -278,3 +278,9 @@ Extraction's bounded global allowance should support productive continuation rat
 **Why:** After quotation errors disappeared, a live packet still honestly reported more claims at its local limit while the global extraction allowance had eight unused calls. The whole run stopped before experiments despite five completed packets.
 
 **How to apply:** Reserve visits to unprocessed packets and retain the global cap. Count consecutive invalid or non-progressing submissions separately from productive batches; otherwise a first late error gets no repair opportunity. Validated progress resets the stall counter, never the global allowance. Never mark a packet complete while it reports remaining claims.
+
+Cross-stage navigation indexes describe captured evidence, never the current filesystem or proven measurement coverage.
+
+**Why:** Repeated source inspection consumed most post-extraction calls in a live run. Reducing those repeats is useful, but a page hash cannot detect subsequent command-side mutations, and planned measurements are not observed results.
+
+**How to apply:** Retain original retrieval identities, distinguish changed captures, bound navigation size and keep fresh reads available. Experiment handoffs aid discovery only: scientific suitability, qP authorization, explicit reuse and per-claim verdict checks remain mandatory.
