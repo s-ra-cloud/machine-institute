@@ -39,3 +39,20 @@ The guard now counts consecutive invalid or non-progressing submissions separate
 Verification: 842 tests passed, 2 skipped, across 63 files with one worker. The same 13 pre-existing TypeScript errors remain; none are in the changed code. The default parallel-test reliability issue remains separate.
 
 Third-attempt model cost: $0.08211720. Total model cost since reset: $0.22061952, leaving $4.77938048 of the $5 allowance. No Modal allocation; full $10 allowance remains. No experiments or final judged report were produced. Paid retries are paused after three attempts; the late-error correction has not been tested live.
+
+### User-authorized fourth attempt — extraction completed, run ongoing
+
+Evidence: `.local/state/live-reproduction/website-1791803573941`.
+All six packets completed in thirteen extraction calls, retaining 32 grounded claims. The previously blocked packet completed in four calls. A Modal A10G sandbox was allocated successfully. This establishes live extraction progress, not scientific verification or completed reporting.
+
+At the post-extraction checkpoint, cumulative model spending was $0.29848632. The runner reserved $5 against the $10 Modal allowance for the allocation; this is a conservative reservation, not measured billed GPU cost. Costs were not reset. Planning, experiments, independent judging and the final outcome remain pending.
+
+### Fourth attempt — final outcome
+
+Stopped at the controller's 100-call global resource limit while preparing R5. Extraction remained complete. The real Modal run executed the shipped baseline successfully in 292.1 seconds and the lexical-controls script in 103.3 seconds, plus two R4 analysis commands. The preparation guard refused the baseline twice before the successful run; shared execution covered R2 and R3. R4 recovered through a method-plan revision.
+
+Four of 32 claims received provisional agent assessments: three falsified and one verified. Twenty-eight remain pending. Independent judging and final reporting were not reached, so these are not final scientific verdicts. This is progress beyond the recent extraction failures, not proof of better end-to-end performance than historical runs reaching later claims.
+
+The remaining bottleneck is call-budget efficiency across planning, inspection, execution and assessment: planning recovery triggered for R1, R2, R4 and R5, while R4 required a method revision. The evidence supports investigating repeated inspection and experiment reuse; it does not establish a single root cause or justify bypassing validation or raising the spending cap.
+
+The run logged successful Modal sandbox termination. Cumulative model spending since reset is $1.49969028, leaving $3.50030972. Modal reservation remains $5, leaving $5 of reservation allowance; actual billed GPU cost has not been reconciled. No further paid run is active.
