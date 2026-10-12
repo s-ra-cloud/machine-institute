@@ -266,3 +266,15 @@ Preparation checks must not silently invent bookkeeping files or classify scient
 **Why:** The shipped baseline performs a read-modify-write of confidence history after GPU computation; a missing file wastes that computation. Isolating its exact function established that an object works and a list does not, but that does not establish a universal schema or permission to initialize other inputs.
 
 **How to apply:** Use narrowly recognized source patterns to require inspection before dispatch, preserve qP authorization, and leave initialization or source repair evidence-backed and explicit. Test the extracted shipped function with standard-library dependencies in a temporary directory, never by importing its model-loading entrypoint. This is preparation validation, not scientific reproduction or proof of complete dependency coverage.
+
+Exact-copy extraction should be explicit rather than silently repairing a model's paraphrase.
+
+**Why:** A live run followed the structured tool contract but spent its repair allowance reconciling separately transcribed claims, quotes and optional numerical metadata. Stable rejection IDs helped repair some candidates but did not prevent new transcription errors.
+
+**How to apply:** Let the model explicitly select a verbatim quote as the claim, while retaining literal source matching, size bounds, rejection identities and conflicting-value refusal. Do not silently normalize Markdown or punctuation, infer numerical metadata, or interpret successful extraction as scientific reproduction.
+
+Extraction's bounded global allowance should support productive continuation rather than strand spare calls behind fixed per-packet quotas.
+
+**Why:** After quotation errors disappeared, a live packet still honestly reported more claims at its local limit while the global extraction allowance had eight unused calls. The whole run stopped before experiments despite five completed packets.
+
+**How to apply:** Reserve visits to unprocessed packets and retain the global cap. Count consecutive invalid or non-progressing submissions separately from productive batches; otherwise a first late error gets no repair opportunity. Validated progress resets the stall counter, never the global allowance. Never mark a packet complete while it reports remaining claims.

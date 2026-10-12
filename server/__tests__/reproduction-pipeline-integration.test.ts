@@ -974,7 +974,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(saved.at(-1)?.claims.every(c => c.status === "verified")).toBe(true);
     expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("analyze.py"))).toHaveLength(12);
   });
-  it("repairs a renamed rejected claim, recovers report prose, and explicitly finishes extraction before execution", async () => {
+  it.each([false, true])("repairs a renamed claim and finishes extraction before execution (explicit copy=%s)", async copy => {
     const responder = stageResponder();
     let extractionRequests = 0;
     mock.complete.mockImplementation(async (request: any) => {
@@ -989,7 +989,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
           return complete("## Claims\nThe score is inconclusive.");
         }
         if (extractionRequests === 3) return complete(null, [tool("submit_claims", { claims: [
-          { claim: paper, source_quote: paper, original_value: "0.91", replaces: "E1" },
+          { ...(copy ? { copy_source_quote: true } : { claim: paper }), source_quote: paper, original_value: "0.91", replaces: "E1" },
         ], has_more: true })]);
         return complete(null, [tool("submit_claims", { claims: [], has_more: false })]);
       }
@@ -1033,23 +1033,44 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(mock.create).not.toHaveBeenCalled();
   });
 
-  it("retains all fifteen claims instead of dropping the final three", async () => {
+  it.each(["spread", "dense", "late-repair"])("retains and assesses fifteen claims across batches (%s)", async scenario => {
+    const dense = scenario !== "spread";
     const sentences = Array.from({ length: 15 }, (_, i) => `The measured experimental score for condition ${i} is 0.91.`);
-    const longPaper = [0, 5, 10].map(start => sentences.slice(start, start + 5).join("\n").padEnd(5400, " ")).join("");
+    const longPaper = dense ? sentences.join("\n")
+      : [0, 5, 10].map(start => sentences.slice(start, start + 5).join("\n").padEnd(5400, " ")).join("");
     mock.materials.mockResolvedValue({ paperMarkdown: longPaper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
     const sb = sandbox(); mock.create.mockResolvedValue(sb);
     const responder = stageResponder();
     let packet = 0;
+    let needsRepair = false;
+    let injectedError = false;
     mock.complete.mockImplementation((request: any) => {
       if ((request.tools ?? []).some((t: any) => t.function.name === "submit_claims")) {
-        const selected = sentences.slice(packet * 5, ++packet * 5);
-        return complete(null, [tool("submit_claims", { claims: selected.map(claim => ({ claim, source_quote: claim, original_value: "0.91" })) })]);
+        if (scenario === "late-repair" && packet === 2 && !injectedError) {
+          injectedError = true;
+          needsRepair = true;
+          return complete(null, [tool("submit_claims", { claims: [{
+            source_quote: "This altered quotation is not present in the paper.", copy_source_quote: true,
+          }], has_more: false })]);
+        }
+        const batchSize = dense ? 3 : 5;
+        const selected = sentences.slice(packet * batchSize, ++packet * batchSize);
+        const claims = selected.map((claim, index) => ({
+          source_quote: claim, copy_source_quote: true, original_value: "0.91",
+          ...(needsRepair && index === 0 ? { replaces: "E1" } : {}),
+        }));
+        needsRepair = false;
+        return complete(null, [tool("submit_claims", {
+          claims,
+          has_more: dense && packet < 5,
+        })]);
       }
       return responder(request);
     });
     const saved: PipelineCheckpoint[] = [];
     const result = await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
-    expect(packet).toBe(3);
+    expect(packet).toBe(dense ? 5 : 3);
+    expect(injectedError).toBe(scenario === "late-repair");
     expect(saved.every(s => s.claims.length <= 15)).toBe(true);
     expect(saved.at(-1)?.claims).toHaveLength(15);
     expect(saved.at(-1)?.claims.every(c => c.status === "verified")).toBe(true);

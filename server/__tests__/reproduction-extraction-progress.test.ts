@@ -56,7 +56,7 @@ it("visits late packets beyond six without exceeding the existing eighteen-call 
   expect(result.claims.some(c => c.claim === sentence(8))).toBe(true);
   expect(result.calls).toBeLessThanOrEqual(18);
 });
-it("continues packet batches and refuses unresolved omissions within unchanged bounds", async () => {
+it("lets productive batches borrow spare calls within the unchanged global bound", async () => {
   let n = 0;
   mock.loop.mockImplementation(async (_c, _s, _p, _t, execute, opts) => {
     const toolCalls = [];
@@ -65,8 +65,28 @@ it("continues packet batches and refuses unresolved omissions within unchanged b
     }
     return { toolCalls, rounds: toolCalls.length, stoppedBy: "model" };
   });
-  await expect(extractReproductionClaims({ ...input(), paper: Array.from({ length: 7 }, (_, i) => sentence(i)).join("\n") })).rejects.toThrow("unresolved source packets");
-  expect(n).toBe(3);
+  const result = await extractReproductionClaims({ ...input(), paper: Array.from({ length: 7 }, (_, i) => sentence(i)).join("\n") });
+  expect(result.coverage.termination).toBe("complete");
+  expect(n).toBe(7);
+});
+it.each(["duplicate", "invalid", "productive"])("bounds additional batches without hiding remaining work: %s", async kind => {
+  let calls = 0;
+  mock.loop.mockImplementation(async (_c, _s, _p, _t, execute, opts) => {
+    const toolCalls = [];
+    while (toolCalls.length < opts.maxToolCalls && !opts.getStallReason() && !opts.isStageComplete()) {
+      const claim = kind === "invalid" ? "This text is not in the paper."
+        : sentence(kind === "duplicate" ? 0 : calls);
+      calls++;
+      toolCalls.push(await execute("submit_claims", { claims: [candidate(claim)], has_more: true }));
+    }
+    return { toolCalls, rounds: toolCalls.length, stoppedBy: opts.getStallReason() ? "no-progress" : "tool-budget" };
+  });
+  const progress = vi.fn();
+  await expect(extractReproductionClaims({ ...input(),
+    paper: Array.from({ length: 20 }, (_, i) => sentence(i)).join("\n"), onProgress: progress,
+  })).rejects.toThrow(kind === "invalid" ? "no grounded claims" : "unresolved source packets");
+  expect(calls).toBe(kind === "productive" ? 18 : kind === "duplicate" ? 4 : 3);
+  expect(progress.mock.calls.at(-1)?.[0]).toMatchObject({ termination: "failed" });
 });
 it("deduplicates claims in overlapping packets", async () => {
   const overlap = " ".repeat(5500) + sentence(0) + " ".repeat(5000);
@@ -92,7 +112,8 @@ it("reserves structured-output headroom without increasing extraction tool calls
   respond(p => p ? [] : [candidate(sentence(0))]);
   await extractReproductionClaims(input());
   for (const call of mock.loop.mock.calls) {
-    expect(call[5]).toMatchObject({ maxTokens: 8000, maxToolCalls: 3, maxPrematureStopRecoveries: 1 });
+    expect(call[5]).toMatchObject({ maxTokens: 8000, maxPrematureStopRecoveries: 1 });
+    expect(call[5].maxToolCalls).toBeLessThanOrEqual(18);
   }
 });
 it("reserves visits to later packets despite early invalid candidates", async () => {
@@ -142,4 +163,35 @@ it("cannot replace an accepted claim or clear an unknown replacement reference b
   const onAccepted = vi.fn();
   await expect(extractReproductionClaims({ ...input(), paper: sentence(0) + "\n" + sentence(1), onAccepted })).rejects.toThrow("unresolved");
   expect(onAccepted).toHaveBeenCalledTimes(1);
+});
+it("explicitly copies an exact quote to repair a rejected paraphrase without inventing optional metadata", async () => {
+  mock.loop.mockImplementation(async (_c, _s, _p, _t, execute, opts) => {
+    expect(await execute("submit_claims", { claims: [candidate("Paraphrased and unsupported scientific claim.")] })).toContain("E1");
+    expect(await execute("submit_claims", { claims: [{
+      source_quote: sentence(0), copy_source_quote: true, replaces: "E1",
+    }], has_more: false })).toBe("Extraction accepted.");
+    expect(opts.isStageComplete()).toBe(true);
+    return { toolCalls: [{}, {}], rounds: 2, stoppedBy: "model" };
+  });
+  const result = await extractReproductionClaims({ ...input(), paper: sentence(0) });
+  expect(result.claims[0]).toMatchObject(candidate(sentence(0)));
+  expect(result.claims[0].original_value).toBeUndefined();
+  expect(result.claims[0]).not.toHaveProperty("copy_source_quote");
+});
+it.each([
+  { source_quote: "This quotation does not occur in the actual paper.", copy_source_quote: true },
+  { source_quote: sentence(0), claim: "Conflicting claim", copy_source_quote: true },
+  { source_quote: sentence(0), copy_source_quote: true, original_value: "fabricated" },
+  { source_quote: sentence(0) },
+  { source_quote: sentence(0), copy_source_quote: "true" },
+])("does not use quote copying to bypass evidence validation: %j", async submission => {
+  respond(() => [submission]);
+  const accepted = vi.fn();
+  await expect(extractReproductionClaims({ ...input(), paper: sentence(0), onAccepted: accepted })).rejects.toThrow("no grounded claims");
+  expect(accepted).not.toHaveBeenCalled();
+});
+it("does not truncate oversized copied quotes into accepted claims", async () => {
+  const quote = sentence(0).repeat(40);
+  respond(() => [{ source_quote: quote, copy_source_quote: true }]);
+  await expect(extractReproductionClaims({ ...input(), paper: quote })).rejects.toThrow("no grounded claims");
 });
