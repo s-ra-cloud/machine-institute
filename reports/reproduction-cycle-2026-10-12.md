@@ -56,3 +56,36 @@ Four of 32 claims received provisional agent assessments: three falsified and on
 The remaining bottleneck is call-budget efficiency across planning, inspection, execution and assessment: planning recovery triggered for R1, R2, R4 and R5, while R4 required a method revision. The evidence supports investigating repeated inspection and experiment reuse; it does not establish a single root cause or justify bypassing validation or raising the spending cap.
 
 The run logged successful Modal sandbox termination. Cumulative model spending since reset is $1.49969028, leaving $3.50030972. Modal reservation remains $5, leaving $5 of reservation allowance; actual billed GPU cost has not been reconciled. No further paid run is active.
+
+## Offline investigation: inspection and experiment reuse
+
+No paid calls, allocations or ledger resets were made during this investigation.
+
+Controller milestone deltas account for all 100 calls:
+
+| Stage | Calls |
+| --- | ---: |
+| Extraction | 13 |
+| Planning | 33 |
+| Execution | 41 |
+| Assessment | 13 |
+
+The checkpoint has 119 evidence records, but the first 32 are application-created paper-source records from claim registration, not additional model tool calls. Excluding those leaves 87 post-extraction calls:
+
+- 42 file reads, 16 original-output retrievals, 3 directory listings: 61 navigation calls, about 70% of the post-extraction total.
+- 7 command invocations (including preparation refusals, not seven successful experiments).
+- 4 writes, 5 plans, 4 assessment handoffs, 5 result-recording attempts and 1 revision request.
+- Successful file-read result hashes show 11 repeats beyond their first identical occurrences. Identical results establish repeated content, not that every repeat was unjustified.
+
+### Confirmed code behavior and limitations
+
+1. Explicit reuse of successful shipped-script runs already exists and can skip execution to assessment. Grouping was used for R2/R3 in the live run. Five focused reuse/group tests passed; 63 unrelated tests were not selected. A missing reuse mechanism is therefore not the general explanation.
+2. Stage packets carry up to 30 recent shipped-material read references as path/ID pairs, but not the inspected ranges or result hashes. Planning's range-aware recovery state is stage-local. The next stage has less information for selecting an existing page without reading the file again.
+3. Reusable execution navigation lists command, status and retrieval pointers, not a structured association with previous experiment measurements. Reuse still requires explicit scientific suitability; automatic reuse cannot be inferred from a matching filename.
+4. Direct plan-level reuse is restricted to reruns of successful planned scripts. Generated raw-data computations need stronger provenance support before offering analogous reuse; do not remove the restriction indiscriminately.
+5. Four planning-recovery triggers do not prove four repeated-read loops: the guard also triggers after six calls. The diagnostic log dropped 314 events, so exact causal attribution is incomplete.
+6. Accepting 32 claims exposes the limited capacity of a fixed 100-call pipeline. Saving eleven repeats alone would not establish that the other 28 claims can finish, particularly with separate scientific assessment required.
+
+### Recommended next implementation
+
+First improve stage-to-stage inspection navigation: a bounded index of original successful reads with source path, inspected range, result identity and original retrieval ID, plus a concise association between completed experiments and their planned measurements. Preserve original evidence, explicit reuse, fresh-read availability for changed files, qP authorization and individual claim verdicts. Test multi-claim stage handoffs and changed-source cases offline before another paid cycle. This is a recommendation, not an implemented change or a promise that all claims will fit the current allowance.
