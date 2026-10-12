@@ -231,3 +231,13 @@ Installed SDK source confirms that non-streaming `chat.completions.create` parse
 Verification: 64 tests across the new HTTP boundary, adapter and tool-loop suites passed. No TypeScript errors in the new test file; existing project errors remain. No production behavior, retry limits, model, budgets or GPU configuration changed. No paid calls.
 
 Conclusion: no output-dropping defect was reproduced in these local response-handling paths. This narrows the investigation but does not establish what the historical live HTTP response contained. A future live diagnosis should compare allowlisted response structure before SDK parsing with the existing post-adapter structure, without storing raw response content or private reasoning.
+
+### Paired HTTP and post-adapter structural diagnostics
+
+Implemented in the shared managed and BYOK adapters, not solely in the live-cycle runner. Each request observes the SDK's normal HTTP JSON read and retains only an allowlisted structural snapshot before adapter processing. It does not copy the response body, issue another request, or persist raw JSON. A per-request closure and weakly held completion metadata prevent simultaneous requests from sharing observations.
+
+Completion diagnostics now include `httpResponse` beside existing post-adapter fields. Both record only content/tool container types, lengths and counts, known finish reasons, reasoning/refusal presence, and safe nonnegative token counts. The persistence boundary sanitizes the nested HTTP snapshot independently, discarding arbitrary fields and deeper nesting. Unobserved HTTP metadata stays absent, not an invented zero or match. This snapshot describes parsed HTTP JSON at the SDK read boundary, not raw bytes or model-internal output.
+
+Tests demonstrate matching snapshots for valid and missing calls, an intentional difference for refused calls, isolation across concurrent requests, preservation of parsing when observation fails, rejection of invalid HTTP JSON, and exclusion of private/unallowlisted content. Verification: 146 tests passed across six affected suites; no TypeScript errors in the changed files, while existing unrelated errors remain.
+
+No paid inference, GPU allocation, retry increase, model change or budget reset. The next authorized live attempt can distinguish an already-missing HTTP tool call from a change in local processing. These diagnostics do not themselves cure missing output.

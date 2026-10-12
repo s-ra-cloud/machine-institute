@@ -1,6 +1,32 @@
-import { expect, it } from "vitest";
-import { completionStructure, sanitizeCompletionStructure } from "../completion-structure";
+import { expect, it, vi } from "vitest";
+import { completionStructure, sanitizeCompletionStructure, observingFetch } from "../completion-structure";
 import { ReproductionDiagnostics } from "../reproduction-diagnostics";
+
+it("does not break the SDK JSON read if an observation callback fails", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response('{"choices":[]}')));
+  try {
+    const response = await observingFetch(() => { throw new Error("diagnostic failure"); })("https://offline.test");
+    expect(await response.json()).toEqual({ choices: [] });
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it("independently allowlists HTTP metadata and discards nested or private payloads", () => {
+  const diagnostics = new ReproductionDiagnostics();
+  diagnostics.observe({ kind: "completion", round: 1, callCount: 0,
+    httpResponse: {
+      responseContentType: "null", responseToolCallsType: "missing", responseFinishReason: "stop",
+      responseReasoningPresent: 1, responseCompletionTokens: 4,
+      responseRefusalPresent: 9, responsePromptTokens: -1,
+      raw: "PRIVATE_BODY", reasoning: "PRIVATE_REASONING",
+      httpResponse: { responseContentType: "string", raw: "PRIVATE_NESTED" },
+    },
+  } as any);
+  expect(diagnostics.snapshot().events[0].httpResponse).toEqual({
+    responseContentType: "null", responseToolCallsType: "missing", responseFinishReason: "stop",
+    responseReasoningPresent: 1, responseCompletionTokens: 4,
+  });
+  expect(JSON.stringify(diagnostics.snapshot())).not.toContain("PRIVATE");
+});
 
 it("persists only allowlisted structure, never reasoning, refusal, arguments or arbitrary fields", () => {
   const structure = completionStructure({

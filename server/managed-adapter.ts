@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { observingFetch, retainHttpStructure, type CompletionStructure } from "./completion-structure";
 import { getManagedConnection, resolveByocSelection, resolveManagedSelection } from "./managed-models";
 import { MANAGED_MODELS } from "../shared/model-catalog";
 import type { ModelProviderConfig } from "./model-service";
@@ -11,8 +12,12 @@ export interface ManagedChatClient {
 export function createManagedChatClient(config: ModelProviderConfig, options: { maxRetries?: number } = {}): ManagedChatClient {
   const selected = resolveManagedSelection(config);
   const metadata = MANAGED_MODELS.find(m => m.model === selected.modelName)!;
-  const client = new OpenAI({ ...getManagedConnection(selected.provider), maxRetries: options.maxRetries ?? 0 });
   return { chat: { completions: { create: async (request, requestOptions) => {
+    let httpStructure: CompletionStructure | undefined;
+    const client = new OpenAI({
+      ...getManagedConnection(selected.provider), maxRetries: options.maxRetries ?? 0,
+      fetch: observingFetch(structure => { httpStructure = structure; }),
+    });
     const body = { ...request, model: selected.modelName };
     body.max_tokens = Math.min(body.max_tokens ?? body.max_completion_tokens ?? 12000, metadata.maxOutputTokens);
     delete body.max_completion_tokens;
@@ -21,6 +26,7 @@ export function createManagedChatClient(config: ModelProviderConfig, options: { 
       body.reasoning_effort = "minimal";
     }
     const result = await client.chat.completions.create(body, requestOptions) as any;
+    if (httpStructure && result && typeof result === "object") retainHttpStructure(result, httpStructure);
     // The common service classifies envelope errors (funding/context/retries)
     // before accepting any message, without leaking raw provider payloads.
     if (result?.error) return result;
@@ -54,12 +60,13 @@ export function createByocChatClient(config: ModelProviderConfig, options: { max
   const endpoint = selected.provider === "openai" ? "https://api.openai.com/v1"
     : selected.provider === "anthropic" ? "https://api.anthropic.com/v1"
     : "https://openrouter.ai/api/v1";
-  const client = new OpenAI({
-    baseURL: endpoint,
-    apiKey: selected.apiKey!,
-    maxRetries: options.maxRetries ?? 0,
-  });
   return { chat: { completions: { create: async (request, requestOptions) => {
+    // Per-request capture prevents concurrent completions from sharing metadata.
+    let httpStructure: CompletionStructure | undefined;
+    const client = new OpenAI({
+      baseURL: endpoint, apiKey: selected.apiKey!, maxRetries: options.maxRetries ?? 0,
+      fetch: observingFetch(structure => { httpStructure = structure; }),
+    });
     try {
       // OpenRouter otherwise treats parameter support as best-effort.
       // Fail routing explicitly rather than silently ignoring tool contracts.
@@ -70,6 +77,7 @@ export function createByocChatClient(config: ModelProviderConfig, options: { max
         body,
         requestOptions,
       ) as any;
+      if (httpStructure && result && typeof result === "object") retainHttpStructure(result, httpStructure);
       if (result?.error) return result;
       if (!result?.choices?.length) throw Object.assign(new Error("BYOK provider returned no completion."), { status: 502 });
       for (const choice of result.choices) {

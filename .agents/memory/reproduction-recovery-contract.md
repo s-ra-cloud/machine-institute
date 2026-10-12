@@ -315,6 +315,12 @@ Offline HTTP-boundary testing with the real SDK preserved both valid calls and m
 
 **How to apply:** Keep transport-level tests alongside mocked orchestration tests. Before assigning a live missing-output failure to the provider or SDK, compare allowlisted pre-SDK and post-adapter structural metadata; never store private reasoning or raw response bodies to close this evidence gap.
 
+Boundary observations should use the SDK's existing JSON read and be scoped to each request, not a shared “last response” slot.
+
+**Why:** Reading a second body copy increases buffering, while concurrent completions can misattribute a shared snapshot. Parsed HTTP JSON is sufficient for this comparison; it is not raw wire evidence or evidence of model-internal output.
+
+**How to apply:** Keep observations content-free and independently sanitized at persistence. Treat missing observations as unknown and keep diagnostic failures from altering response parsing or scientific execution.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.
