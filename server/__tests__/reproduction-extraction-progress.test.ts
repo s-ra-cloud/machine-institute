@@ -14,7 +14,7 @@ function respond(get: (packet: number, attempt: number, text: string) => unknown
   mock.loop.mockImplementation(async (_c, _s, text, _t, execute, opts) => {
     const p = packet++;
     const toolCalls = [];
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < opts.maxToolCalls; attempt++) {
       opts.onOutcome?.({ kind: "arguments", round: attempt + 1, callCount: attempt });
       const result = await execute("submit_claims", { claims: get(p, attempt, text) }).catch(() => "error");
       toolCalls.push({ result });
@@ -24,13 +24,13 @@ function respond(get: (packet: number, attempt: number, text: string) => unknown
     return { toolCalls, rounds: toolCalls.length, stoppedBy: opts.isStageComplete() ? "model" : "tool-budget" };
   });
 }
-it.each([12, 15])("caps %i candidates before callback registration", async count => {
+it.each([12, 15])("retains all %i grounded candidates and inspects every packet", async count => {
   respond((p) => Array.from({ length: Math.min(5, Math.max(0, count - p * 5)) }, (_, j) => candidate(sentence(p * 5 + j))));
   const onAccepted = vi.fn(async () => {});
   const result = await extractReproductionClaims({ ...input(), onAccepted });
-  expect(onAccepted).toHaveBeenCalledTimes(12);
-  expect(result.coverage.termination).toBe("claim-limit");
-  expect(mock.loop).toHaveBeenCalledTimes(3);
+  expect(onAccepted).toHaveBeenCalledTimes(count);
+  expect(result.coverage.termination).toBe("complete");
+  expect(mock.loop).toHaveBeenCalledTimes(prepareSourcePackets(paper).length);
 });
 it("retains valid siblings and deduplicates repeated repairs without inferring metadata", async () => {
   respond((p, attempt) => p ? [] : [candidate(sentence(0)), { ...candidate(sentence(1)), ...(attempt ? {} : { original_value: "invented" }) }]);
@@ -42,10 +42,31 @@ it("retains valid siblings and deduplicates repeated repairs without inferring m
 });
 it("retains early claims after later validation exhaustion, with aggregate and local counts", async () => {
   respond(p => p === 0 ? [candidate(sentence(0))] : [{ ...candidate(sentence(p * 5)), required_material: "invented" }]);
-  const result = await extractReproductionClaims(input());
-  expect(result.claims).toHaveLength(1);
-  expect(result.coverage.packets[1]).toMatchObject({ status: "validation-exhausted", calls: 3 });
-  expect(result.calls).toBeGreaterThan(3);
+  const accepted = vi.fn();
+  const progress = vi.fn();
+  await expect(extractReproductionClaims({ ...input(), onAccepted: accepted, onProgress: progress })).rejects.toThrow("unresolved source packets");
+  expect(accepted).toHaveBeenCalledTimes(1);
+  expect(progress.mock.calls.at(-1)?.[0]).toMatchObject({ termination: "failed", failure: "incomplete-coverage" });
+});
+it("visits late packets beyond six without exceeding the existing eighteen-call allowance", async () => {
+  const long = Array.from({ length: 9 }, (_, i) => sentence(i).padEnd(5400, " ")).join("");
+  respond((_p, _a, text) => [candidate(text.match(/The measured experimental score for condition \d+ was 0.91./)![0])]);
+  const result = await extractReproductionClaims({ ...input(), paper: long });
+  expect(result.inspectedPackets).toBe(prepareSourcePackets(long).length);
+  expect(result.claims.some(c => c.claim === sentence(8))).toBe(true);
+  expect(result.calls).toBeLessThanOrEqual(18);
+});
+it("continues packet batches and refuses unresolved omissions within unchanged bounds", async () => {
+  let n = 0;
+  mock.loop.mockImplementation(async (_c, _s, _p, _t, execute, opts) => {
+    const toolCalls = [];
+    while (!opts.isStageComplete() && toolCalls.length < opts.maxToolCalls) {
+      toolCalls.push(await execute("submit_claims", { claims: [candidate(sentence(n++))], has_more: n < 7 }));
+    }
+    return { toolCalls, rounds: toolCalls.length, stoppedBy: "model" };
+  });
+  await expect(extractReproductionClaims({ ...input(), paper: Array.from({ length: 7 }, (_, i) => sentence(i)).join("\n") })).rejects.toThrow("unresolved source packets");
+  expect(n).toBe(3);
 });
 it("deduplicates claims in overlapping packets", async () => {
   const overlap = " ".repeat(5500) + sentence(0) + " ".repeat(5000);
@@ -68,9 +89,23 @@ it("does not convert provider or deadline failures to partial success", async ()
   await expect(extractReproductionClaims(input())).rejects.toThrow("Provider authentication");
 });
 it("reserves structured-output headroom without increasing extraction tool calls", async () => {
-  respond(() => [candidate(sentence(0))]);
+  respond(p => p ? [] : [candidate(sentence(0))]);
   await extractReproductionClaims(input());
   for (const call of mock.loop.mock.calls) {
     expect(call[5]).toMatchObject({ maxTokens: 8000, maxToolCalls: 3, maxPrematureStopRecoveries: 1 });
   }
+});
+it("reserves visits to later packets despite early invalid candidates", async () => {
+  const long = Array.from({ length: 16 }, (_, i) => sentence(i).padEnd(5400, " ")).join("");
+  respond((p, _attempt, text) => p < 2
+    ? [{ ...candidate(sentence(p)), original_value: "invented" }]
+    : [candidate(text.match(/The measured experimental score for condition \d+ was 0.91./)![0])]);
+  const progress = vi.fn();
+  await expect(extractReproductionClaims({ ...input(), paper: long, onProgress: progress })).rejects.toThrow("unresolved");
+  expect(progress.mock.calls.at(-1)?.[0].packets).toHaveLength(16);
+  expect(progress.mock.calls.at(-1)?.[0].calls).toBeLessThanOrEqual(18);
+});
+it("rejects oversized coverage before provider calls rather than silently truncating", async () => {
+  await expect(extractReproductionClaims({ ...input(), paper: "x ".repeat(60000) })).rejects.toThrow("coverage exceeds");
+  expect(mock.loop).not.toHaveBeenCalled();
 });

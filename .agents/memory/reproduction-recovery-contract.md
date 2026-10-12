@@ -107,9 +107,9 @@ Do not silently cache scientific executions. Repeating a successful planned comm
 
 Extraction coverage is not scientific coverage: accepting a bounded set of exact quotations does not establish that every core result was selected.
 
-**Why:** An observed extraction accepted fifteen claims, then a later packet's optional-field refusals aborted all progress before execution. Retaining earlier valid claims is useful only if omitted passages remain explicitly unassessed, rather than becoming scientific verdicts.
+**Why:** Early extraction cutoffs omitted later paper sections, while optional-field refusals left other packets unresolved. The user wants complete reports, not partial reports substituted for that goal. Earlier accepted claims must survive a failure without implying that omitted passages were assessed.
 
-**How to apply:** Separate packet-validation exhaustion from infrastructure and persistence failures. Preserve valid progress without relaxing source evidence, and disclose bounded scope in public reports as well as private checkpoints.
+**How to apply:** Reserve bounded extraction capacity for later packets rather than stopping at an arbitrary claim count. Preserve grounded claims in checkpoints, but require every source packet to resolve before allocating a GPU. If coverage cannot fit the unchanged allowance, stop explicitly instead of launching a partial-paper run. Completion of source inspection still does not prove that the model selected every scientific claim.
 
 Current mandatory tool requirements must accompany saved prompts at execution time without erasing custom scientific instructions.
 

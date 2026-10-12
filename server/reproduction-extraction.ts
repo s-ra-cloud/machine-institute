@@ -7,15 +7,16 @@ export interface ExtractionCoverage {
   packets: Array<{ start: number; end: number; status: "accepted" | "validation-exhausted" | "claim-limit"; calls: number }>;
   calls: number;
   termination: "in-progress" | "complete" | "partial" | "packet-limit" | "claim-limit" | "failed";
-  failure?: "checkpoint" | "deadline" | "no-claims" | "provider-or-runtime";
+  failure?: "checkpoint" | "deadline" | "no-claims" | "provider-or-runtime" | "incomplete-coverage";
 }
 export function describeExtractionCoverage(c: ExtractionCoverage): string {
   return `Bounded extraction coverage (not an exhaustive paper review): ${c.packets.length}/${c.totalPackets} packets attempted; ${c.totalPackets - c.packets.length} packets unprocessed. Termination: ${c.termination}. Incomplete packet ranges: ${c.packets.filter(p => p.status !== "accepted").map(p => `${p.start}-${p.end} (${p.status})`).join(", ") || "none recorded"}. Omitted claims and passages were not experimentally assessed and have no scientific verdict.`;
 }
 const submit: ToolSpec = {
   name: "submit_claims",
-  description: "Submit up to five core scientific claims quoted exactly from the supplied paper packet, or an empty list when it contains none. Application assigns identities and provenance.",
+  description: "Submit up to five core scientific claims per call, quoted exactly from the supplied packet. Set has_more=true if further core claims remain; continue in the next call without repeating accepted claims. Use an empty list only when none remain. Application assigns identities and provenance.",
   parameters: { type: "object", additionalProperties: false, required: ["claims"], properties: {
+    has_more: { type: "boolean", description: "True if further core claims in this packet still need submission. Submit them in the next call." },
     claims: { type: "array", items: { type: "object", additionalProperties: false, required: ["claim", "source_quote"], properties: {
       claim: { type: "string" }, source_quote: { type: "string" },
       original_value: { type: "string" }, required_material: { type: "string" },
@@ -41,8 +42,14 @@ export async function extractReproductionClaims(input: {
     catch (error) { coverage.failure = "checkpoint"; throw error; }
   };
   try {
-  // An explicit coverage limit, not a claim that uninspected text has no results.
-  for (const packet of packets.slice(0, 6)) {
+  // Keep the former worst-case 6 * 3 call allowance, but reserve one call
+  // for every remaining packet instead of dropping late sections at claim 12.
+  const extractionCallLimit = 18;
+  if (packets.length > extractionCallLimit) {
+    coverage.failure = "incomplete-coverage";
+    throw new Error("Extraction failed: complete source coverage exceeds the bounded extraction allowance. No GPU allocated.");
+  }
+  for (const packet of packets) {
     if (Date.now() >= input.deadline) { coverage.failure = "deadline"; throw new Error("Extraction stopped: system-enforced deadline exhaustion before GPU allocation."); }
     let accepted = false;
     let acceptanceError: unknown;
@@ -61,7 +68,6 @@ export async function extractReproductionClaims(input: {
           if (errors.length) { unresolved.add(key); issues.push(...errors.map(e => `claims[${i}]: ${e}`)); continue; }
           unresolved.delete(key);
           const c = candidate as ExtractedCandidate;
-          if (claims.length >= 12) break;
           if (!claims.some(existing => existing.claim.trim() === c.claim.trim())) {
             const claim = { ...c, packet };
             try { await input.onAccepted?.(claim); }
@@ -69,13 +75,13 @@ export async function extractReproductionClaims(input: {
             claims.push(claim);
           }
         }
-        accepted = !issues.length || claims.length >= 12;
-        return accepted ? "Extraction accepted." : `Refused candidates: ${issues.join("; ")}. Valid siblings retained. Correct rejected fields using the SAME supplied packet, or explicitly omit unsupported optional original_value/required_material fields.`;
+        accepted = !issues.length && !unresolved.size && args.has_more !== true;
+        return accepted ? "Extraction accepted." : `Extraction incomplete. ${issues.length ? `Refused candidates: ${issues.join("; ")}.` : "Submit remaining claims or correct previously rejected claims."} Valid siblings retained. Correct rejected fields using the SAME supplied packet, or explicitly omit unsupported optional original_value/required_material fields.`;
       }, {
         // Reasoning-model output budgets include hidden reasoning as well as the
         // structured claims. A 2k ceiling repeatedly truncated real Results
         // packets before any usable tool call; never execute truncated output.
-        maxToolCalls: 3, deadlineMs: input.deadline, maxTokens: 8000,
+        maxToolCalls: Math.min(3, extractionCallLimit - calls - (packets.length - inspectedPackets - 1)), deadlineMs: input.deadline, maxTokens: 8000,
         maxPrematureStopRecoveries: 1,
         onPrematureStop: () => "Submit claims through the declared tool using this same packet; prose is not an extraction.",
         isStageComplete: () => accepted,
@@ -93,14 +99,16 @@ export async function extractReproductionClaims(input: {
     if (acceptanceError) throw acceptanceError;
     if (outcome.stoppedBy === "deadline" || Date.now() >= input.deadline) { coverage.failure = "deadline"; throw new Error("Extraction stopped: system-enforced deadline exhaustion before GPU allocation."); }
     coverage.packets.push({ start: packet.start, end: packet.end, calls: outcome.toolCalls.length,
-      status: claims.length >= 12 ? "claim-limit" : accepted && !unresolved.size ? "accepted" : "validation-exhausted" });
+      status: accepted && !unresolved.size ? "accepted" : "validation-exhausted" });
     inspectedPackets++;
     await saveProgress();
-    if (claims.length >= 12) break;
   }
   if (!claims.length) { coverage.failure = "no-claims"; throw new Error(`Extraction failed: no grounded claims accepted from ${inspectedPackets}/${packets.length} packets. No GPU allocated.`); }
-  coverage.termination = claims.length >= 12 ? "claim-limit" : inspectedPackets < packets.length ? "packet-limit"
-    : coverage.packets.some(p => p.status === "validation-exhausted") ? "partial" : "complete";
+  if (coverage.packets.some(p => p.status !== "accepted")) {
+    coverage.failure = "incomplete-coverage";
+    throw new Error("Extraction failed: unresolved source packets; grounded claims retained pending, no GPU allocated.");
+  }
+  coverage.termination = "complete";
   await saveProgress();
   return { claims, calls, inspectedPackets, totalPackets: packets.length, coverage };
   } catch (error) {

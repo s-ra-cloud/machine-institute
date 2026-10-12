@@ -1,5 +1,5 @@
 {
-  "asOf": "2026-10-09",
+  "asOf": "2026-10-12",
   "scope": "Saved attempts including the newly authorized 2026-10-09 cycle; snapshot, not live dashboard.",
   "fixes": [
     [
@@ -75,7 +75,7 @@
     [
       "Regression tests",
       "Offline tests cover recovery, grouped/reused experiments, independent judging and mixed scientific outcomes.",
-      "816 passed, 2 skipped across full run and targeted rerun; 63 test files. Existing 13 TypeScript errors remain, none in changed code."
+      "823 passed, 2 skipped, 63 files in a full single-worker run. Existing 13 TypeScript errors remain outside changed code. Earlier parallel test workflow timed out in the Python subprocess; this run passed."
     ],
     [
       "Targeted source reads",
@@ -116,6 +116,16 @@
       "Source-based preparation preflight",
       "Before a recognized Python read-modify-write dependency executes, require function/input inspection or inspected source repair. Uses source, not filename classification; never creates files automatically.",
       "Website integration replay plus exact shipped bookkeeping-function isolation; no paid run. Narrow pattern coverage, not a universal dependency solver."
+    ],
+    [
+      "Complete-packet extraction gate",
+      "Removed the early 12-claim and six-packet truncation while retaining the prior 18-call extraction ceiling. Reserve calls for later packets; retain all grounded claims and allow continued batches. Unresolved or oversized coverage now stops before GPU allocation, preserving pending checkpoints.",
+      "Offline: late-packet coverage, fifteen-claim website assessment, P/qP no-GPU failures, and unchanged extraction bounds. Source coverage is not proof that the model selected every scientific claim."
+    ],
+    [
+      "Budget-bound recovery replay",
+      "Exhaust evidence browsing before rejected runtime-file blockers. Existing controller still forces revision and completes a repaired replay; a fourteen-call global limit safely stops before a second experiment. No recovery budget increase or new scientific verdict rules.",
+      "Offline website workflow replay, including ignored required revision; no paid run."
     ]
   ],
   "runs": [

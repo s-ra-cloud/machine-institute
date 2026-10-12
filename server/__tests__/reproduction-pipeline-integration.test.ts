@@ -15,7 +15,7 @@ vi.mock("../fs-materials", () => ({
 }));
 vi.mock("../modal-sandbox", () => ({ isModalConfigured: () => true, ReproductionSandbox: { create: mock.create } }));
 vi.mock("../provider-credit-preflight", () => ({ assertReproductionRuntimeProviderCredits: vi.fn(async () => {}) }));
-import { runReproduction } from "../reproduce";
+import { runReproduction, REPRODUCTION_BUDGET } from "../reproduce";
 import { ReproductionSession } from "../reproduction-session";
 import { getReproducerPrompt, getJudgePrompt } from "../prompts/reproduce";
 import { getReproductionFailureDiagnostics } from "../reproduction-diagnostics";
@@ -730,7 +730,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(result.results[0].verdict).toBe("verified");
   });
 
-  it.each([false, true])("routes repeated runtime-file blocker rejections to bounded revision (ignores=%s)", async ignores => {
+  it.each([[false, false, false], [true, false, false], [false, true, false], [true, true, false], [false, true, true]])("routes runtime-file blockers to revision (ignores=%s, browsing exhausted=%s, global limit=%s)", async (ignores, exhausted, globalLimit) => {
     const sb = sandbox();
     let experiments = 0;
     sb.exec.mockImplementation(async (command: unknown) => {
@@ -742,7 +742,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
     });
     mock.create.mockResolvedValue(sb);
     const responder = stageResponder();
-    let rejected = 0, forced = 0, repaired = false;
+    let rejected = 0, forced = 0, repaired = false, browsed = 0;
     const saved: ReproductionCheckpoint[] = [];
     const reason = "Inspect and repair the non-scientific bookkeeping dependency in the planned source, retaining the scientific computation.";
     mock.complete.mockImplementation(async (request: any) => {
@@ -757,6 +757,8 @@ describe("default reproduction stage-controller integration (offline only)", () 
           complete(null, [tool("request_plan_revision", { reason, method: "rerun" })]);
       }
       if (names.includes("record_result") && !repaired) {
+        if (exhausted && browsed++ < 4)
+          return complete(null, [tool("read_tool_result", { tool_call_id: packet.executionEvidence[0].id, offset: 0, max_chars: 1000 })]);
         rejected++;
         return complete(null, [tool("record_result", { id: "R1", status: "inconclusive",
           method: "blocked", blocker_kind: "missing-material", required_material: "confidence_history.json",
@@ -777,7 +779,17 @@ describe("default reproduction stage-controller integration (offline only)", () 
       }
       return responder(request);
     });
+    const originalBudget = REPRODUCTION_BUDGET.maxToolCalls;
+    if (globalLimit) REPRODUCTION_BUDGET.maxToolCalls = 14;
+    try {
     const run = runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
+    if (globalLimit) {
+      await expect(run).rejects.toThrow(/budget|Pipeline/);
+      expect(experiments).toBe(1);
+      expect(saved.at(-1)?.controller.calls).toBeLessThanOrEqual(14);
+      expect(saved.at(-1)?.claims[0].status).toBe("pending");
+      expect(forced).toBe(1);
+    } else
     if (ignores) {
       await expect(run).rejects.toThrow("Pipeline assessment failed");
       expect(experiments).toBe(1);
@@ -792,6 +804,9 @@ describe("default reproduction stage-controller integration (offline only)", () 
     }
     expect(rejected).toBe(2);
     expect(sb.terminate).toHaveBeenCalledOnce();
+    } finally {
+      REPRODUCTION_BUDGET.maxToolCalls = originalBudget;
+    }
   });
   for (const changed of [false, true]) it(`compares command output before resetting execution progress (changed=${changed})`, async () => {
     const sb = sandbox();
@@ -958,7 +973,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(saved.at(-1)?.claims.every(c => c.status === "verified")).toBe(true);
     expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("analyze.py"))).toHaveLength(12);
   });
-  it("attempted fifteen claims proceed with only twelve registered and no cap overflow checkpoint", async () => {
+  it("retains all fifteen claims instead of dropping the final three", async () => {
     const sentences = Array.from({ length: 15 }, (_, i) => `The measured experimental score for condition ${i} is 0.91.`);
     const longPaper = [0, 5, 10].map(start => sentences.slice(start, start + 5).join("\n").padEnd(5400, " ")).join("");
     mock.materials.mockResolvedValue({ paperMarkdown: longPaper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
@@ -975,11 +990,11 @@ describe("default reproduction stage-controller integration (offline only)", () 
     const saved: PipelineCheckpoint[] = [];
     const result = await runReproduction({ ...options(), onCheckpoint: async value => { saved.push(structuredClone(value)); } });
     expect(packet).toBe(3);
-    expect(saved.every(s => s.claims.length <= 12)).toBe(true);
-    expect(saved.at(-1)?.claims).toHaveLength(12);
+    expect(saved.every(s => s.claims.length <= 15)).toBe(true);
+    expect(saved.at(-1)?.claims).toHaveLength(15);
     expect(saved.at(-1)?.claims.every(c => c.status === "verified")).toBe(true);
-    expect(result.markdown).toContain("claim-limit");
-    expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("analyze.py"))).toHaveLength(12);
+    expect(result.markdown).not.toContain("claim-limit");
+    expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("analyze.py"))).toHaveLength(15);
   });
   for (const failure of ["provider", "checkpoint"]) it(`${failure} after accepted claims remains a hard failure without GPU`, async () => {
     const longPaper = paper.padEnd(5400, " ") + "An additional measured result was 0.82.".padEnd(5400, " ");
@@ -999,7 +1014,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(saved.at(-1)?.logbook).not.toContain("still in progress");
     expect(saved.at(-1)?.controller.phase).toBe("failed");
   });
-  for (const agentId of ["P", "qP"] as const) it(`${agentId}: later extraction refusals preserve early claims through execution`, async () => {
+  for (const agentId of ["P", "qP"] as const) it(`${agentId}: later extraction refusals preserve early claims without GPU allocation`, async () => {
     const longPaper = paper.padEnd(5400, " ") + "A later measured experimental result was 0.82.".padEnd(5400, " ");
     mock.materials.mockResolvedValue({ paperMarkdown: longPaper, files: [{ name: "analyze.py", kind: "text", source: "additional", text: "print('measured_score=0.91')" }], textFileCount: 1, binaryFileCount: 0 });
     const sb = sandbox(); mock.create.mockResolvedValue(sb);
@@ -1013,14 +1028,12 @@ describe("default reproduction stage-controller integration (offline only)", () 
       return responder(request);
     });
     const checkpoints: PipelineCheckpoint[] = [];
-    const result = await runReproduction({ ...options(), agentId, reproducerPrompt: getReproducerPrompt(agentId),
-      judgePrompt: getJudgePrompt(agentId), onCheckpoint: async value => { checkpoints.push(structuredClone(value)); } });
-    expect(result.results).toHaveLength(1);
-    expect(result.results[0].verdict).toBe("verified");
-    expect(result.markdown).toMatch(/^> Bounded extraction coverage/m);
-    expect(result.logbook).toContain("validation-exhausted");
+    await expect(runReproduction({ ...options(), agentId, reproducerPrompt: getReproducerPrompt(agentId),
+      judgePrompt: getJudgePrompt(agentId), onCheckpoint: async value => { checkpoints.push(structuredClone(value)); } })).rejects.toThrow("unresolved source packets");
+    expect(checkpoints.at(-1)?.claims).toHaveLength(1);
+    expect(checkpoints.at(-1)?.claims[0].status).toBe("pending");
     expect(checkpoints.at(-1)?.extraction?.packets.some(p => p.status === "validation-exhausted")).toBe(true);
-    expect(sb.exec.mock.calls.some(c => JSON.stringify(c).includes("analyze.py"))).toBe(true);
+    expect(mock.create).not.toHaveBeenCalled();
   });
   it("persists terminal extraction failure without stale in-progress wording", async () => {
     mock.complete.mockImplementation(stageResponder("bad-quote"));
