@@ -148,3 +148,17 @@ Evidence: `.local/state/live-reproduction/website-1791812743674`. Five of six pa
 Incremental model accounting: $0.11114268. Window total: $1.61965980, leaving $3.38034020. Modal reservation remains $5, with $5 reservation allowance remaining. No budget reset.
 
 The repeat is localized to the same source range across consecutive attempts. This supports investigating packet content/size and provider response handling, but does not establish a cause: the retained events do not explain why no tool call was returned. The execution-stage fixes remain untested in these two attempts. Another unchanged retry is not justified by demonstrated progress; further work should diagnose this packet offline rather than increase retry counts again.
+
+### Offline investigation of the recurring extraction failure
+
+No external model requests, GPU allocations or application-code edits were made during this investigation.
+
+The archived canonical paper contains 28,225 UTF-16 characters. Its 16200–22200 packet is 6,000 characters / 6,002 UTF-8 bytes, with seven paragraph fragments and one image tag. It covers dense numerical results from Analyses 4–7, including patching effects, confidence intervals and negative findings. It starts and ends mid-paragraph. This makes it a plausible candidate for smaller, paragraph-aware extraction, but does not demonstrate that packet size caused the failure.
+
+The exact host-generated source-envelope SHA-256 for that archived packet matches 15 saved source records in the earlier completed attempt and 13 in the index-enabled attempt. Both checkpoints accepted this packet, using four and three submissions respectively. Therefore the section has succeeded with the existing extraction path. Failed attempts do not retain a hash of the unresolved packet, so equal recorded offsets and total source length alone cannot prove that the upstream text was identical on those attempts.
+
+Tracing the BYOK adapter shows it forwards ordinary OpenAI-compatible tool calls without stripping them for `stop` or `tool_calls`. It clears content/tools on an explicit refusal/content filter, which would have a different normalized finish reason from these observed `stop` events. The tool loop recognizes function-type tool calls with a function name, then runs schema validation. No argument or validation events were emitted for the failing packet.
+
+The unresolved distinction is between an actually empty message, reasoning-only output, non-string content, and an unexpected/unrecognized tool-call shape. Current diagnostics save only normalized finish reason and a string-content excerpt for these completion events. They do not preserve raw tool-call counts/types, content type/length, reasoning-presence indicators or per-response usage counters. Consequently the saved evidence cannot establish the provider-side cause or rule out an unexpected response shape being ignored.
+
+Recommended next step: add allowlisted structural response diagnostics (counts, booleans, content type and token totals, not raw reasoning, secrets or entire responses) and regression tests for empty, reasoning-only and malformed-tool response shapes. Do not raise retry limits again. Consider bounded paragraph-aware splitting only as a separately tested mitigation, retaining canonical offsets, overlap, the global allowance and explicit incomplete-coverage failure.

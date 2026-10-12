@@ -287,6 +287,8 @@ Required-tool requests may return no tool calls even when the provider accepts f
 
 Increasing this ceiling alone did not resolve repeated live failures on the same packet, even with small-batch guidance. If this recurs, investigate packet-specific input and response handling rather than assume another reminder fixes the cause; passing mocked recovery tests establishes control flow, not model compliance.
 
+Offline comparison found that the archived packet also succeeded in earlier runs, verified against source-envelope hashes. A missing response excerpt does not prove an empty raw provider response: structural fields and reasoning-presence indicators were not retained. Diagnose with allowlisted metadata rather than logging raw reasoning or assuming deterministic bad source content. Failed-packet offsets alone do not prove its text is unchanged.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.
