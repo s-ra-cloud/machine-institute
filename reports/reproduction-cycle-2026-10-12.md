@@ -255,3 +255,24 @@ Five valid submit_claims calls were preserved and executed. Four packets complet
 Conclusion: this run locates the missing standard output at or before the incoming HTTP JSON boundary, not in the local SDK/adapter processing measured by these diagnostics. It does not distinguish a provider/model defect from request compatibility or prompt effects, nor show what any upstream internal representation contained. Increasing retries or changing local output parsing is not justified by these observations. Investigate the exact model/provider's request, tool-choice and reasoning-history requirements before another unchanged full cycle.
 
 Incremental accounted DeepSeek cost: $0.15287448. Window total: $0.30130980, leaving $4.69869020. All 22 window requests settled. Modal: zero allocation/reservation this window, full $10 remaining. Run exited with code 1. No additional cycle was launched.
+
+### Offline investigation of thinking/tool request compatibility
+
+Official sources checked:
+- https://api-docs.deepseek.com/api/create-chat-completion
+- https://api-docs.deepseek.com/guides/thinking_mode
+- https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+- https://openrouter.ai/docs/guides/features/tool-calling
+- https://openrouter.ai/deepseek/deepseek-v4-pro-0813
+
+Two concrete mismatches were identified:
+
+1. DeepSeek's current completion reference says required and named tool choices are unsupported in thinking mode and return HTTP 400; thinking must be disabled to use them. Its thinking guide says thinking is enabled by default. The website loop sends a named function choice for required stages and does not explicitly disable thinking for this model. The live responses included reasoning. OpenRouter's generic documentation supports named tool choice, but does not establish that every thinking/provider combination supports it. This is a documented compatibility risk that can affect even a first request. The live HTTP responses were successful and empty rather than the documented 400, so causation remains unproven.
+
+2. DeepSeek requires reasoning history to be returned on subsequent requests carrying tools, including turns without a tool call. OpenRouter documents reasoning_details preservation, or reasoning/reasoning_content for plain string reasoning. The current shared loop reconstructs assistant history with content, tool_calls and providerParts only, discarding these reasoning fields. This violates the documented continuation requirements; it can affect retries and tool continuations, but cannot explain an empty first response in a fresh packet.
+
+Recommended correction: preserve thinking while using an API-compatible automatic tool choice for the affected model, explicitly enforcing required-stage tools and completion criteria locally. Keep reasoning payloads opaque and unchanged in transient same-model request history; never put them in diagnostics, reports, checkpoints or scientific evidence. Structured reasoning blocks must retain their ordering and contents, and full request accounting must include them. Do not merely relax stage completion or accept prose instead of a required submission.
+
+Alternative: explicitly disable thinking for affected named-tool requests, but that changes reasoning behavior and should not be substituted silently. No such behavior change was made during this investigation.
+
+No model inference, GPU run, budget reset or production code edit. Findings are based on current official documentation and code inspection, not a claim that either change has already fixed the live failure.

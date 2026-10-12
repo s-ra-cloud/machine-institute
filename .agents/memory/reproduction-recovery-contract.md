@@ -323,6 +323,12 @@ Boundary observations should use the SDK's existing JSON read and be scoped to e
 
 **How to apply:** Keep observations content-free and independently sanitized at persistence. Treat missing observations as unknown and keep diagnostic failures from altering response parsing or scientific execution.
 
+DeepSeek thinking/tool compatibility must be checked beyond generic OpenRouter parameter support.
+
+**Why:** DeepSeek's current official completion reference disallows required/named tool choice in thinking mode, while its thinking guide requires reasoning history on subsequent tool-bearing requests, even after a turn without calls. OpenRouter documents equivalent continuation via unchanged reasoning_details or plain reasoning fields. These constraints can affect first requests and continuations differently; successful empty HTTP responses do not prove the documented direct-API 400 failure occurred.
+
+**How to apply:** See https://api-docs.deepseek.com/api/create-chat-completion and https://api-docs.deepseek.com/guides/thinking_mode alongside OpenRouter's reasoning documentation. Preserve scientific stage enforcement independently of API tool-choice settings. Treat reasoning as opaque transient same-model transport state, not evidence or report/log content, and account for its request size. Do not silently disable thinking or change models to hide incompatibility.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.
