@@ -311,6 +311,8 @@ Live testing with required parameter-compatible routing still produced missing t
 
 Offline HTTP-boundary testing with the real SDK preserved both valid calls and missing-call shapes through the BYOK adapter; no local output loss was reproduced.
 
+Paired live diagnostics subsequently showed the missing standard tool output was already absent in the selected HTTP response message, with all captured structural fields unchanged after the adapter. Do not keep treating local output stripping as the established cause. This does not rule out outgoing request compatibility or establish an internal provider/model defect.
+
 **Why:** Mocking the SDK's completion method cannot detect JSON parsing or transport-boundary problems, but synthetic HTTP tests still cannot establish what a historical live response contained.
 
 **How to apply:** Keep transport-level tests alongside mocked orchestration tests. Before assigning a live missing-output failure to the provider or SDK, compare allowlisted pre-SDK and post-adapter structural metadata; never store private reasoning or raw response bodies to close this evidence gap.

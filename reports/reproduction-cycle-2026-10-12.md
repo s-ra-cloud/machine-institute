@@ -241,3 +241,17 @@ Completion diagnostics now include `httpResponse` beside existing post-adapter f
 Tests demonstrate matching snapshots for valid and missing calls, an intentional difference for refused calls, isolation across concurrent requests, preservation of parsing when observation fails, rejection of invalid HTTP JSON, and exclusion of private/unallowlisted content. Verification: 146 tests passed across six affected suites; no TypeScript errors in the changed files, while existing unrelated errors remain.
 
 No paid inference, GPU allocation, retry increase, model change or budget reset. The next authorized live attempt can distinguish an already-missing HTTP tool call from a change in local processing. These diagnostics do not themselves cure missing output.
+
+### Live cycle with paired boundary diagnostics
+
+Attempt: `.local/state/live-reproduction/website-1791823768052`. User authorized one cycle within the existing budget; no reset.
+
+Outcome: extraction again stopped before GPU allocation, with four of six packets accepted and 11 grounded claims pending. This matches the previous cycle's coverage and claim count, not an improvement in reproduction completion. No experiment, independent judge or completed report ran.
+
+All 11 completions retained HTTP-boundary metadata. Every captured structural field matched its post-adapter counterpart. Six selected response messages already had null content and absent tool calls at the HTTP JSON boundary; all six had `stop`, not `length`, and no refusal. They reported 19,607 completion tokens, including 1,433 labelled reasoning tokens. The contents of unavailable output cannot be inferred from these counts.
+
+Five valid submit_claims calls were preserved and executed. Four packets completed; one submission on 16200–22200 indicated more claims remained, followed by a missing-call response after its earlier recoveries. The 10800–16800 packet emitted no calls in three attempts. No candidate-validation errors remained. Both unresolved packets were correctly kept incomplete.
+
+Conclusion: this run locates the missing standard output at or before the incoming HTTP JSON boundary, not in the local SDK/adapter processing measured by these diagnostics. It does not distinguish a provider/model defect from request compatibility or prompt effects, nor show what any upstream internal representation contained. Increasing retries or changing local output parsing is not justified by these observations. Investigate the exact model/provider's request, tool-choice and reasoning-history requirements before another unchanged full cycle.
+
+Incremental accounted DeepSeek cost: $0.15287448. Window total: $0.30130980, leaving $4.69869020. All 22 window requests settled. Modal: zero allocation/reservation this window, full $10 remaining. Run exited with code 1. No additional cycle was launched.
