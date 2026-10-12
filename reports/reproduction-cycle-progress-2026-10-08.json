@@ -401,17 +401,18 @@
     }
   ],
   "latestCycle": {
-    "run": "website-1791536618164",
-    "status": "stopped",
+    "run": "website-1791800912557",
+    "status": "stopped-before-gpu",
     "recorded": 0,
-    "total": 12,
+    "total": 32,
     "finalReport": false,
-    "modelAccountedBudgetWindow": 0.411675272,
-    "modelRequests": 27,
-    "modelSettled": 27,
+    "modelAccountedBudgetWindow": 0.618235472,
+    "modelCostThisAttempt": 0.2065602,
+    "modelRequests": 45,
+    "modelSettled": 45,
     "modalReservedBudgetWindow": 5,
     "modelCap": 5,
     "modalCap": 10,
-    "note": "No automatic second allocation. Modal reservations are not verified billed spend."
+    "note": "All six source packets attempted; two accepted and four unresolved. Thirteen extraction tool calls, eighteen settled model requests. Some stages emitted final report prose or exhausted output tokens. Thirty-two grounded quotations retained pending; no experiment, judge or GPU allocation. Diagnostics dropped sixteen events, so individual causes are not completely recoverable. No further paid run started."
   }
 }
