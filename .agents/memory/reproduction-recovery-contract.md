@@ -309,6 +309,12 @@ OpenRouter tool contracts should fail on unsupported routing rather than silentl
 
 Live testing with required parameter-compatible routing still produced missing tool output, despite valid submissions elsewhere. Do not treat this flag or a stricter submission schema as a demonstrated cure for absent calls. They address distinct contract risks; absent output needs independent diagnosis.
 
+Offline HTTP-boundary testing with the real SDK preserved both valid calls and missing-call shapes through the BYOK adapter; no local output loss was reproduced.
+
+**Why:** Mocking the SDK's completion method cannot detect JSON parsing or transport-boundary problems, but synthetic HTTP tests still cannot establish what a historical live response contained.
+
+**How to apply:** Keep transport-level tests alongside mocked orchestration tests. Before assigning a live missing-output failure to the provider or SDK, compare allowlisted pre-SDK and post-adapter structural metadata; never store private reasoning or raw response bodies to close this evidence gap.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.

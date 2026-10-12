@@ -212,3 +212,22 @@ All five emitted submit_claims calls passed argument validation and had no unres
 The stricter routing requirement did not eliminate the recurring missing-tool-output failure. Another identical retry or an increased retry ceiling is not an evidence-backed fix. Further diagnosis should distinguish provider response structure from SDK/adapter handling while retaining bounded, non-content diagnostics and the user's chosen model.
 
 Cost: $0.14843532 accounted DeepSeek spend, 11 requests all settled; $4.85156468 remaining. Modal: zero allocation/reservation in this window, full $10 allowance remaining. Run exited with code 1 and released its lock. No further paid cycle was launched.
+
+### Offline HTTP-to-extraction boundary investigation
+
+Added `server/__tests__/openrouter-http-boundary.test.ts`. Unlike earlier mocked-client tests, this suite uses the installed OpenAI SDK, the real BYOK adapter, and the real extraction loop. Only the HTTP fetch boundary is replaced with synthetic JSON responses; unexpected requests fail without reaching the network.
+
+Seven boundary checks establish:
+- Valid function calls survive HTTP JSON parsing and adapter handling unchanged.
+- Null-content / absent-tool responses with `stop` or `length` retain that structure; neither the SDK nor the tested adapter paths manufacture the missing calls.
+- Ordinary text is preserved.
+- Explicit refusals deliberately remove calls and block execution. The latest live diagnostics did not report refusal.
+- A null response followed by a valid call recovers and accepts a grounded claim.
+- Three missing-call responses exhaust bounded recovery and fail before GPU allocation.
+- Actual serialized requests retain the exact model, forced tool choice and required-parameter routing; structural diagnostics exclude synthetic reasoning text.
+
+Installed SDK source confirms that non-streaming `chat.completions.create` parses JSON and adds request metadata, without a tool-field transformation. The tool loop records structural diagnostics before its executable-call filter.
+
+Verification: 64 tests across the new HTTP boundary, adapter and tool-loop suites passed. No TypeScript errors in the new test file; existing project errors remain. No production behavior, retry limits, model, budgets or GPU configuration changed. No paid calls.
+
+Conclusion: no output-dropping defect was reproduced in these local response-handling paths. This narrows the investigation but does not establish what the historical live HTTP response contained. A future live diagnosis should compare allowlisted response structure before SDK parsing with the existing post-adapter structure, without storing raw response content or private reasoning.
