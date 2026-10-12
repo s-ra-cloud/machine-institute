@@ -374,6 +374,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
       const packetMessage = request.messages.find((m: any) => m.role === "user" && String(m.content).startsWith('{"stage":'));
       if (!packetMessage) return base(request);
       const packet = JSON.parse(packetMessage.content);
+      if (packet.stage === "extraction") return base(request);
       if (packet.stage === "planning") {
         const plan = { claimId: packet.claim.id, method: "raw-data-rederived", materialPaths: [path],
           measurement: "Mean of the two raw observations", rationale: "Compute from observations, not a supplied summary." };
@@ -973,6 +974,65 @@ describe("default reproduction stage-controller integration (offline only)", () 
     expect(saved.at(-1)?.claims.every(c => c.status === "verified")).toBe(true);
     expect(sb.exec.mock.calls.filter(c => JSON.stringify(c).includes("analyze.py"))).toHaveLength(12);
   });
+  it("repairs a renamed rejected claim, recovers report prose, and explicitly finishes extraction before execution", async () => {
+    const responder = stageResponder();
+    let extractionRequests = 0;
+    mock.complete.mockImplementation(async (request: any) => {
+      if ((request.tools ?? []).some((t: any) => t.function.name === "submit_claims")) {
+        expect(request.tool_choice).toEqual({ type: "function", function: { name: "submit_claims" } });
+        extractionRequests++;
+        if (extractionRequests === 1) return complete(null, [tool("submit_claims", { claims: [
+          { claim: "The paraphrased evaluation score was 0.91.", source_quote: paper },
+        ], has_more: true })]);
+        if (extractionRequests === 2) {
+          expect(JSON.stringify(request.messages)).toContain("E1");
+          return complete("## Claims\nThe score is inconclusive.");
+        }
+        if (extractionRequests === 3) return complete(null, [tool("submit_claims", { claims: [
+          { claim: paper, source_quote: paper, original_value: "0.91", replaces: "E1" },
+        ], has_more: true })]);
+        return complete(null, [tool("submit_claims", { claims: [], has_more: false })]);
+      }
+      return responder(request);
+    });
+    const result = await runReproduction(options());
+    expect(extractionRequests).toBe(4);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].verdict).toBe("verified");
+  });
+  it.each([false, true])("handles extraction output truncation without dispatching partial claims (repeated=%s)", async repeated => {
+    const responder = stageResponder();
+    let requests = 0;
+    mock.complete.mockImplementation(async (request: any) => {
+      if ((request.tools ?? []).some((t: any) => t.function.name === "submit_claims")) {
+        requests++;
+        if (requests === 1 || repeated)
+          return { choices: [{ finish_reason: "length", message: { content: "Incomplete reasoning", tool_calls: [] } }] };
+      }
+      return responder(request);
+    });
+    const checkpoints: PipelineCheckpoint[] = [];
+    const run = runReproduction({ ...options(), onCheckpoint: async c => { checkpoints.push(structuredClone(c)); } });
+    if (repeated) {
+      await expect(run).rejects.toThrow("no grounded claims");
+      expect(mock.create).not.toHaveBeenCalled();
+      expect(checkpoints.at(-1)?.extraction?.packets[0]).toMatchObject({ finishReason: "length" });
+      expect(checkpoints.at(-1)?.claims).toHaveLength(0);
+    } else expect((await run).results[0].verdict).toBe("verified");
+    expect(requests).toBe(2);
+  });
+  it("does not request a paid final logbook when extraction tool allowance is exhausted", async () => {
+    let requests = 0;
+    mock.complete.mockImplementation(async (request: any) => {
+      expect(request.tools?.some((t: any) => t.function.name === "submit_claims")).toBe(true);
+      requests++;
+      return complete(null, [tool("submit_claims", { claims: [{ claim: "invented", source_quote: paper }] })]);
+    });
+    await expect(runReproduction(options())).rejects.toThrow("no grounded claims");
+    expect(requests).toBe(3);
+    expect(mock.create).not.toHaveBeenCalled();
+  });
+
   it("retains all fifteen claims instead of dropping the final three", async () => {
     const sentences = Array.from({ length: 15 }, (_, i) => `The measured experimental score for condition ${i} is 0.91.`);
     const longPaper = [0, 5, 10].map(start => sentences.slice(start, start + 5).join("\n").padEnd(5400, " ")).join("");

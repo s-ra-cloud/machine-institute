@@ -75,7 +75,7 @@
     [
       "Regression tests",
       "Offline tests cover recovery, grouped/reused experiments, independent judging and mixed scientific outcomes.",
-      "823 passed, 2 skipped, 63 files in a full single-worker run. Existing 13 TypeScript errors remain outside changed code. Earlier parallel test workflow timed out in the Python subprocess; this run passed."
+      "829 passed, 2 skipped in 63 files with one worker. Existing 13 TypeScript errors remain outside changed code. Default parallel test workflow retains a Python subprocess timeout issue."
     ],
     [
       "Targeted source reads",
@@ -126,6 +126,11 @@
       "Budget-bound recovery replay",
       "Exhaust evidence browsing before rejected runtime-file blockers. Existing controller still forces revision and completes a repaired replay; a fourteen-call global limit safely stops before a second experiment. No recovery budget increase or new scientific verdict rules.",
       "Offline website workflow replay, including ignored required revision; no paid run."
+    ],
+    [
+      "Actionable extraction repairs and structured completion",
+      "Rejected candidates have stable per-packet IDs and explicit replacements; changed wording no longer leaves an unreachable rejection. Accepted claims cannot be replaced. Current errors remain in model context, submissions are tool-required, and extraction exhaustion no longer requests a paid final logbook. Packet checkpoints retain rejection reasons, continuation state, and stop/finish reasons.",
+      "Offline actual website orchestration: renamed-claim repair, report-prose recovery, successful continuation after truncation, repeated-truncation safe stop, no final logbook request on exhaustion. No paid validation yet."
     ]
   ],
   "runs": [

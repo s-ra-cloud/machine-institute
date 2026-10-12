@@ -285,6 +285,8 @@ export interface ToolLoopOutcome {
 }
 
 export interface ToolLoopOptions {
+  /** Structured-only stages must not spend a final request on a logbook. */
+  stopWithoutFinalResponse?: boolean;
   /** Host-owned stage transition; does not supply the model's scientific arguments. */
   getRequiredTool?: () => string | undefined;
   /** Restrict the next request to host-authorized tools without adding calls. */
@@ -610,6 +612,10 @@ export async function runToolLoop(
     if (!forceFinal && (budgetExhausted || pastDeadline || stallReason)) {
       forceFinal = true;
       stoppedBy = budgetExhausted ? "tool-budget" : pastDeadline ? "deadline" : "no-progress";
+      if (options.stopWithoutFinalResponse) {
+        await observe({ kind: "stop", round, callCount: toolCalls.length, stopReason: stoppedBy });
+        return { content: "", toolCalls, rounds: round - 1, stoppedBy };
+      }
       messages.push({
         role: "user",
         content: budgetExhausted
@@ -982,6 +988,8 @@ export async function runToolLoop(
 
   // Round cap reached with the model still calling tools: force one last
   // tool-free turn so a logbook is always produced.
+  if (options.stopWithoutFinalResponse)
+    return { content: "", toolCalls, rounds: maxRounds, stoppedBy: "round-cap" };
   if (!forceFinal || (stoppedBy !== "deadline" && stoppedBy !== "tool-budget")) {
     stoppedBy = "round-cap";
   }

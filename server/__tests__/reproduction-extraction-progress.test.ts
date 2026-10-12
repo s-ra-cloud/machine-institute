@@ -109,3 +109,37 @@ it("rejects oversized coverage before provider calls rather than silently trunca
   await expect(extractReproductionClaims({ ...input(), paper: "x ".repeat(60000) })).rejects.toThrow("coverage exceeds");
   expect(mock.loop).not.toHaveBeenCalled();
 });
+it("keeps rejection IDs actionable after a failed replacement and does not erase them with empty submissions", async () => {
+  let state: any;
+  mock.loop.mockImplementation(async (_c, _s, _p, _t, execute, opts) => {
+    const first = await execute("submit_claims", { claims: [candidate("A made up scientific claim with wrong words.")] });
+    expect(first).toContain("E1");
+    const second = await execute("submit_claims", { claims: [{ ...candidate(sentence(0)), original_value: "wrong", replaces: "E1" }] });
+    expect(second).toContain("E1");
+    expect(second).toContain("original_value");
+    expect(await execute("submit_claims", { claims: [], has_more: false })).toContain("E1");
+    state = opts.contextProtection.getState();
+    return { toolCalls: [{}, {}, {}], rounds: 3, stoppedBy: "tool-budget" };
+  });
+  const progress = vi.fn();
+  await expect(extractReproductionClaims({ ...input(), paper: sentence(0), onProgress: progress })).rejects.toThrow("no grounded claims");
+  expect(state).toContain("E1");
+  expect(progress.mock.calls.at(-1)?.[0].packets[0]).toMatchObject({
+    stopReason: "tool-budget", unresolved: [{ id: "E1", errors: expect.arrayContaining([expect.stringContaining("original_value")]) }],
+  });
+});
+it("cannot replace an accepted claim or clear an unknown replacement reference by submitting nothing", async () => {
+  mock.loop.mockImplementation(async (_c, _s, _p, _t, execute, opts) => {
+    await execute("submit_claims", { claims: [candidate(sentence(0))], has_more: true });
+    const rejected = await execute("submit_claims", {
+      claims: [{ ...candidate(sentence(1)), replaces: "R1" }], has_more: false,
+    });
+    expect(rejected).toContain("accepted claims cannot be replaced");
+    expect(await execute("submit_claims", { claims: [], has_more: false })).toContain("E1");
+    expect(opts.isStageComplete()).toBe(false);
+    return { toolCalls: [{}, {}, {}], rounds: 3, stoppedBy: "tool-budget" };
+  });
+  const onAccepted = vi.fn();
+  await expect(extractReproductionClaims({ ...input(), paper: sentence(0) + "\n" + sentence(1), onAccepted })).rejects.toThrow("unresolved");
+  expect(onAccepted).toHaveBeenCalledTimes(1);
+});

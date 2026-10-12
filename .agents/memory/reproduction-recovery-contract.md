@@ -111,6 +111,12 @@ Extraction coverage is not scientific coverage: accepting a bounded set of exact
 
 **How to apply:** Reserve bounded extraction capacity for later packets rather than stopping at an arbitrary claim count. Preserve grounded claims in checkpoints, but require every source packet to resolve before allocating a GPU. If coverage cannot fit the unchanged allowance, stop explicitly instead of launching a partial-paper run. Completion of source inspection still does not prove that the model selected every scientific claim.
 
+Rejected extraction candidates need stable repair identities independent of their wording; structured-only stages must not request final scientific reports on exhaustion.
+
+**Why:** A correction that changes claim text can leave the original rejection permanently outstanding when identity is derived from the text. Also, the generic loop's forced final-logbook request caused report-style prose during extraction; not every observed report was unsolicited model drift.
+
+**How to apply:** Require explicit replacement of an outstanding rejection when wording changes; never replace accepted claims or clear unresolved rejections with an empty submission. Give the model current rejection IDs and reasons. Preserve packet-level stop reasons separately from rolling diagnostics. Stop extraction without a paid logbook request when its limits are reached, while retaining source validation and global spending bounds.
+
 Current mandatory tool requirements must accompany saved prompts at execution time without erasing custom scientific instructions.
 
 **Why:** Explicit reruns retain old prompts, which can predate stricter evidence contracts. Changing only the default prompt leaves retries inconsistent with the validator.
