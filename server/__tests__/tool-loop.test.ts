@@ -12,7 +12,7 @@ vi.mock("openai", () => ({
   },
 }));
 
-import { runToolLoop, type ToolSpec } from "../model-service";
+import { runToolLoop, validateToolArguments, type ToolSpec } from "../model-service";
 import { ReproductionReadGuard } from "../reproduction-read-guard";
 import { extractReproductionClaims } from "../reproduction-extraction";
 import { ReproductionDiagnostics } from "../reproduction-diagnostics";
@@ -31,6 +31,35 @@ function assistantFinal(content: string) {
 const platform = { providerMode: "platform" as const, provider: "openai", modelName: "openai/gpt-4o" };
 
 describe("runToolLoop", () => {
+  it("rejects a missing claim/copy selection at schema validation then accepts an explicit copy", async () => {
+    const quote = "The measured experimental score was exactly 0.91.";
+    const response = (candidate: any) => ({ choices: [{ finish_reason: "tool_calls", message: {
+      content: null, tool_calls: [{ id: "claim", type: "function", function: {
+        name: "submit_claims", arguments: JSON.stringify({ claims: [candidate] }),
+      } }],
+    } }] });
+    createMock.mockResolvedValueOnce(response({ source_quote: quote }))
+      .mockResolvedValueOnce(response({ source_quote: quote, copy_source_quote: true }));
+    const onAccepted = vi.fn(async () => {});
+    const events: any[] = [];
+    const result = await extractReproductionClaims({ paper: quote, instructions: "Extract",
+      config: platform, deadline: Date.now() + 60_000, onAccepted, onOutcome: event => { events.push(event); } });
+    expect(result.coverage.termination).toBe("complete");
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+    expect(events.some(e => e.argumentParse === "invalid-schema")).toBe(true);
+    const schema = createMock.mock.calls[0][0].tools[0].function.parameters;
+    for (const candidate of [
+      { source_quote: quote }, { source_quote: quote, copy_source_quote: false },
+      { source_quote: quote, claim: "" }, { source_quote: quote, claim: "a".repeat(2001) },
+      { source_quote: "a".repeat(2001), copy_source_quote: true },
+    ]) expect(validateToolArguments({ claims: [candidate] }, schema).length).toBeGreaterThan(0);
+    for (const candidate of [
+      { source_quote: quote, copy_source_quote: true },
+      { source_quote: quote, claim: quote },
+      { source_quote: quote, claim: quote, copy_source_quote: false },
+    ]) expect(validateToolArguments({ claims: [candidate] }, schema)).toEqual([]);
+  });
+
   it.each([
     { label: "empty", message: { content: null, tool_calls: [] }, expected: { responseContentType: "null", responseReasoningPresent: 0, responseToolCallCount: 0 } },
     { label: "reasoning only", message: { content: null, reasoning: "PRIVATE_REASONING", tool_calls: [] }, expected: { responseReasoningPresent: 1, responseToolCallCount: 0 } },

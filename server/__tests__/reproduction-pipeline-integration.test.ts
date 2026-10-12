@@ -308,7 +308,7 @@ describe("default reproduction stage-controller integration (offline only)", () 
         expect(schema.required).toContain("evidence_excerpt");
         expect(schema.properties.evidence_excerpt).toMatchObject({ minLength: 1, maxLength: 6000 });
         sawRefusal ||= request.messages.some((m: any) => String(m.content).includes(
-          failure === "oversized" ? "6001 characters; maximum is 6000"
+          failure === "oversized" ? "evidence_excerpt must contain at most 6000 characters"
             : failure === "missing" ? "evidence_excerpt is required" : "missing, blank, or not a string"));
         const call = reply.choices[0].message.tool_calls![0] as any;
         const args = JSON.parse(call.function.arguments);

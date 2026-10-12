@@ -440,6 +440,18 @@ export function validateToolArguments(value: unknown, schema: Record<string, any
     : type === "boolean" ? typeof value === "boolean"
     : type === "null" ? value === null : true;
   if (!valid) return [`${path} must be ${type}`];
+  if (Array.isArray(schema.anyOf) && !schema.anyOf.some((branch: Record<string, any>) =>
+    validateToolArguments(value, branch, path).length === 0)) {
+    const alternatives = schema.anyOf.map((branch: Record<string, any>) =>
+      validateToolArguments(value, branch, path).join("; "));
+    errors.push(`${path} must satisfy one alternative: ${alternatives.join(" OR ")}`);
+  }
+  if (typeof value === "string") {
+    if (typeof schema.minLength === "number" && value.length < schema.minLength)
+      errors.push(`${path} must contain at least ${schema.minLength} characters`);
+    if (typeof schema.maxLength === "number" && value.length > schema.maxLength)
+      errors.push(`${path} must contain at most ${schema.maxLength} characters`);
+  }
   if (schema.enum && !schema.enum.includes(value)) errors.push(`${path} must be one of ${schema.enum.join(", ")}`);
   if (type === "object") {
     const object = value as Record<string, unknown>;

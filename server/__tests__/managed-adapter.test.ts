@@ -82,6 +82,27 @@ it("caps output and applies GPT-5 options at the managed gateway", async () => {
 });
 
 describe("BYOK provider transport and key handling", () => {
+  it.each(["openrouter", "openai"])("restricts tool-parameter routing only on OpenRouter (%s)", async provider => {
+    openaiCreate.mockResolvedValue(completion("stop"));
+    const request = { messages: [], tools: [{ type: "function", function: { name: "submit_claims" } }],
+      tool_choice: { type: "function", function: { name: "submit_claims" } },
+      provider: { order: ["example"], require_parameters: false } };
+    const modelName = provider === "openrouter" ? "deepseek/deepseek-v4-pro-0813" : "gpt-4o";
+    await createByocChatClient({ providerMode: "byoc", provider, modelName,
+      apiKey: provider === "openrouter" ? "sk-or-offline-test-key-123456" : "sk-offline-test-key-123456" }).chat.completions.create(request);
+    expect(openaiCreate.mock.calls[0][0]).toMatchObject({
+      model: modelName, tool_choice: request.tool_choice,
+      provider: { order: ["example"], require_parameters: provider === "openrouter" },
+    });
+    expect(request.provider.require_parameters).toBe(false);
+  });
+  it("does not add routing restrictions to ordinary OpenRouter text requests", async () => {
+    openaiCreate.mockResolvedValue(completion("stop"));
+    await createByocChatClient({ providerMode: "byoc", provider: "openrouter",
+      modelName: "deepseek/deepseek-v4-pro-0813", apiKey: "sk-or-offline-test-key-123456" })
+      .chat.completions.create({ messages: [] });
+    expect(openaiCreate.mock.calls[0][0]).not.toHaveProperty("provider");
+  });
   const config = {
     providerMode: "byoc" as const,
     provider: "openai",

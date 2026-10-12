@@ -19,9 +19,16 @@ const submit: ToolSpec = {
   description: "Submit up to five core scientific claims per call, quoted exactly from the supplied packet. Set has_more=true if further core claims remain; continue in the next call without repeating accepted claims. Use an empty list only when none remain. Application assigns identities and provenance.",
   parameters: { type: "object", additionalProperties: false, required: ["claims"], properties: {
     has_more: { type: "boolean", description: "True if further core claims in this packet still need submission. Submit them in the next call." },
-    claims: { type: "array", items: { type: "object", additionalProperties: false, required: ["source_quote"], properties: {
-      claim: { type: "string", description: "Exact substring of source_quote; omit when copy_source_quote=true." },
-      source_quote: { type: "string", description: "Exact contiguous paper text, including punctuation, case, whitespace and Markdown. Never paraphrase." },
+    claims: { type: "array", items: { type: "object", additionalProperties: false, required: ["source_quote"],
+      anyOf: [
+        { type: "object", required: ["claim"] },
+        { type: "object", required: ["copy_source_quote"], properties: {
+          copy_source_quote: { type: "boolean", enum: [true] },
+          source_quote: { type: "string", maxLength: 2000 },
+        } },
+      ], properties: {
+      claim: { type: "string", minLength: 1, maxLength: 2000, description: "Exact substring of source_quote; omit when copy_source_quote=true." },
+      source_quote: { type: "string", minLength: 24, maxLength: 4000, description: "Exact contiguous paper text, including punctuation, case, whitespace and Markdown. Never paraphrase." },
       copy_source_quote: { type: "boolean", description: "Set true to use source_quote verbatim as the claim without transcribing it twice. Omit claim, original_value and required_material unless needed. Quote must still be exact and at most 2000 characters." },
       original_value: { type: "string" }, required_material: { type: "string" },
       replaces: { type: "string", description: "Rejected candidate ID to replace, e.g. E1. Required when correcting its claim text. Accepted claims cannot be replaced." },

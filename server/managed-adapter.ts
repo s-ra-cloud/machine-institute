@@ -61,8 +61,13 @@ export function createByocChatClient(config: ModelProviderConfig, options: { max
   });
   return { chat: { completions: { create: async (request, requestOptions) => {
     try {
+      // OpenRouter otherwise treats parameter support as best-effort.
+      // Fail routing explicitly rather than silently ignoring tool contracts.
+      const body = { ...request, model: selected.modelName };
+      if (selected.provider === "openrouter" && Array.isArray(body.tools) && body.tools.length)
+        body.provider = { ...body.provider, require_parameters: true };
       const result = await client.chat.completions.create(
-        { ...request, model: selected.modelName },
+        body,
         requestOptions,
       ) as any;
       if (result?.error) return result;

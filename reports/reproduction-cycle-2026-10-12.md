@@ -184,3 +184,17 @@ The other failing packet, 0–6000, did return recognized tool calls. It exhaust
 All diagnostic events were retained (zero dropped events). The previous hypothesis that only a single difficult packet was involved is no longer sufficient. The next investigation should examine model/provider tool-calling compatibility and the conditional claim/copy schema, without changing the model, loosening source grounding, raising retry limits again or spending on an unchanged full cycle.
 
 Incremental model accounting: $0.19413636. Cumulative window: $1.81379616, leaving $3.18620384. Modal reservation remains $5, with $5 reservation allowance remaining. No further run or reset was performed.
+
+### Offline provider compatibility and extraction contract changes
+
+Read OpenRouter's official provider-routing documentation and its public model catalogue without inference requests. The exact `deepseek/deepseek-v4-pro-0813` catalogue entry advertises `tools`, `tool_choice`, `structured_outputs` and `response_format`. OpenRouter documents that default routing may ignore unsupported parameters and that `provider.require_parameters=true` excludes incompatible providers. Neither catalogue support nor this routing flag guarantees that the model will produce a valid call.
+
+References:
+- https://openrouter.ai/docs/guides/routing/provider-selection#requiring-providers-to-support-all-parameters
+- https://openrouter.ai/api/v1/models
+
+BYOK OpenRouter requests carrying tools now require parameter-compatible routing, preserving the exact model, existing provider preferences and separate billing modes. Direct-provider requests and ordinary text requests are unchanged. If no compatible endpoint exists, the request should fail rather than downgrade silently; there is no new model fallback or relaxed routing retry.
+
+Extraction's advertised schema now requires either `claim` or `copy_source_quote=true`. It also declares claim and quote length limits, including the 2000-character explicit-copy limit. The local schema validator supports these alternatives and string-length constraints before dispatch. Canonical quotation, word-count, explicit-copy conflict and source-grounding validation remain in place; malformed input is rejected, not silently repaired.
+
+Tests cover exact-model routing, preservation of provider preferences, request immutability, unchanged direct/text requests, missing claim/copy selection, false-copy selection, empty/oversized claims, oversized copied quotes, valid explicit claims/copies, and repair after a schema rejection. Full offline suite: 65 files passed, 859 tests passed, two skipped. TypeScript has no errors in the changed files; the existing project errors remain. No paid inference, GPU allocation, budget reset or live success claim.
