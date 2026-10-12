@@ -172,3 +172,15 @@ The diagnostics collector independently filters these fields. It does not retain
 A non-array tool-call field now follows the bounded missing-call path rather than crashing on `.filter`. It never executes a malformed call or supplies invented arguments. Retry ceilings, scientific validation, model selection, spend limits and GPU workflow are unchanged.
 
 Verification: 25 focused tests and 68 pipeline integration tests passed. Coverage includes empty messages, reasoning-only messages, unsupported tool-call shapes/types, non-string content, valid counts, invalid numeric metadata, and privacy filtering. Full-suite attempts timed out; a separate diagnostics API run also timed out in route-import setup before its 20 tests ran. This is not a claim that the whole suite passed. TypeScript reported the same 13 pre-existing errors, with none in changed files. No paid run or budget reset occurred.
+
+### Instrumented live attempt: missing structured output confirmed
+
+Evidence: `.local/state/live-reproduction/website-1791820987826`. The normal shared website workflow was run with the approved model and remaining budget. Only three of six packets completed; eight grounded claims remained pending. No sandbox was allocated and no independent judging or final report occurred. This is a regression in observed completion, not an improvement.
+
+For both the 10800–16800 and 16200–22200 packets, all three permitted responses had `responseContentType=null`, `responseToolCallsType=missing`, reasoning metadata present and no refusal field. Each sequence ended `stop`, `length`, `stop`. These six responses reported 26,980 completion tokens in total, of which 1,409 were labeled reasoning tokens. Thus there was charged generation without usable structured calls, but it would be incorrect to label all those tokens reasoning. Metadata describes the adapter output, not independently captured raw HTTP bytes.
+
+The other failing packet, 0–6000, did return recognized tool calls. It exhausted validation recovery with missing/nonempty-claim errors and a nonmatching source quote. Its outstanding rejection IDs were not resolved. This is distinct from missing tool output; validation correctly refused to treat it as complete.
+
+All diagnostic events were retained (zero dropped events). The previous hypothesis that only a single difficult packet was involved is no longer sufficient. The next investigation should examine model/provider tool-calling compatibility and the conditional claim/copy schema, without changing the model, loosening source grounding, raising retry limits again or spending on an unchanged full cycle.
+
+Incremental model accounting: $0.19413636. Cumulative window: $1.81379616, leaving $3.18620384. Modal reservation remains $5, with $5 reservation allowance remaining. No further run or reset was performed.

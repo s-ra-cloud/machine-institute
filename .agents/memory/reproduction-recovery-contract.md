@@ -295,6 +295,12 @@ Structural diagnostics should report unknown usage as unknown, not zero, and ide
 
 **How to apply:** Keep counts, presence flags and enumerated types allowlisted at collection as well as generation. Do not infer a provider-side cause from normalized metadata or compensate for missing evidence by raising retry ceilings. Test absent and malformed response shapes without paid calls.
 
+Reasoning presence does not mean all missing output or all billed completion tokens are reasoning.
+
+**Why:** Instrumented live responses reported null content and absent tool calls, with reasoning metadata present but reasoning token counts much smaller than total completion counts. This occurred on multiple packets, not just the originally suspected passage.
+
+**How to apply:** Distinguish response-contract failures from schema/quotation rejections. Report measured token categories without inventing what unavailable output contained; investigate provider compatibility and request contracts before another identical retry.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.
