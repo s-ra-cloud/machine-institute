@@ -102,6 +102,12 @@ describe("Reproduction session — immediate validation", () => {
     s.noteGeneratedPath("/work/results/train.py");
     expect(s.validateCommand("python /work/results/train.py --seed 1")).toBeUndefined();
     expect(s.validateCommand("python /work/results/generated-by-command.py")).toContain("not a verified");
+    expect(s.validateCommand("python /work/results/generated-by-command.py")).toContain('read_file(path="/work/results/generated-by-command.py", offset=0, max_chars=500)');
+    s.observeToolCall({
+      ...command(2, "File not found"),
+      name: "read_file", args: { path: "/work/results/generated-by-command.py" }, error: true,
+    });
+    expect(s.validateCommand("python /work/results/generated-by-command.py")).toContain("not a verified");
     s.observeToolCall({
       ...command(2, "Verified file: /work/results/generated-by-command.py\nReturned characters: 0-12 of 12\n---\nprint('ok')"),
       name: "read_file", args: { path: "/work/results/generated-by-command.py" },

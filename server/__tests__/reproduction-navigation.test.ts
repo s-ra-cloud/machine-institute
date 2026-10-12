@@ -1,5 +1,18 @@
 import { expect, it } from "vitest";
-import { inspectionIndex } from "../reproduction-navigation";
+import { inspectionIndex, nextExecutionNavigationCount } from "../reproduction-navigation";
+
+it("does not replenish navigation for fresh command output or failed writes", () => {
+  let count = 0;
+  for (let i = 0; i < 6; i++) {
+    count = nextExecutionNavigationCount(count, { name: "read_file", result: `page ${i}`, error: false });
+    count = nextExecutionNavigationCount(count, { name: "run_command", result: `exit code 0 (0.3s)\nnew grep output ${i}`, error: false });
+  }
+  expect(count).toBe(6);
+  expect(nextExecutionNavigationCount(count, { name: "run_command", result: "exit code 0 (300s)\nmeasurement", error: false })).toBe(6);
+  expect(nextExecutionNavigationCount(count, { name: "write_file", result: "Refused: not authorized", error: false })).toBe(6);
+  expect(nextExecutionNavigationCount(count, { name: "write_file", result: "failure", error: true })).toBe(6);
+  expect(nextExecutionNavigationCount(count, { name: "write_file", result: "File written", error: false })).toBe(0);
+});
 const read = (index: number, text: string, start = 0) => ({
   index, name: "read_file", args: { path: "/work/data.csv" }, error: false,
   result: `Verified file: /work/data.csv\nReturned characters: ${start}-${start + text.length} of 10000\n---\n${text}`,

@@ -279,6 +279,12 @@ Extraction's bounded global allowance should support productive continuation rat
 
 **How to apply:** Reserve visits to unprocessed packets and retain the global cap. Count consecutive invalid or non-progressing submissions separately from productive batches; otherwise a first late error gets no repair opportunity. Validated progress resets the stall counter, never the global allowance. Never mark a packet complete while it reports remaining claims.
 
+New command output must not replenish execution browsing merely because it differs from previous output.
+
+**Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.
+
+**How to apply:** Keep browsing bounded across commands without classifying shell syntax as scientific execution. Explicit successful writes may reopen repair inspection; phase changes provide fresh stage allowances. Existing-script registration should recommend a small inspection of the generated path rather than full source retranscription; registration never overrides plan or qP checks.
+
 Cross-stage navigation indexes describe captured evidence, never the current filesystem or proven measurement coverage.
 
 **Why:** Repeated source inspection consumed most post-extraction calls in a live run. Reducing those repeats is useful, but a page hash cannot detect subsequent command-side mutations, and planned measurements are not observed results.

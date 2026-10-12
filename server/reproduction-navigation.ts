@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import type { ToolCallRecord } from "./model-service";
 
+/** Commands can be inspection too: new output must not replenish browsing. */
+export function nextExecutionNavigationCount(count: number, call: Pick<ToolCallRecord, "name" | "error" | "result">): number {
+  if (["read_file", "read_tool_result", "list_files"].includes(call.name)) return count + 1;
+  if (call.name === "write_file" && !call.error && !call.result.startsWith("Refused:")) return 0;
+  return count;
+}
+
 type Call = Pick<ToolCallRecord, "index" | "name" | "args" | "result" | "error">;
 
 /** Historical navigation only. A captured page hash is not a current file hash. */

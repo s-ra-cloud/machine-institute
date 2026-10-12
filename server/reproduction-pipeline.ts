@@ -8,7 +8,7 @@ import type { ReproductionSession } from "./reproduction-session";
 import { ContextBudgetError, estimateRequestTokens } from "./llm-context";
 import { describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
 import { PlanningRecovery } from "./reproduction-planning-recovery";
-import { inspectionIndex } from "./reproduction-navigation";
+import { inspectionIndex, nextExecutionNavigationCount } from "./reproduction-navigation";
 
 const controls: ToolSpec[] = [
   { name: "submit_plan", description: "Plan an experiment for the current claim and related pending claims that the SAME method and materials can measure. Supply an individual measurement for each. Execute once, then assess each claim separately. qP suitability remains required.",
@@ -401,9 +401,8 @@ export async function runControlledReproduction(input: {
             onToolCall: async record => {
               stageCalls++;
               if (phase === "execution") {
-                if (["read_file", "read_tool_result", "list_files"].includes(record.name)) executionNavigationCalls++;
-                else if (record.name === "write_file" && !record.error && !record.result.startsWith("Refused:")) {
-                  executionNavigationCalls = 0;
+                executionNavigationCalls = nextExecutionNavigationCount(executionNavigationCalls, record);
+                if (record.name === "write_file" && !record.error && !record.result.startsWith("Refused:")) {
                   executionOutputs.clear();
                   repeatedExecutionOutputs = 0;
                 } else if (record.name === "run_command" && !record.error && !record.result.startsWith("Refused:")) {
@@ -416,7 +415,8 @@ export async function runControlledReproduction(input: {
                     executionNavigationCalls = Math.max(6, executionNavigationCalls);
                   } else {
                     executionOutputs.add(hash);
-                    executionNavigationCalls = 0;
+                    // Unique output is not evidence of scientific progress and
+                    // cannot renew the stage's file-browsing allowance.
                   }
                 }
               }

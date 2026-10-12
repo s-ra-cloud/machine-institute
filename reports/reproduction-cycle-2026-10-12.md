@@ -122,3 +122,11 @@ Navigation totals include file reads, directory listings and original-output ret
 - Both issues need targeted offline tests before another paid retry. No application change is claimed for these newly identified blockers.
 
 The sandbox logged successful termination. Model accounting for this fresh window: $1.42491492, leaving $3.57508508. Modal reservation: $5, leaving $5 reservation allowance; actual billed GPU spending has not been reconciled. No run remains active.
+
+### Offline repairs following the index-enabled cycle
+
+The provenance refusal now explains the existing supported recovery: inspect a small page of the shell-created script itself to register its existence, rather than retranscribing the original. No new patch tool or automatic authorization was added. Missing/failed reads do not register the script, and plan/method/qP checks remain separate.
+
+Unique command output no longer resets execution navigation. This deliberately applies to all commands, without treating command syntax or output novelty as proof of scientific progress. A successful explicit write still reopens repair inspection; phase changes retain their stage-specific allowances. Repeated-output protection remains in place.
+
+Offline verification: all 64 test files passed, 846 tests passed and two skipped. Regression tests cover alternating file reads/new command output, successful versus refused/failed writes, and the existing generated-path inspection recovery. No paid run or budget reset occurred. Live improvement is not yet established.

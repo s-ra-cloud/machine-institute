@@ -145,7 +145,7 @@ export class ReproductionSession {
     if (!match) return undefined;
     const path = posix.normalize(match[1].startsWith("/") ? match[1] : posix.join("/work", match[1]));
     if (this.materialGrounding.shippedPaths.has(path) || this.generatedPaths.has(path)) return undefined;
-    return `Refused: ${path} is not a verified shipped or generated script. Inspect /work/MATERIALS_INDEX.md and the shipped README/files, or create the script with write_file before executing it. A guessed nonexistent path is not evidence of a missing scientific material.`;
+    return `Refused: ${path} is not a verified shipped or generated script. If an earlier command created this file, inspect that exact output with read_file(path=${JSON.stringify(path)}, offset=0, max_chars=500), then retry. A successful file inspection registers the path; do not reread and retranscribe the entire original script merely to register an existing copy. If the file does not exist, inspect /work/MATERIALS_INDEX.md and the shipped README/files, or create it with write_file. Registration proves existence only: accepted-plan, scientific-method and qP authorization checks still apply. A guessed nonexistent path is not evidence of a missing scientific material.`;
   }
 
   private reportValidation(issues: string[]): void {
