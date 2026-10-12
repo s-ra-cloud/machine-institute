@@ -95,3 +95,30 @@ First improve stage-to-stage inspection navigation: a bounded index of original 
 The shared website pipeline now supplies a bounded historical inspection index and completed-execution-stage navigation. Inspection entries distinguish captured ranges and page hashes, collapse identical captures to an original retrieval ID, and retain changed captures separately. Experiment entries retain planned measurements and explicit handoff references where supplied; recent execution pointers are labeled candidates, not proven measurement coverage. No automatic reuse, freshness assertion, verdict or authorization is introduced.
 
 Verification: full single-worker suite passed with 845 tests and 2 skipped across 64 files. Tests cover duplicate and changed pages, index bounds, failed/mismatched reads, and the execution-to-assessment handoff. Existing 13 unrelated TypeScript errors remain. No paid cycle or cost reset was performed. Live efficiency improvement remains unproven.
+
+## Fresh-budget cycle with navigation indexes
+
+The user authorized a fresh $5 model / $10 Modal allowance at 12:39 UTC. The prior ledger was archived. A workspace restart interrupted the initial launch; no new attempt checkpoint or spending was recorded and a read-only Modal check found no active sandboxes. The same allowance was used for the relaunch, without another reset.
+
+Evidence: `.local/state/live-reproduction/website-1791808864142`.
+Extraction completed all six packets in ten calls and retained 28 claims. The pipeline then exhausted its 100-call global limit during R5 execution. Four claims received provisional agent assessments (three verified, one falsified), 24 remained pending, and independent judging/final reporting did not run. Claim IDs and extracted text vary between runs, so provisional verdicts are not a like-for-like scientific comparison.
+
+| Metric | Previous completed attempt | Index-enabled attempt |
+| --- | ---: | ---: |
+| Extraction calls | 13 | 10 |
+| Planning calls | 33 | 30 |
+| Execution-stage calls | 41 | 52 |
+| Assessment calls | 13 | 8 |
+| Post-extraction navigation calls | 61 | 66 |
+| Additional identical successful file-read captures | 11 | 3 |
+| Claims provisionally assessed | 4 | 4 |
+
+Navigation totals include file reads, directory listings and original-output retrievals, excluding application-created source records. Fewer exact repeats were observed, but this single run does not establish causal attribution to the indexes, and overall completion did not improve.
+
+### Current blockers
+
+- During R5, the agent investigated a 72-task versus 96-task mismatch and generated a modified script with a shell `sed` command. The provenance gate correctly refused to launch a script not registered through the supported generated-script path. The model then tried to reconstruct the approximately 30KB source through reads and `write_file`, exhausting the remaining calls. A controlled, provenance-preserving patch/copy operation is a candidate repair; merely trusting every shell-created file would weaken the workflow.
+- Execution navigation protection resets after every new command-output hash, including code-inspection commands. The trace contains `grep` commands and subsequent fresh read sequences; new textual output is not proof of scientific execution progress. A fix must avoid equating shell syntax with scientific provenance and preserve legitimate preparation/repair.
+- Both issues need targeted offline tests before another paid retry. No application change is claimed for these newly identified blockers.
+
+The sandbox logged successful termination. Model accounting for this fresh window: $1.42491492, leaving $3.57508508. Modal reservation: $5, leaving $5 reservation allowance; actual billed GPU spending has not been reconciled. No run remains active.
