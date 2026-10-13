@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { inspectionIndex, nextExecutionNavigationCount, reproductionProgress } from "../reproduction-navigation";
+import { reproductionProgress } from "../reproduction-navigation";
 
 it("separates source evidence IDs from charged calls without hiding genuine overruns", () => {
   expect(reproductionProgress(80, 24, 10, 100)).toEqual({
@@ -9,42 +9,4 @@ it("separates source evidence IDs from charged calls without hiding genuine over
   expect(reproductionProgress(115, 24, 10, 100).usedCalls).toBe(101);
   expect(reproductionProgress(44, 20, 7, 100).usedCalls).toBe(31);
   expect(reproductionProgress(1, 0, 0, 100).usedCalls).toBe(1);
-});
-
-it("does not replenish navigation for fresh command output or failed writes", () => {
-  let count = 0;
-  for (let i = 0; i < 6; i++) {
-    count = nextExecutionNavigationCount(count, { name: "read_file", result: `page ${i}`, error: false });
-    count = nextExecutionNavigationCount(count, { name: "run_command", result: `exit code 0 (0.3s)\nnew grep output ${i}`, error: false });
-  }
-  expect(count).toBe(6);
-  expect(nextExecutionNavigationCount(count, { name: "run_command", result: "exit code 0 (300s)\nmeasurement", error: false })).toBe(6);
-  expect(nextExecutionNavigationCount(count, { name: "write_file", result: "Refused: not authorized", error: false })).toBe(6);
-  expect(nextExecutionNavigationCount(count, { name: "write_file", result: "failure", error: true })).toBe(6);
-  expect(nextExecutionNavigationCount(count, { name: "write_file", result: "File written", error: false })).toBe(0);
-});
-const read = (index: number, text: string, start = 0) => ({
-  index, name: "read_file", args: { path: "/work/data.csv" }, error: false,
-  result: `Verified file: /work/data.csv\nReturned characters: ${start}-${start + text.length} of 10000\n---\n${text}`,
-});
-it("deduplicates identical captured pages while retaining original evidence IDs", () => {
-  const index = inspectionIndex([read(1, "abc"), read(2, "abc")]);
-  expect(index.pages).toHaveLength(1);
-  expect(index.pages[0]).toMatchObject({ readToolCallId: 1, latestReadToolCallId: 2, identicalCaptures: 2, start: 0, end: 3 });
-  expect(index.pages[0].retrieve.tool_call_id).toBe(1);
-});
-it("keeps changed content and distinct ranges separate without claiming freshness", () => {
-  const index = inspectionIndex([read(1, "abc"), read(2, "xyz"), read(3, "abc", 50)]);
-  expect(index.pages).toHaveLength(3);
-  expect(index.pages[0].capturedPageSha256).not.toBe(index.pages[1].capturedPageSha256);
-  expect(index.notice).toContain("not current file contents");
-  expect(index.notice).toContain("read_file remains available");
-});
-it("ignores failed, mismatched and non-page records and bounds navigation without mutating evidence", () => {
-  const calls = Array.from({ length: 40 }, (_, i) => read(i + 1, String(i)));
-  const index = inspectionIndex([...calls, { ...read(41, "failed"), error: true },
-    { ...read(42, "mismatch"), args: { path: "/elsewhere" } }, { ...read(43, "abc"), name: "run_command" }]);
-  expect(index.pages).toHaveLength(30);
-  expect(index.pages[0].readToolCallId).toBe(11);
-  expect(calls).toHaveLength(40);
 });

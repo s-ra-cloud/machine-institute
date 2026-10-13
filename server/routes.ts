@@ -25,7 +25,7 @@ import { buildConventionName, withMbSuffix, buildFsAgentDescription } from "./ag
 import { INITIATIVE_DOC_IDS, JOURNAL_DISPLAY_NAMES, INITIATIVE_SLUGS, getJournalDisplayName, resolveJournalId } from "./journals";
 import { fetchJournalPaperCatalogue } from "./paper-catalogue";
 import { runReproduction } from "./reproduce";
-import type { PipelineCheckpoint } from "./reproduction-pipeline";
+import type { PipelineCheckpoint } from "./reproduction-batch";
 import { diagnosticExcerpt } from "./reproduction-diagnostics";
 import { canRetryReproduction } from "./reproduction-retry";
 import { BYOC_PROVIDERS, getManagedModels, resolveByocSelection, resolveManagedSelection, ManagedModelError } from "./managed-models";

@@ -4,9 +4,8 @@ import { isSupportedRawInputPath } from "./reproduction-stage-evidence";
 import { loadPaperContext } from "./ethics-review";
 import { ReproductionRecovery } from "./reproduction-recovery";
 import { extractReproductionClaims, describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
-import { runControlledReproduction, type PipelineCheckpoint } from "./reproduction-pipeline";
+import { runBatchReproduction, renderAcceptedLogbook, type PipelineCheckpoint } from "./reproduction-batch";
 import { reproductionProgress } from "./reproduction-navigation";
-import { ReproductionController, renderAcceptedLogbook } from "./reproduction-controller";
 import { createHash } from "node:crypto";
 import { assertReproductionRuntimeProviderCredits } from "./provider-credit-preflight";
 import { fetchContributionMaterials, materialSandboxPath, formatMaterialsInventory } from "./fs-materials";
@@ -445,8 +444,7 @@ function fmtExec(r: { exitCode: number | null; stdout: string; stderr: string; t
 export async function runReproduction(opts: RunReproductionOptions): Promise<ReproductionOutput> {
   const diagnostics = new ReproductionDiagnostics();
   diagnostics.identity(opts.modelConfig.modelName, opts.modelConfig.provider, opts.modelConfig.providerMode,
-    createHash("sha256").update(runControlledReproduction.toString()).update(extractReproductionClaims.toString())
-      .update(ReproductionController.toString()).digest("hex"));
+    createHash("sha256").update(runBatchReproduction.toString()).update(extractReproductionClaims.toString()).digest("hex"));
   try {
     const result = await runReproductionWithDiagnostics(opts, diagnostics);
     try { opts.onDiagnostics?.(diagnostics.snapshot()); } catch { /* best effort */ }
@@ -524,15 +522,14 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     issues => diagnostics.observe({ kind: "claim-validation", toolName: "record_result", validationErrors: issues }),
   );
   session.configureSourceGrounding({ paperPath: "/work/paper.md", paperText });
-  const extractionState = new ReproductionController(startTime + REPRODUCTION_BUDGET.wallClockMs);
-  extractionState.startExtraction();
+  const extractionState = { calls: 0, failed: false };
   await emitEvent("reproduction-extraction", "Extracting grounded claims before GPU allocation.");
   diagnostics.stage("extraction");
   let extractionCoverage: ExtractionCoverage | undefined;
   const saveExtraction = async (limitation: string) => {
     await opts.onCheckpoint?.({
       extraction: extractionCoverage,
-      controller: { ...extractionState.snapshot(), phaseCalls: extractionState.phase === "extraction" ? extractionState.calls : 0 },
+      controller: { version: 2, phase: extractionState.failed ? "failed" : "extraction", calls: extractionState.calls, phaseCalls: extractionState.calls, hostCommands: 0, milestones: [], experiments: [] },
       claims: Array.from(session.recorded.values()).map(c => ({ id: c.id, claim: c.claim, status: c.status, evidenceIds: [] })),
       outputs: [],
       logbook: renderAcceptedLogbook(Array.from(session.recorded.values()), session.toolCalls, limitation),
@@ -545,7 +542,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     onProgress: async coverage => {
       extractionCoverage = coverage;
       extractionState.calls = coverage.calls;
-      if (coverage.termination === "failed") extractionState.fail();
+      if (coverage.termination === "failed") extractionState.failed = true;
       await saveExtraction(`${coverage.termination === "failed" ? `Extraction failed (${coverage.failure}); accepted claims remain pending. No GPU allocated.` : "Extraction checkpoint; no experiments have run."}\n\n${describeExtractionCoverage(coverage)}`);
     },
     onAccepted: async claim => {
@@ -877,9 +874,10 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         { role: "user", content: "x".repeat(ACTIVE_INSTRUCTION_MAX_BYTES) },
       ],
     });
-    const runPipeline = opts.legacyControllerForComparison
-      ? (input: Parameters<typeof runControlledReproduction>[0]) => runToolLoop(modelConfig, effectivePrompt, userMessage, tools, execute, input.options)
-      : runControlledReproduction;
+    const batchMode = !opts.legacyControllerForComparison;
+    const runPipeline = batchMode
+      ? runBatchReproduction
+      : (input: Parameters<typeof runBatchReproduction>[0]) => runToolLoop(modelConfig, effectivePrompt, userMessage, tools, execute, input.options);
     toolLoopResult = await runPipeline({
       config: modelConfig, instructions: effectivePrompt, tools, execute, session,
       shippedPaths: new Set(shippedPaths), extractionCalls: extracted.calls,
@@ -921,7 +919,8 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       // still establish real progress. Refuse further browsing, not that repair.
       getStallReason: stallReason,
       onToolCall: async (rec: ToolCallRecord) => {
-        session.observeToolCall(rec);
+        // The batch orchestrator observes every record itself (host-run and model calls).
+        if (!batchMode) session.observeToolCall(rec);
         if (handoffActive() && handoffStart !== undefined) {
           const previous = recovery.stage;
           recovery.observe(session.toolCalls.length, rec.name, rec.result, rec.error);
@@ -934,9 +933,11 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           const firstLine = rec.result.split("\n")[0];
           const progress = reproductionProgress(rec.index, sourceEvidenceRecordCount, extracted.calls, REPRODUCTION_BUDGET.maxToolCalls);
           await emitEvent("reproduction-run", `${progress.label} ${cmd} → ${firstLine}`);
-        } else if (rec.name === "record_result") {
+        } else if (rec.name === "record_result" || rec.name === "record_results") {
           const progress = reproductionProgress(rec.index, sourceEvidenceRecordCount, extracted.calls, REPRODUCTION_BUDGET.maxToolCalls);
           await emitEvent("reproduction-record", `${progress.label} ${rec.result.slice(0, 500)}`);
+        } else if (rec.name === "submit_plan" || rec.name === "defer_claims" || rec.name === "declare_blocked" || rec.name === "submit_for_assessment") {
+          await emitEvent("reproduction-progress", `${rec.name}: ${rec.result.replace(/\s+/g, " ").slice(0, 300)}`);
         } else if (rec.index % 10 === 0) {
           const progress = reproductionProgress(rec.index, sourceEvidenceRecordCount, extracted.calls, REPRODUCTION_BUDGET.maxToolCalls);
           await emitEvent("reproduction-progress", `${progress.usedCalls} budgeted calls used; latest evidence #${rec.index} (${Math.round((Date.now() - startTime) / 60000)} min elapsed).`);

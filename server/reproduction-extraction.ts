@@ -10,9 +10,33 @@ export interface ExtractionCoverage {
   calls: number;
   termination: "in-progress" | "complete" | "partial" | "packet-limit" | "claim-limit" | "failed";
   failure?: "checkpoint" | "deadline" | "no-claims" | "provider-or-runtime" | "incomplete-coverage";
+  /** Valid quotations the application deliberately did not register; they carry no verdict. */
+  skipped?: Array<{ reason: "duplicate" | "no-measurement" | "claim-limit"; claim: string }>;
 }
+/** Registered claims are capped so every one can be planned and assessed within the enforced call budget. */
+export const EXTRACTION_CLAIM_LIMIT = 24;
 export function describeExtractionCoverage(c: ExtractionCoverage): string {
-  return `Bounded extraction coverage (not an exhaustive paper review): ${c.packets.length}/${c.totalPackets} packets attempted; ${c.totalPackets - c.packets.length} packets unprocessed. Termination: ${c.termination}. Incomplete packet ranges: ${c.packets.filter(p => p.status !== "accepted").map(p => `${p.start}-${p.end} (${p.status})`).join(", ") || "none recorded"}. Omitted claims and passages were not experimentally assessed and have no scientific verdict.`;
+  const skipped = c.skipped?.length
+    ? ` Skipped ${c.skipped.length} valid quotation(s) without registering them: ${(["duplicate", "no-measurement", "claim-limit"] as const)
+      .map(reason => [reason, c.skipped!.filter(s => s.reason === reason).length] as const).filter(([, n]) => n)
+      .map(([reason, n]) => `${n} ${reason === "duplicate" ? "overlapping an already registered claim" : reason === "no-measurement" ? "without a measurable quantity" : `beyond the ${EXTRACTION_CLAIM_LIMIT}-claim allowance`}`).join(", ")}.`
+    : "";
+  return `Bounded extraction coverage (not an exhaustive paper review): ${c.packets.length}/${c.totalPackets} packets attempted; ${c.totalPackets - c.packets.length} packets unprocessed. Termination: ${c.termination}. Incomplete packet ranges: ${c.packets.filter(p => p.status !== "accepted").map(p => `${p.start}-${p.end} (${p.status})`).join(", ") || "none recorded"}.${skipped} Omitted claims and passages were not experimentally assessed and have no scientific verdict.`;
+}
+const normalizeClaimText = (text: string) => ` ${text.toLocaleLowerCase().replace(/[^a-z0-9\u00c0-\u024f\u0370-\u03ff\u0400-\u04ff]+/g, " ").trim()} `;
+const wordCount = (normalized: string) => normalized.trim().split(" ").filter(Boolean).length;
+/** Why a valid quotation is not registered as a separate claim, or undefined when it should be. */
+export function extractionSkipReason(claim: string, registered: readonly string[]): "duplicate" | "no-measurement" | "claim-limit" | undefined {
+  const normalized = normalizeClaimText(claim);
+  if (!/[0-9]/.test(claim)) return "no-measurement";
+  for (const existing of registered) {
+    const other = normalizeClaimText(existing);
+    if (normalized === other) return "duplicate";
+    const [shorter, longer] = normalized.length <= other.length ? [normalized, other] : [other, normalized];
+    if (wordCount(shorter) >= 6 && longer.includes(shorter)) return "duplicate";
+  }
+  if (registered.length >= EXTRACTION_CLAIM_LIMIT) return "claim-limit";
+  return undefined;
 }
 const submit: ToolSpec = {
   name: "submit_claims",
@@ -117,7 +141,11 @@ export async function extractReproductionClaims(input: {
           }
           if (rejectionId) unresolved.delete(rejectionId);
           const c = candidate as unknown as ExtractedCandidate;
-          if (!claims.some(existing => existing.claim.trim() === c.claim.trim())) {
+          const skip = extractionSkipReason(c.claim, claims.map(existing => existing.claim));
+          if (skip) {
+            if (skip !== "duplicate" || !claims.some(existing => existing.claim.trim() === c.claim.trim()))
+              (coverage.skipped ??= []).push({ reason: skip, claim: c.claim.slice(0, 300) });
+          } else {
             const claim = { ...c, packet };
             try { await input.onAccepted?.(claim); }
              catch (error) { coverage.failure = "checkpoint"; acceptanceError = error; throw error; }
@@ -178,7 +206,7 @@ export async function extractReproductionClaims(input: {
     coverage.failure = "incomplete-coverage";
     throw new Error("Extraction failed: unresolved source packets; grounded claims retained pending, no GPU allocated.");
   }
-  coverage.termination = "complete";
+  coverage.termination = coverage.skipped?.some(s => s.reason === "claim-limit") ? "claim-limit" : "complete";
   await saveProgress();
   return { claims, calls, inspectedPackets, totalPackets: packets.length, coverage };
   } catch (error) {

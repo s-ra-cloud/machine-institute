@@ -3,6 +3,7 @@
 - [Future Science publishing](future-science-publishing.md) — two endpoints (editorial=Bearer /contributions, LR/peer/ethics=x-api-key /api-bots); valid `type` list; logs too noisy so LR submit throws real FS error; republish endpoints exist.
 - [Model-blind peer reviews](model-blind-reviews.md) — redact ALL evaluator-visible blocks (incl. ethics block); MB suffix on every code-rebuild path; never detect target model from body text.
 - [Available-papers endpoints are slow](available-papers-slow.md) — peer/ethics paper pickers re-fetch the whole FS catalogue (~30s, no cache) per request; UI must show real loading/error states, not conflate empty with loading.
+- [Reproduction batch pipeline](reproduction-batch-pipeline.md) — per-claim agent loops structurally exceed the 100-call cap; host runs the experiments, deferred claims are owned by their new experiment, offline integration test first.
 - [Reproduction recovery](reproduction-recovery-contract.md) — strict evidence checks need live repair and orchestration replays; saved retry prompts must receive current runtime requirements.
 - [Reproduction orchestration research](reproduction-orchestration-research.md) — borrow explicit evidence reuse and persistent-state patterns; existing frameworks are not drop-in replacements for Modal.
 - [Questioning execution provenance](questioning-provenance.md) — qP needs controlled source entrypoints, not shell-command classification, to distinguish adapted analysis from original verification.
