@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createByocChatClient } from "../managed-adapter";
 import { extractReproductionClaims } from "../reproduction-extraction";
 import { completionStructure } from "../completion-structure";
+import { runToolLoop } from "../model-service";
 
 // Do not mock OpenAI: exercise its real HTTP JSON parser, then our adapter.
 // Only fetch is replaced, so these tests cannot make billable requests.
@@ -34,6 +35,46 @@ function intercept(responses: unknown[]) {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("OpenRouter HTTP → real SDK → BYOK adapter → extraction", () => {
+  it.each([
+    { reasoning: "PRIVATE_CONTINUATION" },
+    { reasoning_content: "PRIVATE_CONTINUATION" },
+    { reasoning_details: [{ type: "reasoning.text", text: "PRIVATE_CONTINUATION", index: 0 }] },
+  ])("preserves opaque reasoning in continuation requests without logging it: %j", async reasoning => {
+    const firstCall = { ...toolCall, function: { ...toolCall.function,
+      arguments: JSON.stringify({ claims: [{ source_quote: quote, copy_source_quote: true }], has_more: true }) } };
+    const lastCall = { ...toolCall, function: { ...toolCall.function,
+      arguments: JSON.stringify({ claims: [], has_more: false }) } };
+    const fetch = intercept([
+      envelope("tool_calls", { content: null, ...reasoning, tool_calls: [firstCall] }),
+      envelope("tool_calls", { content: null, tool_calls: [lastCall] }),
+    ]);
+    const events: any[] = [];
+    const result = await extractReproductionClaims({
+      paper: quote, instructions: "Extract", config, deadline: Date.now() + 60_000,
+      onAccepted: async () => {}, onOutcome: event => { events.push(event); },
+    });
+    expect(result.coverage.termination).toBe("complete");
+    const requests = fetch.mock.calls.map(call => JSON.parse((call as unknown as [unknown, RequestInit])[1].body as string));
+    expect(requests.every(r => r.tool_choice === "auto")).toBe(true);
+    expect(requests[1].messages.find((m: any) => m.role === "assistant")).toMatchObject(reasoning);
+    expect(JSON.stringify(events)).not.toContain("PRIVATE_CONTINUATION");
+    expect(JSON.stringify(result)).not.toContain("PRIVATE_CONTINUATION");
+  });
+
+  it("does not dispatch a known but wrong tool when auto choice is used for a required stage", async () => {
+    const call = (name: string) => envelope("tool_calls", { content: null, tool_calls: [{
+      id: name, type: "function", function: { name, arguments: "{}" },
+    }] });
+    intercept([call("wrong"), call("required")]);
+    let complete = false;
+    const execute = vi.fn(async (_name: string, _args: Record<string, unknown>) => { complete = true; return "accepted"; });
+    await runToolLoop(config, "rules", "task",
+      ["wrong", "required"].map(name => ({ name, description: name, parameters: { type: "object" } })),
+      execute, { maxToolCalls: 3, deadlineMs: Date.now() + 60_000,
+        getRequiredTool: () => "required", isStageComplete: () => complete });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0][0]).toBe("required");
+  });
   it("keeps simultaneous request observations isolated on a reused client", async () => {
     vi.stubGlobal("fetch", vi.fn(async (_input, init) => {
       const text = JSON.parse(init.body).messages[0].content;
@@ -108,6 +149,8 @@ describe("OpenRouter HTTP → real SDK → BYOK adapter → extraction", () => {
     expect(result.coverage.termination).toBe("complete");
     expect(onAccepted).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledTimes(2);
+    const secondRequest = JSON.parse((fetch.mock.calls[1] as unknown as [unknown, RequestInit])[1].body as string);
+    expect(secondRequest.messages.find((m: any) => m.role === "assistant").reasoning).toBe("synthetic private text");
     expect(events.filter(e => e.kind === "completion").map(e => e.responseToolCallsType))
       .toEqual(["missing", "array"]);
     expect(events.filter(e => e.kind === "completion").map(e => e.httpResponse?.responseToolCallsType))

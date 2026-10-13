@@ -1,3 +1,4 @@
+import { hasReasoningContinuation } from "./reasoning-continuation";
 import type { ModelProviderConfig } from "./model-service";
 import { ContextBudgetError, RequestContextBudget } from "./llm-context";
 import { describeToolContext } from "./context-diagnostics";
@@ -296,7 +297,7 @@ function compactCompletedArguments(messages: Message[], fits: () => boolean, arc
     if (message.role !== "assistant" || !hasCompletedCall(messages, i)) continue;
     // Native signed function-call parts are immutable continuation data. Their
     // arguments must agree with the canonical calls and cannot be rewritten.
-    if (message.providerParts?.length) continue;
+    if (message.providerParts?.length || hasReasoningContinuation(message)) continue;
     for (const call of message.tool_calls as any[]) {
       if (!call?.function || typeof call.function.arguments !== "string") continue;
       const replacement = compactedArguments(call.function.arguments, String(call.function.name ?? ""), archive, String(call.id ?? i));
@@ -342,7 +343,7 @@ function removeObsoleteProse(
       && typeof message.content === "string"
       && message.content.length > 0
       && !/"notice"\s*:\s*"Archived unchanged; not scientific evidence\."/i.test(message.content);
-    if (repairUser || oldAssistantProse) {
+    if ((repairUser || oldAssistantProse) && !hasReasoningContinuation(message)) {
       messages.splice(i, 1);
       return true;
     }
@@ -354,6 +355,7 @@ function removeOldestCompleteGroup(messages: Message[], protectedIds: Set<string
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     if (message.role !== "assistant" || !hasCompletedCall(messages, i)) continue;
+    if (hasReasoningContinuation(message)) continue;
     const ids = callIds(message);
     const removableIds = ids.filter(id => !protectedIds.has(id));
     if (removableIds.length === 0) continue;

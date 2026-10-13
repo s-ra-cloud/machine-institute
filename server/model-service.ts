@@ -1,5 +1,6 @@
 import { MANAGED_MODELS } from "../shared/model-catalog";
 import { completionStructure, type CompletionStructure } from "./completion-structure";
+import { isDeepSeekV4, reasoningContinuation } from "./reasoning-continuation";
 import { createByocChatClient, createManagedChatClient, type ManagedChatClient } from "./managed-adapter";
 import { BYOC_PROVIDERS, isSyntacticallyValidApiKey } from "./managed-models";
 import {
@@ -475,7 +476,9 @@ const ELIDED_TOOL_OUTPUT = "[earlier tool output elided to fit the context windo
 const KEEP_RECENT_TOOL_MESSAGES = 8;
 
 function messageChars(m: { content?: unknown }): number {
-  return typeof m.content === "string" ? m.content.length : JSON.stringify(m.content ?? "").length;
+  const continuation = reasoningContinuation(m);
+  return (typeof m.content === "string" ? m.content.length : JSON.stringify(m.content ?? "").length)
+    + (Object.keys(continuation).length ? JSON.stringify(continuation).length : 0);
 }
 
 // Drop the bodies of the oldest tool results once the transcript outgrows the
@@ -666,7 +669,9 @@ export async function runToolLoop(
     const baseRequest: Record<string, unknown> = {
       model,
       messages: messages as any,
-      ...(forceFinal ? {} : { tools: availableToolDefs as any, tool_choice: requiredTool
+      ...(forceFinal ? {} : { tools: (requiredTool && isDeepSeekV4(model)
+        ? availableToolDefs.filter(tool => tool.function.name === requiredTool) : availableToolDefs) as any,
+        tool_choice: requiredTool && !isDeepSeekV4(model)
         ? { type: "function", function: { name: requiredTool } } : "auto" }),
       max_tokens: maxTokens,
       temperature,
@@ -846,6 +851,7 @@ export async function runToolLoop(
       content: assistantText ?? "",
       ...(calls.length ? { tool_calls: calls } : {}),
       ...(msg.providerParts ? { providerParts: msg.providerParts } : {}),
+      ...(isDeepSeekV4(model) ? reasoningContinuation(msg) : {}),
     });
     await options.onRound?.(round, assistantText);
 
@@ -919,6 +925,10 @@ export async function runToolLoop(
         validationErrors = spec
           ? validateToolArguments(parsedArgs, { ...spec.parameters, type: "object" })
           : ["tool name is not available"];
+        if (isDeepSeekV4(model) && requiredTool && call.function.name !== requiredTool)
+          validationErrors.push(`this stage requires ${requiredTool}; other tools cannot execute`);
+        if (isDeepSeekV4(model) && availableNames && !availableNames.includes(call.function.name))
+          validationErrors.push("tool is not available in this stage");
         if (validationErrors.length) argumentParse = "invalid-schema";
         else args = parsedArgs as Record<string, unknown>;
       } catch {

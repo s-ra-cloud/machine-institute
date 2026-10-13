@@ -15,6 +15,24 @@ function budget(inputLimit: number): RequestContextBudget {
 }
 
 describe("fitToolContext", () => {
+  it("keeps opaque reasoning and its call intact or fails closed instead of silently deleting them", () => {
+    const request = { messages: [
+      { role: "system", content: "rules" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: "", reasoning_details: [
+        { type: "reasoning.text", text: "PRIVATE_CONTINUATION".repeat(200), index: 0 },
+      ], tool_calls: [{ id: "r", type: "function", function: { name: "read_file", arguments: '{"path":"a"}' } }] },
+      { role: "tool", tool_call_id: "r", content: "data" },
+    ] };
+    const archived: string[] = [];
+    const protection = { getState: () => "state", archiveContext: (_key: string, text: string) => {
+      archived.push(text); return "archived";
+    } };
+    const fitted = fitToolContext(request, { budget: budget(20_000), protection });
+    expect(fitted.messages.find((m: any) => m.role === "assistant")).toEqual(request.messages[2]);
+    expect(() => fitToolContext(request, { budget: budget(150), protection })).toThrow(ContextBudgetError);
+    expect(archived.join("")).not.toContain("PRIVATE_CONTINUATION");
+  });
   it("resizes every protected retrieval in a batch with genuine source offsets", () => {
     const pages = [500, 900].map(offset => JSON.stringify({
       offset, end: offset + 18000, total: offset + 20000, text: "λ".repeat(18000),

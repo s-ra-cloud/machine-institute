@@ -329,6 +329,12 @@ DeepSeek thinking/tool compatibility must be checked beyond generic OpenRouter p
 
 **How to apply:** See https://api-docs.deepseek.com/api/create-chat-completion and https://api-docs.deepseek.com/guides/thinking_mode alongside OpenRouter's reasoning documentation. Preserve scientific stage enforcement independently of API tool-choice settings. Treat reasoning as opaque transient same-model transport state, not evidence or report/log content, and account for its request size. Do not silently disable thinking or change models to hide incompatibility.
 
+For DeepSeek V4, prefer compatible automatic API tool choice while enforcing required actions locally; keep reasoning-bearing turns intact or fail closed on context exhaustion.
+
+**Why:** Preserving the user's thinking model avoids silently changing its reasoning behavior. Automatic API choice must not weaken mandatory stages, and trimming opaque continuation blocks defeats their documented requirement.
+
+**How to apply:** Restrict advertised tools for a required action and reject other actions before execution. Preserve returned reasoning blocks unchanged in same-model history, including no-call turns. Do not assume this model-specific compatibility rule applies to every other model family.
+
 New command output must not replenish execution browsing merely because it differs from previous output.
 
 **Why:** The index-enabled live run reduced identical reads but still exhausted its global limit while fresh grep output repeatedly renewed navigation. Text novelty is not scientific progress.
