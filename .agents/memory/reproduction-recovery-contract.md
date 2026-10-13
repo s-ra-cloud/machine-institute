@@ -346,3 +346,15 @@ Cross-stage navigation indexes describe captured evidence, never the current fil
 **Why:** Repeated source inspection consumed most post-extraction calls in a live run. Reducing those repeats is useful, but a page hash cannot detect subsequent command-side mutations, and planned measurements are not observed results.
 
 **How to apply:** Retain original retrieval identities, distinguish changed captures, bound navigation size and keep fresh reads available. Experiment handoffs aid discovery only: scientific suitability, qP authorization, explicit reuse and per-claim verdict checks remain mandatory.
+
+Retry model requests separately from scientific execution; never recover a transient provider response by blindly replaying a GPU experiment.
+
+**Why:** A provider failure during assessment can otherwise discard useful work even when the experiment already succeeded. A sanitized 502 can represent either an upstream failure or an unusable completion rejected by the adapter, so it does not prove a credential or HTTP gateway problem.
+
+**How to apply:** Keep retries bounded, preserve the exact pending request, retain payment/deadline/spending guards, and dispatch tools only after a usable response. Reuse captured experiment evidence explicitly; persistent provider failures must still stop.
+
+Evidence-record IDs are not resource-budget counters, and host-created source evidence is not agent navigation.
+
+**Why:** Per-claim extraction registrations repeated canonical source pages in the evidence archive. Counting those entries as agent reads overstated repetition and made an exactly enforced limit appear exceeded.
+
+**How to apply:** Preserve provenance when counting actions. Compare controller-budgeted calls separately from evidence IDs; exclude pre-pipeline source registrations when assessing repeated navigation. Correct historical comparisons before using them to justify orchestration changes.

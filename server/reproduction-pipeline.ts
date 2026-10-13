@@ -45,7 +45,7 @@ export interface PipelineCheckpoint {
   extraction?: ExtractionCoverage;
   controller: ReturnType<ReproductionController["snapshot"]>;
   claims: Array<{ id: string; claim: string; status: string; evidenceIds: number[] }>;
-  outputs: Array<{ id: number; tool: string; sha256: string; error: boolean }>;
+  outputs: Array<{ id: number; tool: string; sha256: string; error: boolean; origin?: "pre-pipeline" | "agent-tool" }>;
   logbook: string;
 }
 export async function runControlledReproduction(input: {
@@ -93,6 +93,7 @@ export async function runControlledReproduction(input: {
       controller: controller.snapshot(),
       claims: Array.from(input.session.recorded.values()).map(c => ({ id: c.id, claim: c.claim, status: c.status, evidenceIds: c.evidenceToolCallIds ?? [] })),
       outputs: input.session.toolCalls.map(c => ({ id: c.index, tool: c.name,
+        origin: c.index <= started ? "pre-pipeline" as const : "agent-tool" as const,
         sha256: createHash("sha256").update(c.result).digest("hex"), error: c.error })),
       logbook: renderAcceptedLogbook(Array.from(input.session.recorded.values()), input.session.toolCalls, [limitation, input.extraction && describeExtractionCoverage(input.extraction)].filter(Boolean).join("\n\n")),
     });

@@ -5,6 +5,7 @@ import { loadPaperContext } from "./ethics-review";
 import { ReproductionRecovery } from "./reproduction-recovery";
 import { extractReproductionClaims, describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
 import { runControlledReproduction, type PipelineCheckpoint } from "./reproduction-pipeline";
+import { reproductionProgress } from "./reproduction-navigation";
 import { ReproductionController, renderAcceptedLogbook } from "./reproduction-controller";
 import { createHash } from "node:crypto";
 import { assertReproductionRuntimeProviderCredits } from "./provider-credit-preflight";
@@ -553,6 +554,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       await saveExtraction("Extraction is still in progress; no experiments have run and no scientific verdict exists.");
     },
   });
+  const sourceEvidenceRecordCount = session.toolCalls.length;
   await emitEvent("reproduction-extraction", `Accepted ${extracted.claims.length} grounded claims from ${extracted.inspectedPackets}/${extracted.totalPackets} source packets. Uninspected packets are outside this run's extraction coverage.`);
   if (questioning) {
     // Enforce capacity before booting/uploading to a paid sandbox.
@@ -930,11 +932,14 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
         if (rec.name === "run_command") {
           const cmd = String(rec.args.command || "").replace(/\s+/g, " ").slice(0, 140);
           const firstLine = rec.result.split("\n")[0];
-          await emitEvent("reproduction-run", `[${rec.index}/${REPRODUCTION_BUDGET.maxToolCalls}] ${cmd} → ${firstLine}`);
+          const progress = reproductionProgress(rec.index, sourceEvidenceRecordCount, extracted.calls, REPRODUCTION_BUDGET.maxToolCalls);
+          await emitEvent("reproduction-run", `${progress.label} ${cmd} → ${firstLine}`);
         } else if (rec.name === "record_result") {
-          await emitEvent("reproduction-record", `[${rec.index}/${REPRODUCTION_BUDGET.maxToolCalls}] ${rec.result.slice(0, 500)}`);
+          const progress = reproductionProgress(rec.index, sourceEvidenceRecordCount, extracted.calls, REPRODUCTION_BUDGET.maxToolCalls);
+          await emitEvent("reproduction-record", `${progress.label} ${rec.result.slice(0, 500)}`);
         } else if (rec.index % 10 === 0) {
-          await emitEvent("reproduction-progress", `${rec.index} tool calls used (${Math.round((Date.now() - startTime) / 60000)} min elapsed).`);
+          const progress = reproductionProgress(rec.index, sourceEvidenceRecordCount, extracted.calls, REPRODUCTION_BUDGET.maxToolCalls);
+          await emitEvent("reproduction-progress", `${progress.usedCalls} budgeted calls used; latest evidence #${rec.index} (${Math.round((Date.now() - startTime) / 60000)} min elapsed).`);
         }
       },
       onPrematureStop: (assistantText) => {

@@ -35,6 +35,37 @@ function intercept(responses: unknown[]) {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("OpenRouter HTTP → real SDK → BYOK adapter → extraction", () => {
+  it.each([502, 503, 504])("recovers from HTTP %s without changing the request or duplicating accepted claims", async (status) => {
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input, init) => {
+      bodies.push(init.body);
+      return new Response(JSON.stringify(bodies.length === 1
+        ? { error: { message: "PRIVATE transient gateway failure" } }
+        : envelope("tool_calls", { content: null, tool_calls: [toolCall] })), {
+        status: bodies.length === 1 ? status : 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+    const result = await extractReproductionClaims({
+      paper: quote, instructions: "Extract", config, deadline: Date.now() + 60_000,
+      onAccepted: async () => {},
+    });
+    expect(result.claims).toHaveLength(1);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]);
+  });
+
+  it("stops persistent gateway failures after two retries", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { message: "PRIVATE" } }), {
+      status: 502, headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(runToolLoop(config, "rules", "task", [], async () => "never", {
+      maxToolCalls: 1, deadlineMs: Date.now() + 60_000,
+    })).rejects.toThrow("temporarily unavailable");
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it.each([
     { reasoning: "PRIVATE_CONTINUATION" },
     { reasoning_content: "PRIVATE_CONTINUATION" },

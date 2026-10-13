@@ -111,7 +111,7 @@ describe("tool-loop context protection", () => {
 
   it("sanitizes an unrelated provider exception without exposing its body", async () => {
     const original = Object.assign(new Error("service unavailable"), { status: 503 });
-    createMock.mockRejectedValueOnce(original);
+    createMock.mockRejectedValue(original);
     let thrown: unknown;
     try {
       await runToolLoop(
@@ -126,9 +126,9 @@ describe("tool-loop context protection", () => {
       thrown = error;
     }
     expect(thrown).not.toBe(original);
-    expect((thrown as Error).message).toBe("LLM request failed (503). Retry later or ask an administrator to check the managed integration.");
+    expect((thrown as Error).message).toBe("Model provider temporarily unavailable (503). Retry later; this does not establish a credential problem.");
     expect((thrown as Error).message).not.toContain("service unavailable");
-    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(createMock).toHaveBeenCalledTimes(3);
   });
 
   it("preserves forced-final STOP after archiving long drafts and repair instructions", async () => {
@@ -447,11 +447,11 @@ describe("tool-loop context protection", () => {
     vi.useRealTimers();
   });
 
-  it("retries a thrown 429 twice at most on the same model request", async () => {
+  it.each([429, 502, 503, 504])("retries a thrown %s on the same model request without replaying tools", async (status) => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
     createMock
-      .mockRejectedValueOnce({ status: 429, headers: { "retry-after": "0.01" }, message: "PRIVATE provider body" })
+      .mockRejectedValueOnce({ status, headers: { "retry-after": "0.01" }, message: "PRIVATE provider body" })
       .mockResolvedValueOnce({ choices: [{ message: { content: "done", tool_calls: [] }, finish_reason: "stop" }] });
     const execute = vi.fn(async () => "must not execute");
     const outcomes: any[] = [];
@@ -486,28 +486,28 @@ describe("tool-loop context protection", () => {
     vi.useRealTimers();
   });
 
-  it("does not retry a 429 when Retry-After would cross the deadline", async () => {
+  it.each([429, 502, 503, 504])("does not retry %s when Retry-After would cross the deadline", async (status) => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
     createMock.mockRejectedValueOnce({
-      status: 429, headers: { "retry-after": "0.05" }, message: "PRIVATE provider body",
+      status, headers: { "retry-after": "0.05" }, message: "PRIVATE provider body",
     });
     const outcomes: any[] = [];
     const pending = runToolLoop(config, "system", "paper", [], async () => "must not execute", {
       maxToolCalls: 1, deadlineMs: 1_020, onOutcome: event => outcomes.push(event),
     });
-    await expect(pending).rejects.toThrow("Managed model rate limit reached");
+    await expect(pending).rejects.toThrow(status === 429 ? "Managed model rate limit reached" : "temporarily unavailable");
     expect(createMock).toHaveBeenCalledTimes(1);
-    expect(outcomes.at(-1)).toMatchObject({ stopReason: "rate-limit", providerStatus: 429 });
+    expect(outcomes.at(-1)).toMatchObject({ providerStatus: status });
     vi.useRealTimers();
   });
 
-  it("does not retry non-429 provider errors", async () => {
-    createMock.mockRejectedValueOnce({ status: 503, message: "PRIVATE provider body" });
+  it("does not retry non-transient provider errors", async () => {
+    createMock.mockRejectedValueOnce({ status: 400, message: "PRIVATE provider body" });
     const outcomes: any[] = [];
     await expect(runToolLoop(config, "system", "paper", [], async () => "must not execute", {
       maxToolCalls: 1, deadlineMs: Date.now() + 60_000, onOutcome: event => outcomes.push(event),
-    })).rejects.toThrow(/LLM request failed \(503\)/);
+    })).rejects.toThrow(/LLM request failed \(400\)/);
     expect(createMock).toHaveBeenCalledTimes(1);
     expect(outcomes.at(-1)).not.toMatchObject({ stopReason: "rate-limit" });
   });
@@ -522,12 +522,12 @@ describe("tool-loop context protection", () => {
     expect(createMock).toHaveBeenCalledTimes(1);
   });
 
-  it("retries completion.error 429 in the forced-final request", async () => {
+  it.each([429, 502, 503, 504])("retries completion.error %s in the forced-final request", async (status) => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
     createMock
       .mockResolvedValueOnce({
-        error: { status: 429, headers: { "retry-after": "0.01" }, message: "PRIVATE provider body" },
+        error: { status, headers: { "retry-after": "0.01" }, message: "PRIVATE provider body" },
       })
       .mockResolvedValueOnce({
         choices: [{ message: { content: "final answer", tool_calls: [] }, finish_reason: "stop" }],

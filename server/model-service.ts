@@ -192,6 +192,8 @@ export function sanitizeContextRequestError(
     : Number(status) === 401 || Number(status) === 403 ? byoc
       ? "Your provider rejected the BYOK credentials or access. Check the selected provider, model, and key."
       : "Managed model access was rejected. An administrator must check the Replit integration configuration."
+    : [502, 503, 504].includes(Number(status))
+      ? `Model provider temporarily unavailable (${status}). Retry later; this does not establish a credential problem.`
     : byoc
       ? `BYOK provider request failed (${status ?? "unknown"}). Check your provider account and key, then retry.`
       : `LLM request failed (${status ?? "unknown"}). Retry later or ask an administrator to check the managed integration.`;
@@ -552,13 +554,18 @@ function isRateLimit429(error: unknown): boolean {
   return Number(value.status ?? value.statusCode) === 429;
 }
 
-async function waitForRateLimitRetry(
+async function waitForRetryableProviderError(
   error: unknown,
   retries: number,
   waitedMs: number,
   deadlineMs: number,
 ): Promise<number | null> {
-  if (retries >= MAX_RATE_LIMIT_RETRIES || !isRateLimit429(error)) return null;
+  // Share the existing bounded request retry allowance across rate limits and
+  // transient gateway failures. No tools have been dispatched for this request.
+  const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const gatewayFailure = [502, 503, 504].includes(Number(value.status ?? value.statusCode));
+  if (retries >= MAX_RATE_LIMIT_RETRIES || isProviderPaymentFailure(error)
+    || (!isRateLimit429(error) && !gatewayFailure)) return null;
   const retryAfterMs = providerRetryAfterMs(error);
   const delayMs = retryAfterMs > 0
     ? retryAfterMs
@@ -729,7 +736,7 @@ export async function runToolLoop(
             ...safeProviderErrorDiagnostic(err) });
           continue;
         }
-        const rateLimitWait = await waitForRateLimitRetry(
+        const rateLimitWait = await waitForRetryableProviderError(
           err, rateLimitRetries, rateLimitWaitedMs, options.deadlineMs,
         );
         if (rateLimitWait !== null) {
@@ -783,7 +790,7 @@ export async function runToolLoop(
             ...safeProviderErrorDiagnostic(completionError) });
           continue;
         }
-        const rateLimitWait = await waitForRateLimitRetry(
+        const rateLimitWait = await waitForRetryableProviderError(
           completionError, rateLimitRetries, rateLimitWaitedMs, options.deadlineMs,
         );
         if (rateLimitWait !== null) {
@@ -1078,7 +1085,7 @@ export async function runToolLoop(
           ...safeProviderErrorDiagnostic(err) });
         continue;
       }
-      const rateLimitWait = await waitForRateLimitRetry(
+      const rateLimitWait = await waitForRetryableProviderError(
         err, finalRateLimitRetries, finalRateLimitWaitedMs, options.deadlineMs,
       );
       if (rateLimitWait !== null) {
@@ -1124,7 +1131,7 @@ export async function runToolLoop(
           ...safeProviderErrorDiagnostic(completionError) });
         continue;
       }
-      const rateLimitWait = await waitForRateLimitRetry(
+      const rateLimitWait = await waitForRetryableProviderError(
         completionError, finalRateLimitRetries, finalRateLimitWaitedMs, options.deadlineMs,
       );
       if (rateLimitWait !== null) {
