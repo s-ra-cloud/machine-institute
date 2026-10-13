@@ -211,6 +211,27 @@ beforeEach(() => {
 });
 
 describe("batch reproduction pipeline (website entrypoint, offline)", () => {
+  it("reserves planning submission calls even when one response batches too many inspections", async () => {
+    sandbox(command => command === ANALYZE ? ok(analyzeOutput(1)) : undefined);
+    const { checkpoints, start } = prepare();
+    let planningTurns = 0;
+    const trace = respond({
+      extraction: extraction(sentences(1)),
+      planning: turn => {
+        if (planningTurns++ === 0) return complete(null,
+          Array.from({ length: 12 }, () => tool("read_file", { path: "/work/MATERIALS_INDEX.md" })));
+        expect(turn.toolMessages.some(message => message.includes("Remaining calls are reserved"))).toBe(true);
+        expect(turn.request.tool_choice).toEqual({ type: "function", function: { name: "submit_plan" } });
+        return rerunPlan()!(turn);
+      },
+      assessment: recordAll, judge: judge(checkpoints),
+    });
+    const result = await start();
+    expect(planningTurns).toBe(2);
+    expect(result.counts).toMatchObject({ verified: 1 });
+    expect(stages(trace)).toContain("judge");
+  });
+
   it("plans one rerun, executes it on the host and completes a judged report with a verified claim", async () => {
     const sb = sandbox(command => command === ANALYZE ? ok(analyzeOutput(1)) : undefined);
     const { checkpoints, start, last } = prepare();

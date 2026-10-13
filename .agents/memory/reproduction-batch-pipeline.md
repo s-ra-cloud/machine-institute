@@ -24,3 +24,19 @@ description: Why the reproduction run is a host-executed batch pipeline, not a p
 - Reasoning models spend `max_tokens` on thinking: DeepSeek V4 returned `finish_reason=length` with 8000 reasoning tokens and *no* content/tool call (sweep) and the judge's 6000-token batch budget died the same way, turning 23 graded claims into "judge batch failed → all inconclusive". A length-stop with nothing in it is a budget problem, not a prose problem: retry the same request with a larger output reserve (loop and judge both do this now) before spending any recovery nudge, and never swallow the judge error without its message.
 - Assessment tolerance must match the judge's standard ("reasonable tolerance"): with "within rounding/reported precision" the model recorded 3.632 vs 3.635 as falsified. GPU/stochastic reruns differ in the third decimal; the rule now asks whether the paper's statement (sign, magnitude, significance) still holds.
 - Run Python in the sandbox with `PYTHONUNBUFFERED=1`: a script killed at the timeout otherwise leaves an empty capture, so the timeout cannot be explained from evidence.
+
+**Provider outage recovery**
+
+Retry transient gateway failures on the identical model request with seconds-scale backoff, without replaying executed tools; apply recovery to the independent judge too. Keep deadlines and spending guards active on every attempt. Distinguish unsupported completion statuses from actual HTTP gateway outages even when the adapter assigns both status 502.
+
+**Why:** a live run lost its sandbox and unfinished report after a provider 502 despite having two subsecond retries; subsecond rate-limit recovery is insufficient for an outage.
+
+**How to apply:** preserve bounded retries in both tool-driven and plain generation paths; test sustained failure, eventual recovery, deadline refusal, and malformed responses separately.
+
+**Planning completion reserves**
+
+Recheck the stage's required tool between individual tool dispatches, including calls batched in one model response. Reserve submission and correction capacity before inspection consumes the stage allowance.
+
+**Why:** a live planner used its whole allowance in parallel read calls; a required-tool check only at request construction could not protect the final submission slot.
+
+**How to apply:** refuse surplus inspection without consuming the closing reserve, then request the closing tool with its declared schema. Never execute textual pseudo-tool markup as if it were a provider tool call.

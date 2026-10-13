@@ -110,25 +110,30 @@ describe("tool-loop context protection", () => {
   });
 
   it("sanitizes an unrelated provider exception without exposing its body", async () => {
+    vi.useFakeTimers();
     const original = Object.assign(new Error("service unavailable"), { status: 503 });
     createMock.mockRejectedValue(original);
     let thrown: unknown;
     try {
-      await runToolLoop(
+      const pending = runToolLoop(
         config, "system", "paper", [], async () => "must not execute",
         {
           maxToolCalls: 1,
-          deadlineMs: Date.now() + 60_000,
+          deadlineMs: Date.now() + 120_000,
           contextProtection: { getState: () => "state" },
         },
       );
+      const caught = pending.catch(error => { thrown = error; });
+      await vi.runAllTimersAsync();
+      await caught;
     } catch (error) {
       thrown = error;
     }
     expect(thrown).not.toBe(original);
     expect((thrown as Error).message).toBe("Model provider temporarily unavailable (503). Retry later; this does not establish a credential problem.");
     expect((thrown as Error).message).not.toContain("service unavailable");
-    expect(createMock).toHaveBeenCalledTimes(3);
+    expect(createMock).toHaveBeenCalledTimes(6);
+    vi.useRealTimers();
   });
 
   it("preserves forced-final STOP after archiving long drafts and repair instructions", async () => {

@@ -44,7 +44,7 @@ export function createManagedChatClient(config: ModelProviderConfig, options: { 
         // runToolLoop rejects the ENTIRE incomplete turn before executing calls.
       } else if (!["stop", "tool_calls"].includes(choice.finish_reason)) {
         // Unknown and missing completion status never authorize tool execution or publication.
-        throw Object.assign(new Error("Managed model returned an unsupported completion status."), { status: 502 });
+        throw Object.assign(new Error("Managed model returned an unsupported completion status."), { status: 502, code: "UNSUPPORTED_COMPLETION_STATUS" });
       }
     }
     return result;
@@ -90,7 +90,7 @@ export function createByocChatClient(config: ModelProviderConfig, options: { max
         } else if (["length", "max_tokens", "model_context_window_exceeded"].includes(choice.finish_reason)) {
           choice.finish_reason = "length";
         } else if (!["stop", "tool_calls"].includes(choice.finish_reason)) {
-          throw Object.assign(new Error("BYOK provider returned an unsupported completion status."), { status: 502 });
+          throw Object.assign(new Error("BYOK provider returned an unsupported completion status."), { status: 502, code: "UNSUPPORTED_COMPLETION_STATUS" });
         }
       }
       return result;

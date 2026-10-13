@@ -512,10 +512,10 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       name: "planning", allowance, packet, tools, execute,
       system: `STAGE CONTRACT (planning): inspect only what the plan needs, then call submit_plan with every pending claim assigned. Available tools: ${toolList(tools)}.`,
       isComplete: () => accepted,
-      requiredTool: () => {
+      requiredTool: (proseStops) => {
         if (accepted) return undefined;
-        if (questioning && !session.questioning?.assessment) return phaseCalls >= allowance - 2 ? "assess_suitability" : undefined;
-        return phaseCalls >= allowance - 1 ? "submit_plan" : undefined;
+        if (questioning && !session.questioning?.assessment) return proseStops > 0 || phaseCalls >= allowance - 4 ? "assess_suitability" : undefined;
+        return proseStops > 0 || phaseCalls >= allowance - 3 ? "submit_plan" : undefined;
       },
       prematureStop: "Call submit_plan with the complete experiment plan; prose is not a plan. Every pending claim must be assigned exactly once.",
       prematureStopRecoveries: 2,

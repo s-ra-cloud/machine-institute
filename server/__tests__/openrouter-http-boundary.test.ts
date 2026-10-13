@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createByocChatClient } from "../managed-adapter";
 import { extractReproductionClaims } from "../reproduction-extraction";
 import { completionStructure } from "../completion-structure";
-import { runToolLoop } from "../model-service";
+import { runToolLoop, generateWithConfig } from "../model-service";
 
 // Do not mock OpenAI: exercise its real HTTP JSON parser, then our adapter.
 // Only fetch is replaced, so these tests cannot make billable requests.
@@ -35,6 +35,25 @@ function intercept(responses: unknown[]) {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("OpenRouter HTTP → real SDK → BYOK adapter → extraction", () => {
+  it("recovers judge generation after three gateway failures with the identical request", async () => {
+    vi.useFakeTimers();
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input, init) => {
+      bodies.push(init.body);
+      return new Response(JSON.stringify(bodies.length <= 3
+        ? { error: { message: "temporary outage" } }
+        : envelope("stop", { content: "judged" })), {
+        status: bodies.length <= 3 ? 502 : 200,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+    const pending = generateWithConfig(config, "judge", "evidence", { maxTokens: 6000, timeoutMs: 120_000 });
+    await vi.runAllTimersAsync();
+    expect((await pending).content).toBe("judged");
+    expect(bodies).toHaveLength(4);
+    expect(new Set(bodies).size).toBe(1);
+    vi.useRealTimers();
+  });
   it.each([502, 503, 504])("recovers from HTTP %s without changing the request or duplicating accepted claims", async (status) => {
     const bodies: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_input, init) => {
@@ -55,15 +74,19 @@ describe("OpenRouter HTTP → real SDK → BYOK adapter → extraction", () => {
     expect(bodies[1]).toBe(bodies[0]);
   });
 
-  it("stops persistent gateway failures after two retries", async () => {
+  it("stops persistent gateway failures after five retries", async () => {
+    vi.useFakeTimers();
     const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { message: "PRIVATE" } }), {
       status: 502, headers: { "content-type": "application/json" },
     }));
     vi.stubGlobal("fetch", fetch);
-    await expect(runToolLoop(config, "rules", "task", [], async () => "never", {
-      maxToolCalls: 1, deadlineMs: Date.now() + 60_000,
+    const rejected = expect(runToolLoop(config, "rules", "task", [], async () => "never", {
+      maxToolCalls: 1, deadlineMs: Date.now() + 120_000,
     })).rejects.toThrow("temporarily unavailable");
-    expect(fetch).toHaveBeenCalledTimes(3);
+    await vi.runAllTimersAsync();
+    await rejected;
+    expect(fetch).toHaveBeenCalledTimes(6);
+    vi.useRealTimers();
   });
 
   it.each([

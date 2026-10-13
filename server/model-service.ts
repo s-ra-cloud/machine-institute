@@ -123,6 +123,10 @@ export async function generateWithConfig(
   }
 
   let completion: any;
+  const generationDeadline = Date.now() + timeoutMs;
+  let generationRetries = 0;
+  let generationWaitedMs = 0;
+  while (true) {
   try {
     completion = await client.chat.completions.create(
       {
@@ -134,12 +138,20 @@ export async function generateWithConfig(
         max_tokens: maxTokens,
         temperature,
       },
-      { timeout: timeoutMs, ...(contextRequest ? { maxRetries: 0 } : {}) },
+      { timeout: Math.max(1, generationDeadline - Date.now()), maxRetries: 0 },
     );
+    break;
   } catch (err: any) {
+    const waited = await waitForRetryableProviderError(err, generationRetries, generationWaitedMs, generationDeadline);
+    if (waited !== null) {
+      generationRetries++;
+      generationWaitedMs = waited;
+      continue;
+    }
     const status = err?.status ?? err?.statusCode ?? "unknown";
     const body = err?.error ?? err?.message ?? String(err);
     throw sanitizeContextRequestError({ ...err, status, message: body }, model, config);
+  }
   }
 
   if (completion?.error) {
@@ -570,15 +582,16 @@ async function waitForRetryableProviderError(
   // transient gateway failures. No tools have been dispatched for this request.
   const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
   const gatewayFailure = [502, 503, 504].includes(Number(value.status ?? value.statusCode));
-  if (retries >= MAX_RATE_LIMIT_RETRIES || isProviderPaymentFailure(error)
+  if (value.code === "UNSUPPORTED_COMPLETION_STATUS") return null;
+  if (retries >= (gatewayFailure ? 5 : MAX_RATE_LIMIT_RETRIES) || isProviderPaymentFailure(error)
     || (!isRateLimit429(error) && !gatewayFailure)) return null;
   const retryAfterMs = providerRetryAfterMs(error);
   const delayMs = retryAfterMs > 0
     ? retryAfterMs
-    : Math.min(500, 100 * (2 ** retries));
+    : gatewayFailure ? Math.min(30_000, 2_000 * (2 ** retries)) : Math.min(500, 100 * (2 ** retries));
   if (
-    delayMs > MAX_RATE_LIMIT_RETRY_DELAY_MS
-    || waitedMs + delayMs > MAX_RATE_LIMIT_TOTAL_WAIT_MS
+    delayMs > (gatewayFailure ? 30_000 : MAX_RATE_LIMIT_RETRY_DELAY_MS)
+    || waitedMs + delayMs > (gatewayFailure ? 60_000 : MAX_RATE_LIMIT_TOTAL_WAIT_MS)
     || Date.now() + delayMs >= deadlineMs
   ) return null;
   if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -977,6 +990,9 @@ export async function runToolLoop(
       let result: string;
       let error = false;
       let dispatched = false;
+      // Parallel inspection calls can cross a stage's reserved closing budget.
+      // Recheck between dispatches, not only when constructing the request.
+      const nowRequiredTool = options.getRequiredTool?.();
       if (forceFinal) {
         result = stoppedBy === "deadline"
           ? "Deadline exhausted — this call was not executed. Write your final logbook."
@@ -993,6 +1009,9 @@ export async function runToolLoop(
         forceFinal = true;
         stoppedBy = "deadline";
         result = "Deadline exhausted — this call was not executed. Write your final logbook.";
+        error = true;
+      } else if (nowRequiredTool && call.function.name !== nowRequiredTool) {
+        result = `Not executed: this stage now requires ${nowRequiredTool}. Remaining calls are reserved for completing that tool, not further inspection.`;
         error = true;
       } else if (argumentParse !== "valid") {
         dispatched = true; // Invalid attempts consume the existing budget, but never execute.
