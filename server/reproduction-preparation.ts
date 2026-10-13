@@ -3,6 +3,30 @@ import type { ToolCallRecord } from "./model-service";
 
 type Call = Pick<ToolCallRecord, "index" | "name" | "args" | "result" | "error">;
 
+export interface PreparationRefusal {
+  /** Function that reads and then rewrites the dependency. */
+  functionName: string;
+  /** Absolute sandbox path the function rewrites. */
+  dependency: string;
+  /** Script that must be inspected at the function definition. */
+  path: string;
+}
+
+/** Recognizes the refusal text emitted by preparationIssue so an orchestrator can satisfy the inspections it demands. */
+export function parsePreparationRefusal(result: string): PreparationRefusal | undefined {
+  const match = /^Refused before execution: preparation check found (\w+) reads then rewrites (\S+)\. Read (\S+) with query="def \1" and inspect \2 before running\./.exec(result);
+  return match ? { functionName: match[1], dependency: match[2], path: match[3] } : undefined;
+}
+
+export const repairedSourceRefusal = (path: string) =>
+  `Refused before execution: inspect the repaired source ${path} after its last write before rerunning. No dependency or scientific result is inferred.`;
+
+/** Recognizes the refusal that follows a rewrite of a guarded script; the repaired source must be read before it runs. */
+export function parseRepairedSourceRefusal(result: string): { path: string } | undefined {
+  const match = /^Refused before execution: inspect the repaired source (\S+) after its last write before rerunning\./.exec(result);
+  return match ? { path: match[1] } : undefined;
+}
+
 /**
  * Narrow Python pattern check, not a dependency solver or scientific classifier.
  * Recognizes ROOT_DIR = Path(__file__).resolve().parent.parent and literal

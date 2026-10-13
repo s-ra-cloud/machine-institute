@@ -1,6 +1,6 @@
 import { getContextWindow, runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolCallRecord } from "./model-service";
 import { prepareProviderContext } from "./provider-context";
-import { isSupportedRawInputPath } from "./reproduction-stage-evidence";
+import { containsExcerpt, excerptMismatchHint, isSupportedRawInputPath } from "./reproduction-stage-evidence";
 import { loadPaperContext } from "./ethics-review";
 import { ReproductionRecovery } from "./reproduction-recovery";
 import { extractReproductionClaims, describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
@@ -9,7 +9,7 @@ import { reproductionProgress } from "./reproduction-navigation";
 import { createHash } from "node:crypto";
 import { assertReproductionRuntimeProviderCredits } from "./provider-credit-preflight";
 import { fetchContributionMaterials, materialSandboxPath, formatMaterialsInventory } from "./fs-materials";
-import { preparationIssue } from "./reproduction-preparation";
+import { preparationIssue, repairedSourceRefusal } from "./reproduction-preparation";
 import { isPlannedEntrypoint } from "./reproduction-entrypoint";
 import { ReproductionSandbox, isModalConfigured, type GpuType } from "./modal-sandbox";
 import {
@@ -174,7 +174,7 @@ export function getReproductionClaimIssues(input: {
     const evidenceExcerpt = result.evidenceExcerpt?.trim() || "";
     const genericExcerpt = /^(?:exit code \d+|timed out|success|failed|error)$/i.test(evidenceExcerpt);
     const excerptCalls = evidenceExcerpt.length >= 4 && !genericExcerpt
-      ? referencedCalls.filter(call => (call.result || "").includes(evidenceExcerpt))
+      ? referencedCalls.filter(call => containsExcerpt(call.result || "", evidenceExcerpt))
       : [];
     if (result.method === "rerun" || result.method === "raw-data-rederived" || result.method === "toy") {
       const successfulCommand = excerptCalls.some(call =>
@@ -227,17 +227,22 @@ export function getReproductionClaimIssues(input: {
         issues.push(`${result.id} uses blocked method with non-inconclusive status ${result.status}`);
       }
       const blockerOutput = excerptCalls.map(call => call.result || "").join("\n");
-      const blockerMatches = result.blockerKind === "oom"
-        ? /\b(?:out of memory|oom)\b/i.test(blockerOutput) && /\b(?:out of memory|oom|memory)\b/i.test(explanation)
-        : result.blockerKind === "missing-material"
-          ? /\b(?:empty directory or not found|no such file|not found|missing)\b/i.test(blockerOutput)
-            && /\b(?:not shipped|no such file|not found|missing|unavailable)\b/i.test(explanation)
-          : result.blockerKind === "timeout"
-            ? /\b(?:timed out|timeout)\b/i.test(blockerOutput) && /\b(?:timed out|timeout)\b/i.test(explanation)
-            : result.blockerKind === "command-error"
-              ? /^(?:exit code (?!0\b)|Tool error:)/m.test(blockerOutput)
-                && /\b(?:error|failed|failure|syntax|dependency|exception)\b/i.test(explanation)
-              : false;
+      // Output-side signal per blocker kind, and the words the explanation must use for that kind.
+      const outputSupports: Record<string, boolean> = {
+        oom: /\b(?:out of memory|oom)\b/i.test(blockerOutput),
+        "missing-material": /\b(?:empty directory or not found|no such file|not found|missing)\b/i.test(blockerOutput),
+        timeout: /\b(?:timed out|timeout)\b/i.test(blockerOutput),
+        "command-error": /^(?:exit code (?!0\b)|Tool error:)/m.test(blockerOutput),
+      };
+      const explanationWords: Record<string, { pattern: RegExp; words: string }> = {
+        oom: { pattern: /\b(?:out of memory|oom|memory)\b/i, words: "out of memory / memory" },
+        "missing-material": { pattern: /\b(?:not shipped|no such file|not found|missing|unavailable)\b/i, words: "not shipped / not found / missing / unavailable" },
+        timeout: { pattern: /\b(?:timed out|timeout)\b/i, words: "timed out / timeout" },
+        "command-error": { pattern: /\b(?:error|failed|failure|syntax|dependency|exception)\b/i, words: "error / failed / exception / dependency" },
+      };
+      const kind = result.blockerKind ?? "";
+      const explanationMatches = explanationWords[kind]?.pattern.test(explanation) ?? false;
+      const blockerMatches = Boolean(outputSupports[kind]) && explanationMatches;
       const citedBlocker = excerptCalls.some(call => {
         const output = call.result || "";
         if (call.name === "run_command") {
@@ -247,7 +252,17 @@ export function getReproductionClaimIssues(input: {
         return /\b(?:empty directory or not found|no such file|not found|missing)\b/i.test(output);
       });
       if ((!citedBlocker || !blockerMatches) && !systemBudgetBlocker) {
-        issues.push(`${result.id} blocker category and evidence excerpt do not match cited tool output`);
+        // Say exactly which check failed: a bare "do not match" refusal was retried verbatim several times.
+        const citedIds = referencedCalls.map(call => `#${call.index}`).join(", ");
+        const supported = Object.keys(outputSupports).filter(k => outputSupports[k]);
+        const detail = excerptCalls.length === 0
+          ? `evidence_excerpt is not an exact quote from the cited tool output (${citedIds}). ${excerptMismatchHint(referencedCalls[referencedCalls.length - 1].result || "", evidenceExcerpt)}`
+          : !citedBlocker
+            ? `the cited output (${citedIds}) shows no failure: no non-zero exit code, TIMED OUT, Tool error, or not-found/missing message, so it cannot support a blocked result; cite the failing execution, or for an absent material a read_file/list_files call whose output reports it as not found`
+            : !outputSupports[kind]
+              ? `blocker_kind ${kind || "(missing)"} is not what the cited output (${citedIds}) shows; that output supports ${supported.length ? supported.join(" or ") : "no listed blocker kind"}`
+              : `blocker_kind ${kind} requires the evidence or notes text to say ${explanationWords[kind]?.words ?? "the blocker"}`;
+        issues.push(`${result.id} blocker category and evidence excerpt do not match cited tool output: ${detail}`);
       }
     }
   }
@@ -436,6 +451,12 @@ const TOOLS: ToolSpec[] = [
 ];
 export const REPRODUCTION_TOOLS = TOOLS;
 
+/** Modal raises SandboxFilesystemNotFoundError for a missing path; other filesystems say ENOENT / No such file. */
+function isMissingPathError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /NotFound/.test(error.name) || /\b(?:not found|no such file|ENOENT)\b/i.test(error.message);
+}
+
 function fmtExec(r: { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number }): string {
   const status = r.timedOut ? "TIMED OUT" : `exit code ${r.exitCode ?? "unknown"}`;
   return `${status} (${(r.durationMs / 1000).toFixed(1)}s)\n--- stdout ---\n${r.stdout || "(empty)"}\n--- stderr ---\n${r.stderr || "(empty)"}`;
@@ -445,8 +466,19 @@ export async function runReproduction(opts: RunReproductionOptions): Promise<Rep
   const diagnostics = new ReproductionDiagnostics();
   diagnostics.identity(opts.modelConfig.modelName, opts.modelConfig.provider, opts.modelConfig.providerMode,
     createHash("sha256").update(runBatchReproduction.toString()).update(extractReproductionClaims.toString()).digest("hex"));
+  // Each pipeline checkpoint carries the diagnostics observed so far, so a run that is still in
+  // progress (or that later loses early events to the bounded buffer) remains inspectable.
+  const withLiveDiagnostics: RunReproductionOptions = opts.onCheckpoint && opts.onDiagnostics
+    ? {
+      ...opts,
+      onCheckpoint: async checkpoint => {
+        try { opts.onDiagnostics?.(diagnostics.snapshot()); } catch { /* best effort */ }
+        await opts.onCheckpoint!(checkpoint);
+      },
+    }
+    : opts;
   try {
-    const result = await runReproductionWithDiagnostics(opts, diagnostics);
+    const result = await runReproductionWithDiagnostics(withLiveDiagnostics, diagnostics);
     try { opts.onDiagnostics?.(diagnostics.snapshot()); } catch { /* best effort */ }
     return result;
   } catch (error) {
@@ -697,7 +729,14 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
           const offset = args.offset === undefined ? 0 : Number(args.offset);
           if (!Number.isSafeInteger(offset) || offset < 0) return "Refused: offset must be a non-negative integer.";
           if (!Number.isSafeInteger(max) || max < 1) return "Refused: max_chars must be a positive integer.";
-          const text = questioning ? questioning.readKnownSource(path) : await sandbox.readText(path);
+          let text: string | undefined;
+          try {
+            text = questioning ? questioning.readKnownSource(path) : await sandbox.readText(path);
+          } catch (error) {
+            // A missing path is evidence of absence, recorded in the words the blocked-result validator recognizes.
+            if (isMissingPathError(error)) return `File not found: ${path} (no such file in the sandbox).`;
+            throw error;
+          }
           if (text === undefined) return "Refused: qP inspection can read only uploaded originals, working source and recorded immutable snapshots. Host paths, symlinks, proc/environment and mutable execution results are not exposed. Retrieve captured execution output with read_tool_result.";
           return readTargetedSourcePage(path, text, args);
         }
@@ -739,7 +778,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
               if (written && preparationIssue(path, originalSource, [])
                 && !session.toolCalls.some(c => c.index > written.index && c.name === "read_file"
                   && !c.error && c.args.path === path && c.result.startsWith(`Verified file: ${path}\n`)))
-                return `Refused before execution: inspect the repaired source ${path} after its last write before rerunning. No dependency or scientific result is inferred.`;
+                return repairedSourceRefusal(path);
               const issue = preparationIssue(path, source, session.toolCalls);
               if (issue) return issue;
             }
@@ -883,6 +922,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
       shippedPaths: new Set(shippedPaths), extractionCalls: extracted.calls,
       extraction: extractionCoverage,
       checkpoint: opts.onCheckpoint,
+      log: message => emitEvent("reproduction-stage", message),
       options: {
       onOutcome: event => { try { diagnostics.observe(event); } catch { /* best effort */ } },
       getArgumentRepair: () => [

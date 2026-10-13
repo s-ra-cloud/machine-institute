@@ -24,6 +24,19 @@ describe("Complete request budgets", () => {
     expect(estimateRequestTokens(expanded)).toBeGreaterThan(estimateRequestTokens(base) + 25000);
   });
 
+  it("moves input room to the output reserve only while the current request still fits", () => {
+    const budget = new RequestContextBudget(config, 6000, "judge", 64000);
+    const small = { messages: [{ role: "user", content: "x".repeat(4000) }] };
+    expect(budget.raiseOutputReserve(12000, small)).toBe(true);
+    expect(budget.maxOutputTokens).toBe(12000);
+    expect(budget.inputLimit).toBe(32768 - 12000 - 1024);
+    // Not enough room left for a request this large: the reserve is left unchanged.
+    const large = { messages: [{ role: "user", content: "x".repeat(60000) }] };
+    expect(budget.raiseOutputReserve(24000, large)).toBe(false);
+    expect(budget.maxOutputTokens).toBe(12000);
+    expect(budget.raiseOutputReserve(12000, small)).toBe(false);
+  });
+
   it("uses conservative unknown-model limits rather than BYOC provider defaults", () => {
     const unknown = { ...config, providerMode: "byoc" as const, provider: "openai", modelName: "unknown-new-model" };
     expect(new RequestContextBudget(unknown, 6000, "judge", 128000).limit).toBe(32768);

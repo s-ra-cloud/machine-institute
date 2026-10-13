@@ -5,6 +5,7 @@ import type { RecordedResult } from "./prompts/reproduce";
 import { describeExtractionCoverage, type ExtractionCoverage } from "./reproduction-extraction";
 import { isPlannedEntrypoint, rerunLaunchRefusal } from "./reproduction-entrypoint";
 import { executionRecoveryExcerpt, isSupportedRawInputPath, rerunEvidenceIssue } from "./reproduction-stage-evidence";
+import { parsePreparationRefusal, parseRepairedSourceRefusal } from "./reproduction-preparation";
 import {
   diagnoseExecutionFailure, normalizeShippedPath, PIP_PACKAGE_ALIASES, PLAN_LIMITS, validateExperimentPlan,
   type ExperimentMethod, type PlannedClaim, type PlannedExperiment,
@@ -47,6 +48,8 @@ export interface BatchExperiment extends PlannedExperiment {
   executionIds: number[];
   evidenceId?: number;
   failure?: string;
+  /** Set when the model called declare_blocked in the repair stage (blocker kind + explanation). */
+  declaredBlocker?: string;
   repairs: string[];
   assessment?: string;
 }
@@ -60,7 +63,8 @@ export interface BatchControllerSnapshot {
   milestones: Array<{ phase: BatchPhase; calls: number }>;
   experiments: Array<{
     id: string; method: ExperimentMethod; status: ExperimentStatus; origin: "plan" | "deferred";
-    claimIds: string[]; command?: string; executionIds: number[]; evidenceId?: number; failure?: string; repairs: string[];
+    claimIds: string[]; command?: string; executionIds: number[]; evidenceId?: number; failure?: string; declaredBlocker?: string;
+    repairs: string[]; assessment?: string;
   }>;
 }
 
@@ -85,6 +89,8 @@ export interface BatchReproductionInput {
   extractionCalls: number;
   extraction?: ExtractionCoverage;
   checkpoint?: (value: PipelineCheckpoint) => Promise<void>;
+  /** Progress line for the run log when a stage ends before its goal (no secrets, no model prose). */
+  log?: (message: string) => Promise<void> | void;
   inventoryPath?: string;
   readmePaths?: string[];
 }
@@ -196,6 +202,8 @@ const DECLARE_BLOCKED_TOOL: ToolSpec = {
 
 const escapeText = (s: string) => s.replace(/[<>]/g, c => c === "<" ? "&lt;" : "&gt;");
 const succeeded = (record: Pick<ToolCallRecord, "error" | "result">) => !record.error && /^exit code 0\b/.test(record.result);
+/** The command never ran: a pre-execution refusal (preparation guard, launch rules) is not execution evidence. */
+const refused = (record: Pick<ToolCallRecord, "result">) => record.result.startsWith("Refused");
 const statusLine = (record: Pick<ToolCallRecord, "result">) => record.result.split("\n", 1)[0].slice(0, 120);
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -296,7 +304,8 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
     version: 2, phase, calls: modelCalls, phaseCalls, hostCommands, milestones: [...milestones],
     experiments: experiments.map(x => ({
       id: x.id, method: x.method, status: x.status, origin: x.origin, claimIds: x.claims.map(c => c.claimId),
-      command: x.command, executionIds: [...x.executionIds], evidenceId: x.evidenceId, failure: x.failure, repairs: [...x.repairs],
+      command: x.command, executionIds: [...x.executionIds], evidenceId: x.evidenceId, failure: x.failure, declaredBlocker: x.declaredBlocker,
+      repairs: [...x.repairs], assessment: x.assessment,
     })),
   });
   const limitationNotes = (): string[] => {
@@ -371,8 +380,11 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
     tools: ToolSpec[];
     execute: (name: string, args: Record<string, unknown>) => Promise<string>;
     isComplete: () => boolean;
-    requiredTool?: () => string | undefined;
+    /** proseStops counts answers without a tool call so far; a stage may force its closing tool after one. */
+    requiredTool?: (proseStops: number) => string | undefined;
     prematureStop: string;
+    /** Prose answers tolerated before the stage ends (default 1); stages without a single closing tool allow more. */
+    prematureStopRecoveries?: number;
     onRecord?: (record: ToolCallRecord) => void;
     state: () => string;
   }
@@ -380,6 +392,7 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
     setPhase(stage.name);
     const startCalls = modelCalls;
     const startRounds = rounds;
+    let proseStops = 0;
     const outcome = await runToolLoop(input.config, stageSystem(stage.system), stage.packet, stage.tools, stage.execute, {
       ...options,
       maxToolCalls: stage.allowance,
@@ -387,15 +400,15 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       numberToolResults: true,
       stopWithoutFinalResponse: true,
       allowResourceStopFallback: true,
-      maxPrematureStopRecoveries: 1,
+      maxPrematureStopRecoveries: stage.prematureStopRecoveries ?? 1,
       isStageComplete: stage.isComplete,
-      getRequiredTool: stage.requiredTool,
+      getRequiredTool: stage.requiredTool ? () => stage.requiredTool!(proseStops) : undefined,
       getAvailableTools: undefined,
       getStallReason: undefined,
       transformToolResult: undefined,
       getRecoveryProgress: undefined,
       onRequestPrepared: undefined,
-      onPrematureStop: () => stage.prematureStop,
+      onPrematureStop: () => { proseStops++; return stage.prematureStop; },
       getArgumentRepair: (tool, errors) => `Schema errors for ${tool}: ${errors.join("; ")}. Resubmit ${tool} with exactly the declared fields. Stage state: ${stage.state().slice(0, 1500)}`,
       onOutcome: event => options.onOutcome?.({
         ...event, phase: stage.name, phaseCallCount: event.callCount,
@@ -428,6 +441,11 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
     // Calls refused for budget are not dispatched; count exactly what the session observed.
     modelCalls = startCalls + outcome.toolCalls.length;
     if (outcome.stoppedBy === "deadline") deadlineHit = true;
+    if (!stage.isComplete()) {
+      try {
+        await input.log?.(`Stage ${stage.name} ended without reaching its goal (${outcome.stoppedBy}${outcome.finishReason ? `, finish_reason=${outcome.finishReason}` : ""}; ${outcome.toolCalls.length}/${stage.allowance} tool calls, ${proseStops} answer(s) without a tool call). State: ${stage.state().slice(0, 300)}`);
+      } catch { /* Progress reporting never affects the run. */ }
+    }
     return outcome;
   };
 
@@ -500,14 +518,43 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
         return phaseCalls >= allowance - 1 ? "submit_plan" : undefined;
       },
       prematureStop: "Call submit_plan with the complete experiment plan; prose is not a plan. Every pending claim must be assigned exactly once.",
+      prematureStopRecoveries: 2,
       state: () => JSON.stringify({ stage: "planning", pending: pending.map(c => c.id), accepted, lastRefusal: lastRefusal.slice(0, 600) }),
     });
     if (!accepted) throw new Error(`Planning failed: no valid experiment plan was accepted within ${allowance} model calls${lastRefusal ? ` (last refusal: ${lastRefusal.slice(0, 800)})` : ""}.`);
   };
 
   // --------------------------------------------------------------- execution
+  /**
+   * The preparation guard refuses a script that reads-then-rewrites a file until
+   * the script (at that function) and the file have been inspected. The host
+   * performs those inspections itself; only the judgement — initialize
+   * bookkeeping or declare a missing scientific input — is left to the model.
+   */
+  const satisfyPreparation = async (x: BatchExperiment, failed: ToolCallRecord): Promise<ToolCallRecord | undefined> => {
+    const preparation = parsePreparationRefusal(failed.result);
+    if (preparation) {
+      const key = `preparation ${preparation.functionName}→${preparation.dependency}`;
+      if (x.repairs.filter(note => note.startsWith(key)).length >= 2) return undefined;
+      const fnRead = await hostCall("read_file", { path: preparation.path, query: `def ${preparation.functionName}`, max_chars: 12_000 });
+      const depRead = await hostCall("read_file", { path: preparation.dependency, max_chars: 4_000 });
+      const present = depRead.result.startsWith(`Verified file: ${preparation.dependency}\n`);
+      x.repairs.push(`${key}: inspected ${preparation.path} (#${fnRead.index}) and ${preparation.dependency} (#${depRead.index}${present ? "" : ", absent"})`);
+      return present ? runExperimentCommand(x) : undefined;
+    }
+    const repaired = parseRepairedSourceRefusal(failed.result);
+    if (repaired && !x.repairs.some(note => note === `inspected repaired source ${repaired.path}`)) {
+      const read = await hostCall("read_file", { path: repaired.path, max_chars: 12_000 });
+      x.repairs.push(`inspected repaired source ${repaired.path}`);
+      return read.error ? undefined : runExperimentCommand(x);
+    }
+    return undefined;
+  };
+
   const deterministicRepair = async (x: BatchExperiment, failed: ToolCallRecord): Promise<ToolCallRecord | undefined> => {
-    if (questioning || !x.command) return undefined; // qP setup is frozen and sealed; no host-side environment changes.
+    if (!x.command) return undefined;
+    if (refused(failed)) return questioning ? undefined : satisfyPreparation(x, failed);
+    if (questioning) return undefined; // qP setup is frozen and sealed; no host-side environment changes.
     const diagnosis = diagnoseExecutionFailure(failed.result, shippedPaths);
     if (diagnosis.kind === "missing-module") {
       if (diagnosis.local) {
@@ -550,16 +597,32 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       .filter(other => other.claims.some(c => session.recorded.get(c.claimId)?.status === "pending")).length * BATCH_LIMITS.assessmentReservePerExperiment;
   };
 
-  const repairExperiment = async (x: BatchExperiment, failed: ToolCallRecord): Promise<void> => {
+  /** Outcome of the model repair stage: "fixed" (rerun exited 0), "declared" (declare_blocked), or "open" (allowance ended). */
+  const repairExperiment = async (x: BatchExperiment, failed: ToolCallRecord): Promise<"fixed" | "declared" | "open"> => {
     const allowance = Math.min(BATCH_LIMITS.repairCallsPerExperiment, BATCH_LIMITS.repairCallsTotal - repairCallsUsed, remainingCalls() - reserveAfter(x) - BATCH_LIMITS.assessmentReservePerExperiment);
-    if (allowance < 2) { x.repairs.push("model repair skipped: insufficient call allowance"); return; }
+    if (allowance < 2) { x.repairs.push("model repair skipped: insufficient call allowance"); return "open"; }
     let fixed = false;
     let declared: string | undefined;
     const tools = [...pickTools(["read_file", "list_files", "read_tool_result", "write_file", "run_command", ...(questioning ? ["setup_environment"] : [])]), DECLARE_BLOCKED_TOOL];
+    const preparation = parsePreparationRefusal(failed.result);
+    const inspections = session.toolCalls.filter(c => hostRunIds.has(c.index) && c.name === "read_file"
+      && (c.args.path === preparation?.path || c.args.path === preparation?.dependency));
     const packet = [
-      `CURRENT STAGE: repair of experiment ${x.id} (${x.method}). The planned command failed. Fix ONLY environment or path problems, then rerun the SAME entrypoint with run_command; the stage ends automatically when a rerun exits 0. You have ${allowance} tool calls.`,
+      preparation
+        ? `CURRENT STAGE: repair of experiment ${x.id} (${x.method}). The planned command has NOT run yet: the preparation check refuses it until ${preparation.dependency}, which ${preparation.functionName} in ${preparation.path} reads and rewrites, is accounted for. You have ${allowance} tool calls.`
+        : `CURRENT STAGE: repair of experiment ${x.id} (${x.method}). The planned command failed. Fix ONLY environment or path problems, then rerun the SAME entrypoint with run_command; the stage ends automatically when a rerun exits 0. You have ${allowance} tool calls.`,
       `Planned command: ${x.command}${x.workingDirectory ? ` (working_directory ${x.workingDirectory})` : ""}\nClaims waiting on it: ${x.claims.map(c => c.claimId).join(", ")}\nRationale: ${x.rationale.slice(0, 600)}`,
-      `Failing execution #${failed.index}: ${statusLine(failed)}\n--- last 3000 characters ---\n${failed.result.slice(-3000)}`,
+      preparation
+        ? [
+          `Refusal #${failed.index}: ${failed.result.slice(0, 900)}`,
+          inspections.length ? `The application already inspected: ${inspections.map(c => `${c.args.path} (#${c.index}${c.result.startsWith("Verified file:") ? "" : ": not readable — absent"})`).join(", ")}. Page them with read_tool_result; do not repeat the reads.` : "",
+          `Decide from the inspected function source what ${preparation.dependency} is:`,
+          `- Bookkeeping the script maintains itself (history, cache, log): create it with write_file using exactly the schema the code expects (for example {} or []), then read_file it, then rerun the planned command with run_command.`,
+          `- A shipped input stored elsewhere: list_files/read_file the shipped copy under /work/materials and write_file it to ${preparation.dependency} unchanged, then read_file it and rerun.`,
+          `- A scientific input that is not shipped and cannot be reconstructed: call declare_blocked with blocker_kind missing-material and name the input.`,
+          "Never invent measurements, results or data rows to satisfy the schema.",
+        ].filter(Boolean).join("\n")
+        : `Failing execution #${failed.index}: ${statusLine(failed)}\n--- last 3000 characters ---\n${failed.result.slice(-3000)}`,
       x.repairs.length ? `Repairs already tried by the application: ${x.repairs.join("; ")}` : "",
       questioning
         ? "qP: allowed actions are setup_environment for approved packages and write_file of planned working copies under /work/working/materials with a scientific reason (the write gate applies); then rerun python materials/FILE.py. Do not change analysis logic beyond the assessed adaptation."
@@ -590,6 +653,7 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       system: `STAGE CONTRACT (repair): environment/path repair only, then rerun the planned entrypoint. Available tools: ${toolList(tools)}.`,
       isComplete: () => fixed || Boolean(declared),
       prematureStop: "Either rerun the planned command with run_command after a repair, or call declare_blocked. Prose does not end the stage.",
+      prematureStopRecoveries: 2,
       onRecord: record => {
         if (record.name !== "run_command") return;
         const command = String(record.args.command ?? "");
@@ -608,12 +672,13 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       state: () => JSON.stringify({ stage: "repair", experiment: x.id, command: x.command, failing: failed.index, repairs: x.repairs.slice(-4), fixed, declared }),
     });
     repairCallsUsed += phaseCalls;
-    if (!fixed) x.failure = declared ?? x.failure;
+    if (fixed) return "fixed";
+    if (declared) { x.failure = declared; x.declaredBlocker = declared; return "declared"; }
+    return "open";
   };
 
-  const executeExperiment = async (x: BatchExperiment): Promise<void> => {
-    setPhase("execution");
-    let record = await runExperimentCommand(x);
+  const repairDeterministically = async (x: BatchExperiment, first: ToolCallRecord | undefined): Promise<ToolCallRecord | undefined> => {
+    let record = first;
     let attempts = 0;
     while (record && !succeeded(record) && attempts < BATCH_LIMITS.deterministicRepairs) {
       const next = await deterministicRepair(x, record);
@@ -621,9 +686,28 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       record = next;
       attempts++;
     }
+    return record;
+  };
+
+  const lastExecution = (x: BatchExperiment) => x.executionIds.length ? session.toolCalls.find(c => c.index === x.executionIds[x.executionIds.length - 1]) : undefined;
+
+  const executeExperiment = async (x: BatchExperiment): Promise<void> => {
+    setPhase("execution");
+    let record = await repairDeterministically(x, await runExperimentCommand(x));
     if (record && succeeded(record)) { x.status = "executed"; x.evidenceId = record.index; return; }
     x.failure = record ? failureSummary(record) : deadlineHit ? "deadline reached before execution" : "host command allowance reached before execution";
-    if (record) await repairExperiment(x, record);
+    if (record) {
+      const outcome = await repairExperiment(x, record);
+      // The model may have satisfied a preparation requirement (e.g. initialized bookkeeping) without a
+      // successful rerun; the host completes the mechanical inspections and the run itself.
+      const latest = outcome === "open" ? lastExecution(x) : undefined;
+      if (latest && refused(latest)) {
+        setPhase("execution");
+        record = await repairDeterministically(x, latest);
+        if (record && succeeded(record)) { x.status = "executed"; x.evidenceId = record.index; return; }
+        if (record && record !== latest) x.failure = failureSummary(record);
+      }
+    }
     if (x.status !== "executed") x.status = "failed";
   };
 
@@ -681,6 +765,7 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       isComplete: () => done,
       requiredTool: () => !done && phaseCalls >= allowance - 1 ? "submit_for_assessment" : undefined,
       prematureStop: "Run the computation with run_command and then call submit_for_assessment; prose does not end the stage.",
+      prematureStopRecoveries: 2,
       onRecord: record => { if (record.name === "run_command" && !record.result.startsWith("Refused")) x.executionIds.push(record.index); },
       state: () => JSON.stringify({ stage: "derivation", experiment: x.id, claims: x.claims.map(c => c.claimId), executions: x.executionIds.slice(-4), done }),
     });
@@ -788,8 +873,10 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       name: spec.name, allowance: spec.allowance, packet: spec.packet, tools, execute,
       system: `STAGE CONTRACT (${spec.name}): compare the captured output with each listed claim and record every claim with record_results. Available tools: ${toolList(tools)}.`,
       isComplete: () => outstanding().length === 0,
-      requiredTool: () => outstanding().length && phaseCalls >= spec.allowance - 1 ? "record_results" : undefined,
-      prematureStop: `Call record_results for the pending claims (${outstanding().join(", ")}); prose is not a recorded result.`,
+      // A prose answer means the analysis exists but was not recorded: from then on only record_results is offered,
+      // so the verdicts land in the session instead of ending the stage with every claim still pending.
+      requiredTool: proseStops => outstanding().length && (proseStops > 0 || phaseCalls >= spec.allowance - 1) ? "record_results" : undefined,
+      prematureStop: `Call record_results for the pending claims (${outstanding().join(", ")}); prose is not a recorded result and is not saved. Put each verdict, its evidence_tool_call_ids and an exact evidence_excerpt into the record_results arguments now (one call may carry all claims).`,
       state: () => JSON.stringify({ stage: spec.name, experiment: spec.experiment?.id, pending: outstanding(), evidence: spec.experiment?.evidenceId, failing: spec.experiment?.executionIds.slice(-1) }),
     });
   };
@@ -807,10 +894,21 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       return;
     }
     const evidence = x.evidenceId !== undefined ? session.toolCalls.find(c => c.index === x.evidenceId) : undefined;
-    const failed = !evidence && x.executionIds.length ? session.toolCalls.find(c => c.index === x.executionIds[x.executionIds.length - 1]) : undefined;
+    const latest = evidence ? undefined : lastExecution(x);
+    // A pre-execution refusal is not an execution: it cannot be cited as a command failure.
+    const failed = latest && !refused(latest) ? latest : undefined;
+    if (!evidence && !failed && x.command && !x.declaredBlocker) {
+      // The planned command never ran and the model did not declare a scientific blocker: no model call can
+      // produce evidence for these claims, so the application finalizes them instead of spending the allowance.
+      for (const c of claims) finalizeAtAllowance(session.recorded.get(c.claimId)!, `repair allowance for ${x.id} ended with its planned command never executed: ${(x.failure ?? "no execution").slice(0, 200)}`);
+      x.status = "assessed";
+      x.assessment = "planned command never executed; claims finalized by the application";
+      return;
+    }
     const inventoryRead = session.toolCalls.find(c => c.name === "read_file" && c.args.path === inventoryPath && !c.error);
     const readmeRead = session.toolCalls.find(c => c.name === "read_file" && readmePaths.includes(String(c.args.path)) && !c.error);
     const suggestedBlocker = failed ? (/^TIMED OUT/.test(failed.result) ? "timeout" : /\b(?:out of memory|oom)\b/i.test(failed.result) ? "oom" : "command-error") : undefined;
+    const provenanceIds = inventoryRead || readmeRead ? ` (${[inventoryRead, readmeRead].filter(Boolean).map(c => `#${c!.index}`).join(", ")})` : "";
     const packet = [
       `CURRENT STAGE: assessment of experiment ${x.id} (${x.method}${x.origin === "deferred" ? ", deferred" : ""}). Record every claim listed below with record_results (one call can carry all of them). You have ${allowance} tool calls; the last one must be record_results. Page beyond the inline output with read_tool_result(tool_call_id, offset).`,
       [
@@ -827,12 +925,12 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       [
         "## Recording rules",
         evidence
-          ? `- Measured by this output: method ${x.method}; evidence_tool_call_ids [${evidence.index}]; evidence_excerpt an exact contiguous quote from that output containing the reproduced value (reproduced_value must occur inside it, or set copy_excerpt_to_reproduced_value=true for a table). verified = matches the original within rounding/reported precision; falsified = materially different (state both values in evidence); inconclusive = the output does not settle it (explain).${x.method === "toy" ? " toy method requires status toy." : ""}`
+          ? `- Measured by this output: method ${x.method}; evidence_tool_call_ids [${evidence.index}]; evidence_excerpt an exact contiguous quote from that output containing the reproduced value (reproduced_value must occur inside it, or set copy_excerpt_to_reproduced_value=true for a table). verified = matches the original within a reasonable tolerance: rounding, reported precision, or the small run-to-run variation expected from stochastic or GPU computation when the paper's statement (sign, magnitude, significance) still holds; falsified = materially different, i.e. the difference changes what the paper states (state both values in evidence); inconclusive = the output does not settle it (explain).${x.method === "toy" ? " toy method requires status toy." : ""}`
           : failed
             ? `- The experiment failed: record each claim as status inconclusive, method blocked, blocker_kind ${suggestedBlocker}, evidence_tool_call_ids [${failed.index}], evidence_excerpt an exact error line from that output, and evidence explaining the ${suggestedBlocker === "oom" ? "memory" : suggestedBlocker === "timeout" ? "timeout" : "error"}.`
             : `- Nothing executed: record each claim as inconclusive with method blocked and blocker_kind missing-material, citing read_file of ${inventoryPath}${inventoryRead ? ` (#${inventoryRead.index})` : ""}${readmeRead ? ` and the README (#${readmeRead.index})` : ""} plus a list_files/read_file output showing the absence; required_material must use the claim's own wording from its source quote.`,
         x.method === "raw-data-rederived" && x.rawInputs.length ? `- raw-data-rederived items need raw_input_path and raw_input_tool_call_id: ${x.rawInputs.map(path => `${path} → #${rawReads.get(path)?.index ?? "?"}`).join(", ")}.` : "",
-        x.origin === "plan" ? "- If this output does not contain a claim's measurement, do not guess: defer_claims to raw-data-rederived (naming shipped raw files) or toy. If it can never be measured with shipped materials, record it inconclusive with method blocked and blocker_kind missing-material citing the inventory/README reads and a listing showing the absence." : "- Deferred claims cannot be deferred again; record them with the available evidence.",
+        x.origin === "plan" ? `- If this output does not contain a claim's measurement, do not guess: defer_claims to raw-data-rederived (naming shipped raw files) or toy. If it can never be measured with shipped materials, record it inconclusive with method blocked and blocker_kind missing-material citing the inventory/README reads${provenanceIds} plus proof of absence: a read_file of the path where the material would live (its 'File not found' line is the excerpt) or a list_files of a directory that does not exist. A successful execution or a listing of an existing directory cannot support a blocked result.` : "- Deferred claims cannot be deferred again; record them with the available evidence.",
         "- Never cite read_tool_result IDs as evidence; cite the original execution ID.",
       ].filter(Boolean).join("\n"),
     ].filter(Boolean).join("\n\n");

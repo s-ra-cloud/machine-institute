@@ -30,6 +30,7 @@ import {
   getReproductionCompletionIssues,
   hasUsableReproductionEvidence,
   NO_USABLE_REPRODUCTION_EVIDENCE,
+  getReproductionClaimIssues,
 } from "../reproduce";
 import { canRetryReproduction } from "../reproduction-retry";
 
@@ -562,7 +563,41 @@ describe("Reproduction — premature-stop recovery", () => {
       ].join("\n"),
     });
 
-    expect(issues).toContain("R1 blocker category and evidence excerpt do not match cited tool output");
+    expect(issues).toContain("R1 blocker category and evidence excerpt do not match cited tool output: the cited output (#1) shows no failure: no non-zero exit code, TIMED OUT, Tool error, or not-found/missing message, so it cannot support a blocked result; cite the failing execution, or for an absent material a read_file/list_files call whose output reports it as not found");
+  });
+
+  describe("blocked-result refusals name the failed check", () => {
+    const blocked = (overrides: Record<string, unknown>, output: string) => getReproductionClaimIssues({
+      recordedResults: [{
+        id: "R6", claim: "Patching improved the margin.", status: "inconclusive", method: "blocked",
+        evidenceToolCallIds: [53], evidenceExcerpt: "exit code 137 (901.1s)", blockerKind: "timeout",
+        evidence: "The patching script was killed after the full 900 s allotment (timeout).",
+        ...overrides,
+      } as any],
+      toolCalls: [{ index: 53, name: "run_command", args: { command: "python analysis3.py" }, result: output }],
+    });
+    const killedOutput = "exit code 137 (901.1s)\n--- stdout ---\ntask 3/18\n--- stderr ---\n(empty)";
+    const timedOutOutput = "TIMED OUT (901.1s)\n--- stdout ---\ntask 3/18\n--- stderr ---\n(empty)";
+
+    it("accepts a timeout blocker once the host labels the Modal kill as TIMED OUT", () => {
+      expect(blocked({ evidenceExcerpt: "TIMED OUT (901.1s)" }, timedOutOutput)).toEqual([]);
+    });
+    it("tells the model which kinds the cited output supports when the chosen kind does not fit", () => {
+      expect(blocked({}, killedOutput)).toEqual([
+        "R6 blocker category and evidence excerpt do not match cited tool output: blocker_kind timeout is not what the cited output (#53) shows; that output supports command-error",
+      ]);
+    });
+    it("tells the model the excerpt is not a verbatim quote", () => {
+      expect(blocked({ evidenceExcerpt: "exit code 137 after 901 seconds" }, killedOutput)).toEqual([
+        "R6 blocker category and evidence excerpt do not match cited tool output: evidence_excerpt is not an exact quote from the cited tool output (#53). The excerpt matches the output through \"exit code 137 \", then diverges: the output continues \"(901.1s) --- stdout --- task 3/18 --- stderr --- (empty)\" but the excerpt continues \"after 901 seconds\".",
+      ]);
+    });
+    it("tells the model which words the explanation must use for the chosen kind", () => {
+      expect(blocked({ blockerKind: "command-error", evidence: "The script was killed after 901 seconds." }, killedOutput)).toEqual([
+        "R6 blocker category and evidence excerpt do not match cited tool output: blocker_kind command-error requires the evidence or notes text to say error / failed / exception / dependency",
+      ]);
+      expect(blocked({ blockerKind: "command-error", evidence: "The script failed with exit code 137 after 901 seconds." }, killedOutput)).toEqual([]);
+    });
   });
 
   it("rejects blocked as a conclusive result method", () => {

@@ -10,7 +10,7 @@ vi.mock("../model-service", () => ({
 import { runBoundedReproductionJudge } from "../reproduction-judge";
 import type { RecordedResult } from "../prompts/reproduce";
 import type { ToolCallRecord } from "../model-service";
-import { ContextBudgetError, estimateRequestTokens } from "../llm-context";
+import { ContextBudgetError, IncompleteGenerationError, estimateRequestTokens } from "../llm-context";
 import { QuestioningState } from "../reproduction-questioning";
 
 const config = {
@@ -192,6 +192,59 @@ describe("bounded reproduction judge context handling", () => {
       recordedResults: [result], toolCalls: [call(1, result.evidenceExcerpt)],
     })).rejects.toThrow(ContextBudgetError);
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("retries a batch with a larger output budget when the model ran out of tokens before its verdicts", async () => {
+    const diagnostics: string[] = [];
+    generate
+      .mockRejectedValueOnce(new IncompleteGenerationError("BYOK provider did not return a complete answer (finish_reason=length, max_tokens=6000)", "length", 6000))
+      .mockResolvedValueOnce({ content: JSON.stringify({ summary: "Graded with more room", results: [
+        { id: "R1", claim: "R1", verdict: "verified" }, { id: "R2", claim: "R2", verdict: "falsified" },
+      ] }) });
+    const result = await runBoundedReproductionJudge({
+      config, prompt: "judge", title: "paper", abstract: "", logbook: "",
+      recordedResults: [claim("R1"), claim("R2", 2)], toolCalls: [call(1, "metric=1"), call(2, "metric=2")],
+      onDiagnostic: message => { diagnostics.push(message); },
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls[0][3].maxTokens).toBe(6000);
+    expect(generate.mock.calls[1][3].maxTokens).toBe(12000);
+    expect(generate.mock.calls[1][2]).toBe(generate.mock.calls[0][2]);
+    expect(result.results.map(item => [item.id, item.verdict])).toEqual([["R1", "verified"], ["R2", "falsified"]]);
+    expect(diagnostics.join("\n")).toMatch(/output budget exhausted at max_tokens=6000.*max_tokens=12000/);
+  });
+
+  it("splits a batch at the output ceiling and names the failure if a single claim still cannot be graded", async () => {
+    const diagnostics: string[] = [];
+    generate.mockRejectedValue(new IncompleteGenerationError("did not finish (finish_reason=length)", "length"));
+    const result = await runBoundedReproductionJudge({
+      config, prompt: "judge", title: "paper", abstract: "", logbook: "",
+      recordedResults: [claim("R1"), claim("R2", 2)], toolCalls: [call(1, "metric=1"), call(2, "metric=2")],
+      onDiagnostic: message => { diagnostics.push(message); },
+    });
+    const budgets = generate.mock.calls.map(args => args[3].maxTokens);
+    // Pair: 6000 → 12000 → 24000, then each half: 3000 → 6000 → 12000 → 24000.
+    expect(budgets).toEqual([6000, 12000, 24000, 3000, 6000, 12000, 24000, 3000, 6000, 12000, 24000]);
+    expect(result.results.map(item => [item.id, item.verdict])).toEqual([["R1", "inconclusive"], ["R2", "inconclusive"]]);
+    expect(result.summary).toContain("The judge request failed for R1 (did not finish (finish_reason=length))");
+    expect(diagnostics.some(message => /splitting 2 claims/.test(message))).toBe(true);
+    expect(diagnostics.filter(message => /Judge batch failed \(did not finish/.test(message))).toHaveLength(2);
+  });
+
+  it("allocates at least 300 output tokens per claim so large batches can carry every verdict", async () => {
+    const claims = Array.from({ length: 30 }, (_, i) => claim(`R${i + 1}`, i + 1));
+    generate.mockImplementation(async (_config: unknown, _prompt: string, input: string) => {
+      const ids = [...input.matchAll(/"id":\s*"(R\d+)"/g)].map(match => match[1]);
+      return { content: JSON.stringify({ summary: "ok", results: ids.map(id => ({ id, claim: id, verdict: "verified" })) }) };
+    });
+    const result = await runBoundedReproductionJudge({
+      config, prompt: "judge", title: "paper", abstract: "", logbook: "",
+      recordedResults: claims, toolCalls: claims.map((_, i) => call(i + 1, `metric=${i + 1}`)),
+    });
+    expect(result.results.every(item => item.verdict === "verified")).toBe(true);
+    for (const [, , , opts] of generate.mock.calls) expect(opts.maxTokens).toBeGreaterThanOrEqual(300 * 2);
+    const graded = generate.mock.calls.map(args => [...String(args[2]).matchAll(/"id":\s*"(R\d+)"/g)].length);
+    generate.mock.calls.forEach((args, i) => expect(args[3].maxTokens).toBeGreaterThanOrEqual(300 * graded[i]));
   });
 
   it("keeps ungraded claims inconclusive and discards foreign IDs", async () => {

@@ -8,6 +8,7 @@ import {
   ContextBudgetError,
   isContextOverflow,
   isProviderPaymentFailure,
+  outputBudgetExhausted,
   RequestContextBudget,
 } from "./llm-context";
 import {
@@ -17,7 +18,11 @@ import {
 } from "./prompts/reproduce";
 
 const JUDGE_OUTPUT_TOKENS = 6000;
-const JUDGE_TIMEOUT_MS = 600_000;
+/** A verdict row with its evidence sentence needs this much output even when the batch is large. */
+const JUDGE_OUTPUT_PER_CLAIM = 300;
+/** Ceiling for one request after growth; reasoning models may spend most of it before the JSON. */
+const JUDGE_OUTPUT_CAP = 24_000;
+const JUDGE_TIMEOUT_MS = 1_200_000;
 const MAX_CONTEXT_RETRIES = 2;
 const TRANSCRIPT_RESULT_CHARS = 3_000;
 
@@ -232,7 +237,12 @@ function outputAllocation(groupSize: number, totalClaims: number): number {
       `Reproduction judge cannot allocate output tokens to a batch of ${groupSize} claim(s); ${totalClaims} claims exceed the 6000-token judge budget.`,
     );
   }
-  return allocation;
+  return Math.max(allocation, JUDGE_OUTPUT_PER_CLAIM * groupSize);
+}
+
+function describeError(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error ?? "unknown error");
+  return text.replace(/\s+/g, " ").slice(0, 300);
 }
 
 function firstFittingLevel(
@@ -365,7 +375,7 @@ export async function runBoundedReproductionJudge(
   for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
     const group = groups[groupIndex];
     const claims = group.claims;
-    const maxTokens = outputAllocation(claims.length, recordedResults.length);
+    let maxTokens = outputAllocation(claims.length, recordedResults.length);
     const budget = budgetFor(opts.config, maxTokens, observedInputLimit);
     let level: InputReduction = group.initialLevel;
     let parsed: { summary: string; results: ClaimVerdict[] } | undefined;
@@ -469,8 +479,32 @@ export async function runBoundedReproductionJudge(
           continue;
         }
         if (error instanceof ContextBudgetError) throw error;
-        await diagnostic(opts.onDiagnostic, `Judge batch failed; its claims remain inconclusive.`);
-        summaries.push(`The judge request failed for ${claims.map(claim => claim.id).join(", ")}; claims remain inconclusive.`);
+        if (outputBudgetExhausted(error)) {
+          // The model used the whole output budget without finishing its verdicts (reasoning included).
+          // Give the same batch more room while the evidence still fits; otherwise split it.
+          const raised = Math.min(JUDGE_OUTPUT_CAP, maxTokens * 2);
+          if (raised > maxTokens && budget.raiseOutputReserve(raised, { ...request, max_tokens: raised })) {
+            await diagnostic(opts.onDiagnostic, `Judge output budget exhausted at max_tokens=${maxTokens} before the verdicts were complete; retrying ${claims.map(claim => claim.id).join(", ")} with max_tokens=${raised}.`);
+            maxTokens = raised;
+            continue;
+          }
+          if (claims.length > 1) {
+            const midpoint = Math.ceil(claims.length / 2);
+            await diagnostic(opts.onDiagnostic, `Judge output budget exhausted at max_tokens=${maxTokens}; splitting ${claims.length} claims into two batches.`);
+            const children = [claims.slice(0, midpoint), claims.slice(midpoint)]
+              .map(child => ({
+                claims: child,
+                initialLevel: firstFittingLevel(opts, child, outputAllocation(child.length, recordedResults.length), 0, budget) ?? 0,
+                contextRetries,
+              }));
+            groups.splice(groupIndex, 1, ...children);
+            groupIndex--;
+            break;
+          }
+        }
+        const reason = describeError(error);
+        await diagnostic(opts.onDiagnostic, `Judge batch failed (${reason}); its claims remain inconclusive.`);
+        summaries.push(`The judge request failed for ${claims.map(claim => claim.id).join(", ")} (${reason}); claims remain inconclusive.`);
         break;
       }
     }

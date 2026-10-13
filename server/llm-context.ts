@@ -40,6 +40,20 @@ export class ContextBudgetError extends Error {
   }
 }
 
+/** The provider answered, but the answer is unusable: cut off at max_tokens, filtered, or empty. */
+export class IncompleteGenerationError extends Error {
+  readonly code = "INCOMPLETE_GENERATION";
+  constructor(message: string, readonly finishReason: string, readonly completionTokens?: number) {
+    super(message);
+    this.name = "IncompleteGenerationError";
+  }
+}
+
+/** A response that ended on max_tokens without any visible answer: reasoning models can spend the whole output budget thinking. */
+export function outputBudgetExhausted(error: unknown): error is IncompleteGenerationError {
+  return error instanceof IncompleteGenerationError && error.finishReason === "length";
+}
+
 export class ProviderPaymentError extends Error {
   readonly code = "PROVIDER_PAYMENT_REQUIRED";
   readonly status?: number;
@@ -296,7 +310,7 @@ export class RequestContextBudget {
   private lastRejectedTarget?: number;
   constructor(
     readonly config: ModelProviderConfig,
-    readonly maxOutputTokens: number,
+    public maxOutputTokens: number,
     readonly stage: string,
     advertisedWindow = verifiedProviderContext(config) ?? CONSERVATIVE_CONTEXT_LIMIT,
     protectedInputFloor = 0,
@@ -314,6 +328,20 @@ export class RequestContextBudget {
 
   estimate(request: unknown): number {
     return estimateRequestTokens(request);
+  }
+
+  /**
+   * Reserve more output tokens for the same conversation, taking the room from the input side.
+   * Refuses (returns false) when the current request would no longer fit, so growth never causes an overflow.
+   */
+  raiseOutputReserve(maxOutputTokens: number, request: unknown): boolean {
+    const extra = maxOutputTokens - this.maxOutputTokens;
+    if (extra <= 0) return false;
+    const inputLimit = this.inputLimit - extra;
+    if (inputLimit < this.protectedInputFloor || this.estimate(request) > inputLimit) return false;
+    this.inputLimit = inputLimit;
+    this.maxOutputTokens = maxOutputTokens;
+    return true;
   }
 
   fits(request: unknown): boolean {

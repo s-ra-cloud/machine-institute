@@ -18,6 +18,7 @@ import {
   providerRetryAfterMs,
   providerContextConstraint,
   reportedContextLimit,
+  IncompleteGenerationError,
 } from "./llm-context";
 import { describeToolContext, fitToolContext, type ToolContextProtection } from "./tool-context";
 import { verifiedProviderContext } from "./provider-context";
@@ -152,7 +153,12 @@ export async function generateWithConfig(
 
   const choice = completion?.choices?.[0];
   if (choice?.finish_reason !== "stop" || choice?.message?.refusal != null || choice?.message?.tool_calls?.length) {
-    throw new Error(`${config.providerMode === "byoc" ? "BYOK provider" : "Managed model"} did not return a complete, non-refused text answer (model=${model}). No result was accepted.`);
+    const finishReason = String(choice?.finish_reason ?? "unknown");
+    throw new IncompleteGenerationError(
+      `${config.providerMode === "byoc" ? "BYOK provider" : "Managed model"} did not return a complete, non-refused text answer (model=${model}, finish_reason=${finishReason}${finishReason === "length" ? `, max_tokens=${maxTokens}` : ""}). No result was accepted.`,
+      finishReason,
+      Number(completion?.usage?.completion_tokens) || undefined,
+    );
   }
   const content = choice.message?.content;
   if (typeof content !== "string" || !content.trim()) {
@@ -599,7 +605,13 @@ export async function runToolLoop(
   const client = createLLMClient(config, { maxRetries: 0 });
   if (!client) throw new Error(`Could not create LLM client for provider: ${config.provider}`);
   const model = resolveModelName(config);
-  const maxTokens = options.maxTokens ?? 8000;
+  let maxTokens = options.maxTokens ?? 8000;
+  // A response that ends on max_tokens with no text and no tool call carries nothing to continue from
+  // (reasoning models can think through the whole budget). The same request is retried with more room,
+  // doubling up to this cap, before any prose/required-tool recovery is spent on it.
+  const providerOutputCap = PLATFORM_MODELS.find(m => m.model === model)?.maxOutputTokens;
+  const maxTokensCap = Math.max(maxTokens, Math.min(32_000, maxTokens * 4, providerOutputCap ?? Number.POSITIVE_INFINITY));
+  let outputBudgetRaises = 0;
   const temperature = options.temperature ?? 0.2;
   const maxToolResultChars = options.maxToolResultChars ?? 12_000;
   const contextBudget = options.contextCharBudget ?? Math.floor(getContextWindow(config) * 3.0);
@@ -853,6 +865,18 @@ export async function runToolLoop(
     const calls: Array<{ id: string; function: { name: string; arguments: string } }> =
       (Array.isArray(msg.tool_calls) ? msg.tool_calls : []).filter((c: any) => c?.type === "function" && c.function?.name);
     const assistantText: string | null = typeof msg.content === "string" && msg.content.trim() ? msg.content : null;
+    if (finishReason === "length" && !assistantText && calls.length === 0 && !forceFinal && maxTokens < maxTokensCap) {
+      const raised = Math.min(maxTokensCap, maxTokens * 2);
+      const probe = { ...baseRequest, max_tokens: raised };
+      if (!requestBudget || requestBudget.raiseOutputReserve(raised, probe)) {
+        outputBudgetRaises++;
+        await observe({ kind: "context", round, callCount: toolCalls.length, finishReason,
+          requestedOutputTokens: raised,
+          stopReason: `output budget exhausted without an answer; retrying with max_tokens=${raised} (raise ${outputBudgetRaises})` });
+        maxTokens = raised;
+        continue;
+      }
+    }
     messages.push({
       role: "assistant",
       content: assistantText ?? "",

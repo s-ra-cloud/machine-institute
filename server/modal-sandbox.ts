@@ -100,6 +100,9 @@ export class ReproductionSandbox {
       timeoutMs: opts.timeoutMs,
       workdir: opts.workdir || "/work",
       mode: "text",
+      // A process killed at the timeout must leave its progress output behind: block-buffered Python
+      // otherwise dies with an empty capture and the timeout cannot be explained from evidence.
+      env: { PYTHONUNBUFFERED: "1" },
     });
     // Read both streams concurrently with the exit wait so large outputs can't
     // deadlock the process on a full pipe.
@@ -112,7 +115,10 @@ export class ReproductionSandbox {
       ]),
     ]);
     const durationMs = Date.now() - started;
-    if (!timedOut && exitCode === null) timedOut = durationMs >= opts.timeoutMs;
+    // Modal enforces timeoutMs itself by killing the process (SIGKILL → exit 137), so a run that used
+    // its whole allotment is a timeout even when an exit code came back; the host timer above only
+    // covers the case where no exit code arrives at all.
+    if (!timedOut && (exitCode === null || exitCode === 137)) timedOut = durationMs >= opts.timeoutMs - 2_000;
     return {
       stdout: truncateCapture(stdout),
       stderr: truncateCapture(stderr),

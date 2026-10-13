@@ -103,8 +103,11 @@ describe("runToolLoop", () => {
       await expect(result).rejects.toThrow("no grounded claims");
       expect(onAccepted).not.toHaveBeenCalled();
     }
-    expect(createMock).toHaveBeenCalledTimes(3);
-    const last = createMock.mock.calls[2][0];
+    // The empty length-stop is retried with a larger output budget without spending a recovery,
+    // so the non-recovering variant gets one more correction before the loop gives up.
+    expect(createMock).toHaveBeenCalledTimes(recovers ? 3 : 4);
+    expect(createMock.mock.calls[1][0].max_tokens).toBeGreaterThan(createMock.mock.calls[0][0].max_tokens);
+    const last = createMock.mock.calls[createMock.mock.calls.length - 1][0];
     expect(last.tool_choice).toEqual({ type: "function", function: { name: "submit_claims" } });
     expect(JSON.stringify(last.messages)).toContain("one complete core source_quote");
   });
@@ -127,6 +130,31 @@ describe("runToolLoop", () => {
     expect(result.toolCalls).toHaveLength(2);
     expect(createMock).toHaveBeenCalledTimes(4);
     expect(createMock.mock.calls[3][0].tool_choice).toEqual({ type: "function", function: { name: "echo" } });
+  });
+
+  it("retries with a larger output budget when a response ends on max_tokens with nothing in it", async () => {
+    createMock
+      .mockResolvedValueOnce({ choices: [{ finish_reason: "length", message: { content: null, tool_calls: [] } }] })
+      .mockResolvedValueOnce({ choices: [{ finish_reason: "length", message: { content: "", reasoning: "thinking..." } }] })
+      .mockResolvedValueOnce(assistantToolCall("1", "hello"))
+      .mockResolvedValueOnce(assistantFinal("done"));
+    const execute = vi.fn(async () => "ok");
+    const events: any[] = [];
+    const result = await runToolLoop(platform, "sys", "user", tools, execute, {
+      maxToolCalls: 8, deadlineMs: Date.now() + 60_000, maxTokens: 8000,
+      getRequiredTool: () => execute.mock.calls.length === 0 ? "echo" : undefined, maxPrematureStopRecoveries: 0,
+      onOutcome: event => { events.push(event); },
+    });
+    // gpt-4o's catalogue output ceiling (16384) bounds the growth.
+    expect(createMock.mock.calls.map(args => args[0].max_tokens)).toEqual([8000, 16000, 16384, 16384]);
+    // The empty responses are not kept as conversation turns and no correction message was spent on them
+    // (the loop mutates one messages array, so inspect the final transcript).
+    const transcript = createMock.mock.calls[3][0].messages as Array<Record<string, unknown>>;
+    expect(transcript.filter(m => m.role === "user")).toHaveLength(1);
+    expect(transcript.filter(m => m.role === "assistant" && !m.content && !m.tool_calls)).toHaveLength(0);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.content).toBe("done");
+    expect(events.filter(e => e.kind === "context" && /output budget exhausted/.test(e.stopReason ?? ""))).toHaveLength(2);
   });
 
   it("stops unresolved after one required-call correction rather than returning prose as completion", async () => {

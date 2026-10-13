@@ -3,7 +3,7 @@
  * extraction, tools, execution, or judge. Does not publish or change database rows.
  * Keep the ledger across attempts, including charges from interrupted requests.
  */
-import { mkdirSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { runReproduction } from "../server/reproduce";
 import { getReproducerPrompt, getJudgePrompt } from "../server/prompts/reproduce";
 import { INITIATIVE_DOC_IDS, INITIATIVE_SLUGS, getJournalDisplayName } from "../server/journals";
@@ -101,7 +101,10 @@ try {
     modelConfig: config, judgeModelConfig: config, gpu: "A10G",
     emitEvent: async (phase, message) => console.log(JSON.stringify({ phase, message })),
     onCheckpoint: async checkpoint => save("checkpoint", checkpoint),
-    onDiagnostics: diagnostics => save("diagnostics", diagnostics),
+    onDiagnostics: diagnostics => {
+      save("diagnostics", diagnostics);
+      appendFileSync(`${attempt}/diagnostics.jsonl`, `${JSON.stringify({ at: new Date().toISOString(), ...diagnostics })}\n`);
+    },
   });
   save("result", result);
   console.log(JSON.stringify({ event: "complete", overall: result.overall, attempt }));

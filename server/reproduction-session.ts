@@ -3,6 +3,7 @@ import { posix } from "node:path";
 import type { ToolCallRecord } from "./model-service";
 import { REPRODUCTION_BLOCKERS, REPRODUCTION_METHODS, VERDICTS, type RecordedResult } from "./prompts/reproduce";
 import { ReproductionContextStore } from "./reproduction-context-store";
+import { findExcerpt } from "./reproduction-stage-evidence";
 import type { QuestioningState } from "./reproduction-questioning";
 
 type ClaimValidator = (results: RecordedResult[], calls: readonly ToolCallRecord[]) => string[];
@@ -637,13 +638,12 @@ export class ReproductionSession {
   judgeEvidence(): string {
     return Array.from(this.recorded.values()).map(result => {
       const excerpt = result.evidenceExcerpt?.trim();
-      const blocks = excerpt ? this.toolCalls.filter(call =>
-        result.evidenceToolCallIds?.includes(call.index) && evidenceTools.has(call.name)
-        && call.result.includes(excerpt),
-      ).map(call => {
-        const position = call.result.indexOf(excerpt);
-        const slice = call.result.slice(Math.max(0, position - 250), position + excerpt.length + 250);
-        return `Original tool #${call.index}: ${call.name} ${JSON.stringify(call.args)}\nOutput status: ${call.result.split("\n", 1)[0]}\n${slice}`;
+      const blocks = excerpt ? this.toolCalls.flatMap(call => {
+        if (!result.evidenceToolCallIds?.includes(call.index) || !evidenceTools.has(call.name)) return [];
+        const found = findExcerpt(call.result, excerpt);
+        if (!found) return [];
+        const slice = call.result.slice(Math.max(0, found.start - 250), found.end + 250);
+        return [`Original tool #${call.index}: ${call.name} ${JSON.stringify(call.args)}\nOutput status: ${call.result.split("\n", 1)[0]}\n${slice}`];
       }) : [];
       return `### ${result.id} — original cited evidence\n${blocks.join("\n\n") || "No scientific output cited. See the structured result for the system-enforced resource limit."}`;
     }).join("\n\n");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { executionEvidenceIndex, executionRecoveryExcerpt, rerunEvidenceIssue, repeatExecutionRefusal, sharedMeasurementIssue } from "../reproduction-stage-evidence";
+import { containsExcerpt, excerptMismatchHint, executionEvidenceIndex, executionRecoveryExcerpt, findExcerpt, rerunEvidenceIssue, repeatExecutionRefusal, sharedMeasurementIssue } from "../reproduction-stage-evidence";
 const paths = ["/work/materials/analyze.py"];
 describe("shared measurement handoffs", () => {
   const calls = [{ index: 7, name: "run_command", args: {}, result: "exit code 0\ncondition_1=0.91\ncondition_2=0.90" }];
@@ -73,8 +73,28 @@ describe("stage evidence handoff", () => {
     expect(rerunEvidenceIssue([run(1, "exit code 0\nscore=0.966667")], paths, { ...args, reproduced_value: "0.967" })).toContain("literally");
     expect(rerunEvidenceIssue([run(1, "exit code 0\nscore=0.966667")], paths, args)).toBeUndefined();
   });
+  it("accepts a quote whose whitespace was collapsed while copying a table, and points at the divergence otherwise", () => {
+    const table = "exit code 0\n  task      clean   misleading\n  parity    1.000   0.411\nmargin_mean = 0.3121\n";
+    expect(rerunEvidenceIssue([run(1, table)], paths, { ...args, evidence_excerpt: "parity 1.000 0.411", reproduced_value: "0.411" })).toBeUndefined();
+    const issue = rerunEvidenceIssue([run(1, table)], paths, { ...args, evidence_excerpt: "parity    1.000   0.412", reproduced_value: "0.412" })!;
+    expect(issue).toContain("copied exactly from one cited successful source execution (#1)");
+    expect(issue).toContain('matches the output through "parity 1.000 0.41", then diverges: the output continues "1 margin_mean = 0.3121" but the excerpt continues "2"');
+    expect(rerunEvidenceIssue([run(1, table)], paths, { ...args, evidence_excerpt: "accuracy was perfect on parity" })).toContain("No 12-character run from the start of the excerpt occurs in the cited output");
+  });
   it("does not combine a successful unrelated command with a failed source run", () => {
     expect(rerunEvidenceIssue([run(1, "exit code 1\nscore=0.966667"), run(2, "exit code 0\nscore=0.966667", "cat results.csv")],
       paths, { ...args, evidence_tool_call_ids: [1, 2] })).toContain("not a standalone");
+  });
+});
+
+describe("excerpt location", () => {
+  it("finds exact and whitespace-collapsed quotes with raw offsets", () => {
+    const output = "exit code 0\nalpha\t=  0.91\n\nbeta = 0.5";
+    expect(findExcerpt(output, "alpha\t=  0.91")).toEqual({ start: 12, end: 25 });
+    const collapsed = findExcerpt(output, "alpha = 0.91 beta")!;
+    expect(output.slice(collapsed.start, collapsed.end)).toBe("alpha\t=  0.91\n\nbeta");
+    expect(containsExcerpt(output, "alpha=0.91")).toBe(false);
+    expect(containsExcerpt(output, "  ")).toBe(false);
+    expect(excerptMismatchHint(output, "beta = 0.6")).toContain("too short");
   });
 });

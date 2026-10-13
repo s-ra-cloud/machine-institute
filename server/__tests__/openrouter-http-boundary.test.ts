@@ -189,14 +189,18 @@ describe("OpenRouter HTTP → real SDK → BYOK adapter → extraction", () => {
     expect(JSON.stringify(events)).not.toContain("synthetic private text");
   });
 
-  it("retains incomplete coverage when all three HTTP responses lack calls", async () => {
-    const fetch = intercept(["length", "stop", "stop"].map(finish =>
+  it("retains incomplete coverage when every HTTP response lacks calls", async () => {
+    // An empty length-stop is retried once with a larger output budget (no recovery spent), then the
+    // two correction allowances are used on empty stops before the extraction gives up.
+    const fetch = intercept(["length", "stop", "stop", "stop"].map(finish =>
       envelope(finish, { content: null, reasoning: "synthetic private text" })));
     const onAccepted = vi.fn(async () => {});
     await expect(extractReproductionClaims({
       paper: quote, instructions: "Extract", config, deadline: Date.now() + 60_000, onAccepted,
     })).rejects.toThrow("no grounded claims accepted from 1/1 packets. No GPU allocated.");
     expect(onAccepted).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    const budgets = fetch.mock.calls.map(args => JSON.parse(String(args[1]?.body)).max_tokens);
+    expect(budgets[1]).toBeGreaterThan(budgets[0]);
   });
 });
