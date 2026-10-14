@@ -52,3 +52,11 @@ For raw-data re-derivation, retain the latest computation source preceding each 
 **Why:** matching printed metrics can come from stored summary fields instead of independent computation. A raw-looking filename and an exit-zero command cannot establish re-derivation.
 
 **How to apply:** inspect observations, computation, and analysis identity together; summary extraction or insufficient provenance must remain inconclusive, even if every printed value matches.
+
+**Extraction repair guidance**
+
+Keep rejected-candidate identities explicit when correcting a quotation. Give canonical, packet-local context when an exact shared phrase can locate it, but never automatically accept the suggested passage or clear a rejection because a different valid quotation arrived.
+
+**Why:** a live extractor submitted shorter valid quotations without identifying the original rejection they replaced. The old rejection remained unresolved and correctly prevented GPU allocation, but generic exact-match errors did not help the model recover.
+
+**How to apply:** corrections must still pass exact-source validation and explicitly replace the rejection; contextual hints are guidance, not evidence or automatic repairs.

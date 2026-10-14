@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({ loop: vi.fn() }));
 vi.mock("../model-service", () => ({ runToolLoop: mock.loop }));
-import { extractReproductionClaims } from "../reproduction-extraction";
+import { extractReproductionClaims, extractionRepairPassage } from "../reproduction-extraction";
 import { prepareSourcePackets } from "../reproduction-packets";
 const sentence = (n: number) => `The measured experimental score for condition ${n} was 0.91.`;
 const paper = Array.from({ length: 5 }, (_, i) =>
@@ -9,6 +9,32 @@ const paper = Array.from({ length: 5 }, (_, i) =>
 const candidate = (claim: string) => ({ claim, source_quote: claim });
 const input = () => ({ paper, instructions: "Custom science", config: {} as any, deadline: Date.now() + 60000 });
 beforeEach(() => vi.resetAllMocks());
+it("offers canonical repair context without accepting a correction or clearing a rejection implicitly", async () => {
+  const accepted = vi.fn();
+  mock.loop.mockImplementation(async (_c, _s, _p, _t, execute, opts) => {
+    const wrong = `Invented prefix. ${sentence(0)}`;
+    const refusal = await execute("submit_claims", { claims: [candidate(wrong)] });
+    expect(refusal).toContain("canonicalPassage");
+    expect(refusal).toContain(sentence(0));
+    expect(accepted).not.toHaveBeenCalled();
+    const stillOpen = await execute("submit_claims", { claims: [candidate(sentence(0))] });
+    expect(stillOpen).toContain('replaces=\\"E1\\"');
+    expect(opts.isStageComplete()).toBe(false);
+    await execute("submit_claims", { claims: [{ ...candidate(sentence(0)), replaces: "E1" }], has_more: false });
+    expect(opts.isStageComplete()).toBe(true);
+    return { toolCalls: [{}, {}, {}], rounds: 3, stoppedBy: "model" };
+  });
+  const result = await extractReproductionClaims({ ...input(), paper: sentence(0), onAccepted: accepted });
+  expect(result.claims).toHaveLength(1);
+  expect(accepted).toHaveBeenCalledTimes(1);
+});
+it("never constructs repair context from guessed text or outside the current packet", () => {
+  expect(extractionRepairPassage("This fabricated source shares no matching phrase.", sentence(0))).toBeUndefined();
+  const source = `Canonical introduction. ${sentence(0)}\nCanonical ending.`;
+  const hint = extractionRepairPassage(`Incorrect prefix ${sentence(0)}`, source);
+  expect(hint).toBeDefined();
+  expect(source.includes(hint!)).toBe(true);
+});
 function respond(get: (packet: number, attempt: number, text: string) => unknown[]) {
   let packet = 0;
   mock.loop.mockImplementation(async (_c, _s, text, _t, execute, opts) => {
