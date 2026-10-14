@@ -337,7 +337,8 @@ describe("runReproduction orchestration repair", () => {
       .mockResolvedValueOnce(completion(null, finalCorrections))
       .mockResolvedValueOnce(completion(""))
       .mockResolvedValueOnce(completion(logbook))
-      .mockResolvedValueOnce(judgeCompletion(["R1", "R2", "R3", "R4", "R5"]));
+      .mockResolvedValueOnce(judgeCompletion(["R1", "R2", "R3"]))
+      .mockResolvedValueOnce(judgeCompletion(["R4", "R5"]));
 
     const result = await runReproduction(options());
 
@@ -350,7 +351,8 @@ describe("runReproduction orchestration repair", () => {
     expect(sandbox.exec.mock.calls.some(args => String(args[0]).includes("r4-correct.py"))).toBe(true);
     expect(Math.max(...sandbox.exec.mock.invocationCallOrder)).toBeLessThan(sandbox.terminate.mock.invocationCallOrder[0]);
     expect(sandbox.terminate.mock.invocationCallOrder[0]).toBeLessThan(createCompletion.mock.invocationCallOrder.at(-1)!);
-    expect(createCompletion).toHaveBeenCalledTimes(14);
+    expect(createCompletion).toHaveBeenCalledTimes(15);
+    expect(result.results.every(r => r.verdict === "verified")).toBe(true);
 
     const firstRequest = createCompletion.mock.calls[0][0];
     expect(firstRequest.messages[0].content).toContain("CUSTOM SAVED REPAIR INSTRUCTION");

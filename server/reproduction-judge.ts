@@ -17,9 +17,12 @@ import {
   type RecordedResult,
 } from "./prompts/reproduce";
 
+// Each request gets its own reasoning allowance, including split children.
+// Never divide a fixed global allowance by the total registered claim count.
 const JUDGE_OUTPUT_TOKENS = 6000;
-/** A verdict row with its evidence sentence needs this much output even when the batch is large. */
-const JUDGE_OUTPUT_PER_CLAIM = 300;
+// Reasoning and evidence comparison cost much more than serializing verdict rows.
+const JUDGE_MAX_BATCH_CLAIMS = 3;
+const JUDGE_REQUEST_TIMEOUT_MS = 240_000;
 /** Ceiling for one request after growth; reasoning models may spend most of it before the JSON. */
 const JUDGE_OUTPUT_CAP = 24_000;
 const JUDGE_TIMEOUT_MS = 1_200_000;
@@ -244,16 +247,6 @@ function fitsAt(
   return budget.fits(requestFor(config, prompt, input, maxTokens));
 }
 
-function outputAllocation(groupSize: number, totalClaims: number): number {
-  const allocation = Math.floor(JUDGE_OUTPUT_TOKENS * groupSize / totalClaims);
-  if (allocation < 1) {
-    throw new ContextBudgetError(
-      `Reproduction judge cannot allocate output tokens to a batch of ${groupSize} claim(s); ${totalClaims} claims exceed the 6000-token judge budget.`,
-    );
-  }
-  return Math.max(allocation, JUDGE_OUTPUT_PER_CLAIM * groupSize);
-}
-
 function describeError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error ?? "unknown error");
   return text.replace(/\s+/g, " ").slice(0, 300);
@@ -292,7 +285,13 @@ function partitionClaims(
 ): PartitionedGroup[] {
   const groups: PartitionedGroup[] = [];
   const visit = (group: RecordedResult[]): void => {
-    const maxTokens = outputAllocation(group.length, claims.length);
+    if (group.length > JUDGE_MAX_BATCH_CLAIMS) {
+      for (let i = 0; i < group.length; i += JUDGE_MAX_BATCH_CLAIMS) {
+        visit(group.slice(i, i + JUDGE_MAX_BATCH_CLAIMS));
+      }
+      return;
+    }
+    const maxTokens = JUDGE_OUTPUT_TOKENS;
     const fittingLevel = firstFittingLevel(opts, group, maxTokens);
     if (fittingLevel !== undefined) {
       groups.push({ claims: group, initialLevel: fittingLevel, contextRetries: 0 });
@@ -420,7 +419,7 @@ export async function runBoundedReproductionJudge(
   for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
     const group = groups[groupIndex];
     const claims = group.claims;
-    let maxTokens = outputAllocation(claims.length, recordedResults.length);
+    let maxTokens = JUDGE_OUTPUT_TOKENS;
     const budget = budgetFor(opts.config, maxTokens, observedInputLimit);
     let level: InputReduction = group.initialLevel;
     let parsed: { summary: string; results: ClaimVerdict[] } | undefined;
@@ -448,7 +447,7 @@ export async function runBoundedReproductionJudge(
               initialLevel: firstFittingLevel(
                 opts,
                 child,
-                outputAllocation(child.length, recordedResults.length),
+                JUDGE_OUTPUT_TOKENS,
                 0,
                 budget,
               ) ?? 0,
@@ -474,7 +473,9 @@ export async function runBoundedReproductionJudge(
           maxTokens,
           temperature: 0.1,
           contextRequest: true,
-          timeoutMs: remaining,
+          // A stuck batch must not consume the time belonging to later claims.
+          timeoutMs: Math.max(1, Math.min(JUDGE_REQUEST_TIMEOUT_MS,
+            Math.floor(remaining / (groups.length - groupIndex)))),
         });
         parsed = parseJudgeOutput(response.content);
         if (parsed.results.length === 0) {
@@ -505,7 +506,7 @@ export async function runBoundedReproductionJudge(
                   initialLevel: firstFittingLevel(
                     opts,
                     child,
-                    outputAllocation(child.length, recordedResults.length),
+                    JUDGE_OUTPUT_TOKENS,
                     0,
                     budget,
                   ) ?? 0,
@@ -528,7 +529,9 @@ export async function runBoundedReproductionJudge(
           // The model used the whole output budget without finishing its verdicts (reasoning included).
           // Give the same batch more room while the evidence still fits; otherwise split it.
           const raised = Math.min(JUDGE_OUTPUT_CAP, maxTokens * 2);
-          if (raised > maxTokens && budget.raiseOutputReserve(raised, { ...request, max_tokens: raised })) {
+          // Split multi-claim work immediately instead of paying for repeated
+          // reasoning over the same oversized group. Only singletons grow.
+          if (claims.length === 1 && raised > maxTokens && budget.raiseOutputReserve(raised, { ...request, max_tokens: raised })) {
             await diagnostic(opts.onDiagnostic, `Judge output budget exhausted at max_tokens=${maxTokens} before the verdicts were complete; retrying ${claims.map(claim => claim.id).join(", ")} with max_tokens=${raised}.`);
             maxTokens = raised;
             continue;
@@ -539,7 +542,7 @@ export async function runBoundedReproductionJudge(
             const children = [claims.slice(0, midpoint), claims.slice(midpoint)]
               .map(child => ({
                 claims: child,
-                initialLevel: firstFittingLevel(opts, child, outputAllocation(child.length, recordedResults.length), 0, budget) ?? 0,
+                initialLevel: firstFittingLevel(opts, child, JUDGE_OUTPUT_TOKENS, 0, budget) ?? 0,
                 contextRetries,
               }));
             groups.splice(groupIndex, 1, ...children);

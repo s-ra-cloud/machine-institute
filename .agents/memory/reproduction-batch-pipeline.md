@@ -66,6 +66,14 @@ Preserve bounded command captures beyond the single agent-selected excerpt when 
 
 **How to apply:** inspect observations, computation, and analysis identity together; summary extraction or insufficient provenance must remain inconclusive, even if every printed value matches.
 
+**Judge reasoning budget lesson**
+
+Treat output allowance as a per-request reasoning budget, not merely space for verdict JSON. Start with small batches, split exhausted multi-claim batches before retrying them, and leave deadline time for later batches.
+
+**Why:** a fresh completed experiment cycle yielded no independent verdicts: a 14-claim judge exhausted 6k, 12k, and 24k responses, then its children restarted at 3k and exhausted the shared deadline. A large context window does not imply sufficient reasoning output.
+
+**How to apply:** preserve cited evidence and conservative inconclusive outcomes; test both output exhaustion and slow requests with mocked providers before spending on another live run.
+
 **Extraction repair guidance**
 
 Keep rejected-candidate identities explicit when correcting a quotation. Give canonical, packet-local context when an exact shared phrase can locate it, but never automatically accept the suggested passage or clear a rejection because a different valid quotation arrived.

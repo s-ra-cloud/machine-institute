@@ -80,6 +80,50 @@ beforeEach(() => {
 });
 
 describe("bounded reproduction judge context handling", () => {
+  it("grades 14 claims in small batches and lets later batches finish after a timed-out request", async () => {
+    const claims = Array.from({ length: 14 }, (_, i) => claim(`R${i + 1}`, i + 1));
+    let now = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    generate.mockImplementation(async (_config, _prompt, input, opts) => {
+      const ids = [...input.matchAll(/"id":\s*"(R\d+)"/g)].map(match => match[1]);
+      expect(ids.length).toBeLessThanOrEqual(3);
+      expect(opts.maxTokens).toBe(6000);
+      expect(opts.timeoutMs).toBeLessThanOrEqual(240_000);
+      if (ids.includes("R1")) {
+        now += opts.timeoutMs;
+        throw new Error("request timed out");
+      }
+      return { content: JSON.stringify({ summary: "Graded", results: ids.map(id => ({ id, claim: id, verdict: "verified" })) }) };
+    });
+    try {
+      const result = await runBoundedReproductionJudge({
+        config, prompt: "judge", title: "paper", abstract: "", logbook: "",
+        recordedResults: claims, toolCalls: claims.map((_, i) => call(i + 1, `metric=${i + 1}`)),
+      });
+      expect(generate).toHaveBeenCalledTimes(5);
+      expect(result.results.map(r => r.id)).toEqual(claims.map(r => r.id));
+      expect(result.results.slice(0, 3).every(r => r.verdict === "inconclusive")).toBe(true);
+      expect(result.results.slice(3).every(r => r.verdict === "verified")).toBe(true);
+    } finally { clock.mockRestore(); }
+  });
+
+  it("splits on output exhaustion without shrinking child allowances or losing cited evidence", async () => {
+    generate.mockRejectedValueOnce(new IncompleteGenerationError("length", "length"));
+    generate.mockImplementation(async (_config, _prompt, input, opts) => {
+      const ids = [...input.matchAll(/"id":\s*"(R\d+)"/g)].map(match => match[1]);
+      expect(ids).toHaveLength(1);
+      expect(opts.maxTokens).toBe(6000);
+      expect(input).toContain(`metric=${ids[0].slice(1)}`);
+      return { content: JSON.stringify({ summary: "Graded", results: ids.map(id => ({ id, claim: id, verdict: "verified" })) }) };
+    });
+    const result = await runBoundedReproductionJudge({
+      config, prompt: "judge", title: "paper", abstract: "", logbook: "",
+      recordedResults: [claim("R1"), claim("R2", 2)], toolCalls: [call(1, "metric=1"), call(2, "metric=2")],
+    });
+    expect(generate.mock.calls.map(args => args[3].maxTokens)).toEqual([6000, 6000, 6000]);
+    expect(result.results.every(r => r.verdict === "verified")).toBe(true);
+  });
+
   it("retains separate rows of a compound claim beyond the selected excerpt", async () => {
     const output = "band mean=-0.013 CI=[-0.052,0.027]\n" + "intermediate rows\n".repeat(500)
       + "layer=12 mean=0.132 CI=[0.085,0.188] improved=76.7%";
@@ -176,7 +220,7 @@ describe("bounded reproduction judge context handling", () => {
     expect(output.results.every(result => result.verdict === "verified")).toBe(true);
     expect(generate.mock.calls.length).toBeGreaterThan(1);
     expect(String(generate.mock.calls[0][2])).toContain("Original tool #1");
-    expect(generate.mock.calls.reduce((sum, args) => sum + Number((args[3] as { maxTokens: number }).maxTokens), 0)).toBeLessThanOrEqual(6000);
+    for (const args of generate.mock.calls) expect(args[3].maxTokens).toBe(6000);
   });
 
   it("locally reduces after a wrapped provider overflow without losing the claim", async () => {
@@ -214,7 +258,7 @@ describe("bounded reproduction judge context handling", () => {
     })).rejects.toThrow(/context/i);
   });
 
-  it("splits after a provider rejection, preserving raw provenance and the total output allowance", async () => {
+  it("splits after a provider rejection, preserving raw provenance and each child's output allowance", async () => {
     const claims = [claim("R1"), claim("R2", 2)];
     claims.forEach(item => { item.claim += " context".repeat(1000); });
     claims[0].rawInputToolCallId = 9;
@@ -234,7 +278,7 @@ describe("bounded reproduction judge context handling", () => {
     const childInputs = generate.mock.calls.slice(1).map(args => args[2]);
     expect(childInputs.join("\n")).toContain("/work/raw.csv");
     expect(childInputs.join("\n")).toContain("sample,value");
-    expect(generate.mock.calls.slice(1).reduce((sum, args) => sum + args[3].maxTokens, 0)).toBe(6000);
+    expect(generate.mock.calls.slice(1).map(args => args[3].maxTokens)).toEqual([6000, 6000]);
     for (const [, prompt, input, opts] of generate.mock.calls) {
       const request = { model: config.modelName, messages: [{ role: "system", content: prompt }, { role: "user", content: input }], max_tokens: opts.maxTokens, temperature: 0.1 };
       expect(estimateRequestTokens(request) + opts.maxTokens + 1024).toBeLessThanOrEqual(32768);
@@ -251,7 +295,7 @@ describe("bounded reproduction judge context handling", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
-  it("retries a batch with a larger output budget when the model ran out of tokens before its verdicts", async () => {
+  it("retries a singleton with a larger output budget when the model ran out of tokens before its verdict", async () => {
     const diagnostics: string[] = [];
     generate
       .mockRejectedValueOnce(new IncompleteGenerationError("BYOK provider did not return a complete answer (finish_reason=length, max_tokens=6000)", "length", 6000))
@@ -260,18 +304,18 @@ describe("bounded reproduction judge context handling", () => {
       ] }) });
     const result = await runBoundedReproductionJudge({
       config, prompt: "judge", title: "paper", abstract: "", logbook: "",
-      recordedResults: [claim("R1"), claim("R2", 2)], toolCalls: [call(1, "metric=1"), call(2, "metric=2")],
+      recordedResults: [claim("R1")], toolCalls: [call(1, "metric=1")],
       onDiagnostic: message => { diagnostics.push(message); },
     });
     expect(generate).toHaveBeenCalledTimes(2);
     expect(generate.mock.calls[0][3].maxTokens).toBe(6000);
     expect(generate.mock.calls[1][3].maxTokens).toBe(12000);
     expect(generate.mock.calls[1][2]).toBe(generate.mock.calls[0][2]);
-    expect(result.results.map(item => [item.id, item.verdict])).toEqual([["R1", "verified"], ["R2", "falsified"]]);
+    expect(result.results.map(item => [item.id, item.verdict])).toEqual([["R1", "verified"]]);
     expect(diagnostics.join("\n")).toMatch(/output budget exhausted at max_tokens=6000.*max_tokens=12000/);
   });
 
-  it("splits a batch at the output ceiling and names the failure if a single claim still cannot be graded", async () => {
+  it("splits an exhausted batch immediately and bounds retries if a single claim still cannot be graded", async () => {
     const diagnostics: string[] = [];
     generate.mockRejectedValue(new IncompleteGenerationError("did not finish (finish_reason=length)", "length"));
     const result = await runBoundedReproductionJudge({
@@ -280,8 +324,8 @@ describe("bounded reproduction judge context handling", () => {
       onDiagnostic: message => { diagnostics.push(message); },
     });
     const budgets = generate.mock.calls.map(args => args[3].maxTokens);
-    // Pair: 6000 → 12000 → 24000, then each half: 3000 → 6000 → 12000 → 24000.
-    expect(budgets).toEqual([6000, 12000, 24000, 3000, 6000, 12000, 24000, 3000, 6000, 12000, 24000]);
+    // Pair splits immediately; neither singleton restarts with a smaller allowance.
+    expect(budgets).toEqual([6000, 6000, 12000, 24000, 6000, 12000, 24000]);
     expect(result.results.map(item => [item.id, item.verdict])).toEqual([["R1", "inconclusive"], ["R2", "inconclusive"]]);
     expect(result.summary).toContain("The judge request failed for R1 (did not finish (finish_reason=length))");
     expect(diagnostics.some(message => /splitting 2 claims/.test(message))).toBe(true);

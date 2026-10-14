@@ -120,6 +120,8 @@ qP provenance schema v2 stores source/output text once in a SHA-256 blob map. Or
   - `captureProcessStream` (`server/reproduction-stream.ts`) keeps partial command output when a sandbox stream fails mid-run, so a timed-out experiment still leaves evidence in the logbook.
 - `POST /api/reproductions/:id/republish` — Admin re-submit to Future Science.
 
+The independent judge starts with at most three claims per batch and a 6,000-token allowance per request. Output-exhausted multi-claim batches split immediately; single claims can grow to 12,000 and then 24,000 tokens while context permits. Requests share the remaining 20-minute deadline across pending batches, capped at four minutes per request, so one stuck batch cannot consume all later batches' time. Provider failures leave affected claims inconclusive; these scheduling limits do not change scientific verdict criteria.
+
 Frontend: "Reproduce a publication" card on `/generate` (GPU + judge-model pickers, shared `PaperPicker` component), detail page `/reproductions/:id` (verdict banner, per-result verdicts, full report, raw logbook).
 
 ### Editorials API
