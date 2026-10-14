@@ -68,6 +68,12 @@ Preserve bounded command captures beyond the single agent-selected excerpt when 
 
 **Judge reasoning budget lesson**
 
+**Remote cleanup after workspace restart:** a lost local reproduction process does not imply that its Modal sandbox stopped.
+
+**Why:** after a workspace restart, the recorded sandbox still returned a running status while the controller was gone.
+
+**How to apply:** reattach using the saved sandbox ID, terminate orphaned work, and confirm a non-null exit status before declaring cleanup complete. A successful termination request can initially still poll as running. Preserve budget reservations and interrupted records.
+
 Treat output allowance as a per-request reasoning budget, not merely space for verdict JSON. Start with small batches, split exhausted multi-claim batches before retrying them, and leave deadline time for later batches.
 
 **Why:** a fresh completed experiment cycle yielded no independent verdicts: a 14-claim judge exhausted 6k, 12k, and 24k responses, then its children restarted at 3k and exhausted the shared deadline. A large context window does not imply sufficient reasoning output.
