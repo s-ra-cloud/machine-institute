@@ -67,12 +67,14 @@ with tempfile.TemporaryDirectory() as tmp:
     assert result["unrelated"] == "preserved"
 print("bookkeeping cases passed")
 `;
+    // The interpreter needs well under a second alone; the generous timeout only
+    // guards against a hung process when the full suite runs under heavy load.
     const result = spawnSync("python3", ["-I", "-c", python], {
-      input: JSON.stringify(fixture.functionSource), encoding: "utf8", timeout: 10_000,
+      input: JSON.stringify(fixture.functionSource), encoding: "utf8", timeout: 120_000,
       env: { PATH: process.env.PATH },
     });
     expect(result.error).toBeUndefined();
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("bookkeeping cases passed");
-  });
+  }, 150_000);
 });

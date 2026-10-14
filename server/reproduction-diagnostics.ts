@@ -2,6 +2,9 @@ import type { RecordedResult } from "./prompts/reproduce";
 import { sanitizeCompletionStructure, type CompletionStructure } from "./completion-structure";
 import type { ReproductionPagingDiagnostics } from "./reproduction-read-guard";
 
+/** Sanitized completion structure stays nested (httpResponse), everything else is a bounded primitive. */
+type DiagnosticRecord = Record<string, string | number | string[] | CompletionStructure>;
+
 const MAX_BYTES = 24_000;
 const MAX_EVENTS = 32;
 const snapshots = new WeakMap<object, ReproductionFailureDiagnostics>();
@@ -36,10 +39,10 @@ export interface ReproductionFailureDiagnostics {
   redaction: string;
   truncated: boolean;
   droppedEvents: number;
-  events: Array<Record<string, string | number | string[]>>;
+  events: Array<DiagnosticRecord>;
   claims: Array<{ id: string; claim: string; status: string }>;
   paging?: ReproductionPagingDiagnostics;
-  milestones?: Array<Record<string, string | number | string[]>>;
+  milestones?: Array<DiagnosticRecord>;
   identity?: { controller: string; model: string; provider: string; mode: string; build?: string };
 }
 
@@ -66,7 +69,7 @@ export class ReproductionDiagnostics {
       ...(build && /^[a-f0-9]{64}$/.test(build) ? { build } : {}) };
   }
 
-  private pin(event: Record<string, string | number | string[]>): void {
+  private pin(event: DiagnosticRecord): void {
     const milestones = this.data.milestones ??= [];
     if (milestones.length < 10) milestones.push(event);
   }
@@ -102,7 +105,7 @@ export class ReproductionDiagnostics {
     this.data.rounds = Math.max(this.data.rounds, safeNumber(event.round));
     this.data.callCount = Math.max(this.data.callCount, safeNumber(event.callCount));
     if (event.stopReason) this.stop(event.stopReason);
-    const safe: Record<string, string | number | string[]> = {
+    const safe: DiagnosticRecord = {
       ...sanitizeCompletionStructure(event),
       kind: diagnosticExcerpt(event.kind, 100), round: safeNumber(event.round),
       callCount: safeNumber(event.callCount),

@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { Menu, X, Lock, LogIn, LogOut, User, ChevronRight } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
-const navLinks = [
+const navLinks: { label: string; href: string; locked?: boolean }[] = [
   { label: "Home", href: "/" },
   { label: "Projects", href: "/projects" },
   { label: "Members", href: "/members" },

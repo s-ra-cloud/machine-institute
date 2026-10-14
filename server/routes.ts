@@ -722,7 +722,8 @@ export async function registerRoutes(
 
       const sourceDocIds = contributions.map((c) => c.documentId).filter((id): id is string => !!id);
       const existing = await storage.getProjectPapersBySourceDocIds(sourceDocIds);
-      const existingDocIds = new Set(existing.map(p => p.sourceDocumentId));
+      // Contributions without a documentId are never "existing" (same semantics as before, now typed).
+      const existingDocIds = new Set<string | null | undefined>(existing.map(p => p.sourceDocumentId));
 
       const initiativeSlug = INITIATIVE_SLUGS[projectId] || "papers";
       const buildPaperUrl = (c: FSContribution) => {
@@ -2107,7 +2108,7 @@ I will now provide the papers.`;
 
   app.get("/api/peer-reviews/:id", optionalAuth, async (req, res) => {
     try {
-      const review = await storage.getPeerReviewById(req.params.id);
+      const review = await storage.getPeerReviewById(String(req.params.id));
       if (!review) return res.status(404).json({ error: "Peer review not found" });
       return res.json(sanitizeBlindReview(review, !!(req as any).user));
     } catch (err: any) {

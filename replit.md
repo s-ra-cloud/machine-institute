@@ -115,6 +115,9 @@ qP provenance schema v2 stores source/output text once in a SHA-256 blob map. Or
   - Per-paper-per-model lock (`reproductions_journal_doc_model_uniq`, non-failed rows).
   - Pipeline (`server/reproduce.ts`): `loadPaperContext` → `fetchContributionMaterials` (`server/fs-materials.ts`: every `additionalMaterialsFiles` entry — README, `.py` scripts, `analysis_N_results.json`, `.ipynb`; binaries listed by URL) → `ReproductionSandbox.create` (`server/modal-sandbox.ts`, PyTorch CUDA image, `HF_TOKEN` injected) → upload to `/work/paper.md` + `/work/materials/` → tool loop with `list_files / read_file / write_file / run_command / record_result` (budget: 100 tool calls, 2 h wall-clock, 15 min per command) → sandbox terminated → judge call → deterministic paper-level verdict (any falsified ⇒ falsified; all verified ⇒ verified; some ⇒ partially verified; toy-only ⇒ toy; else inconclusive).
   - Publishes via `submitReproductionToFutureScience` as **"Response to a contribution"** with `linkOriginalContribution` = the original paper's URL; falsified results → `majorRevisions`, toy/inconclusive → `minorRevisions`. Title `Reproduction Report: "<paper title>"`, agentName `MachInstit <ModelCode>P-N1`, live-feed agentId `P`.
+  - Host resources: every sandbox (website and `scripts/live-reproduction.ts`) uses `REPRODUCTION_RESOURCES` from `server/reproduction-resources.ts` (2 CPU, 32 GiB RAM). Live validation on Oct 14 2026 showed the shipped `analysis3` experiment thrashing past the 15-minute command cap under 8 GiB and finishing in ~3 minutes under 32 GiB — fix host resources, never the paper's task counts. `scripts/diagnose-reproduction-timeout.ts` is the opt-in instrumentation for such timeouts. The constant lives in its own module because tests mock `../modal-sandbox`.
+  - Judge safeguards (`server/reproduction-judge.ts`): the judge receives the full `run_command` output (≤12,000 chars) for cited evidence so compound claims keep all their rows; `comparisonCountMismatch` (reported vs reproduced task/sample counts differ) and `hasRoundingOnlyRationale` (a "falsified" justified only by exceeding rounding precision) both downgrade a verdict to inconclusive. Safeguards only ever move verdicts toward inconclusive, never toward verified/falsified.
+  - `captureProcessStream` (`server/reproduction-stream.ts`) keeps partial command output when a sandbox stream fails mid-run, so a timed-out experiment still leaves evidence in the logbook.
 - `POST /api/reproductions/:id/republish` — Admin re-submit to Future Science.
 
 Frontend: "Reproduce a publication" card on `/generate` (GPU + judge-model pickers, shared `PaperPicker` component), detail page `/reproductions/:id` (verdict banner, per-result verdicts, full report, raw logbook).
@@ -212,3 +215,9 @@ OAuth2 SSO via Future Science (`future-science.org`). Machine Institute has no n
 - wouter (frontend routing)
 - zod + drizzle-zod (validation)
 - openai (single Replit-managed OpenRouter OpenAI-compatible transport for all native model families)
+
+## Verification
+
+- `npm run check` (tsc) must stay at 0 errors. `tsconfig.json` sets `target: ES2022` explicitly: esbuild (tsx + Vite) already treated the missing target as ES2022 for class-field semantics, so this only aligned the type-check with the runtime — do not lower it (ES2021 or below would switch esbuild to assign-style class fields).
+- `npm test` (vitest, 65 files) runs with `hookTimeout: 90s` / `testTimeout: 60s`: route suites import the whole server graph inside `beforeAll` and a few suites spawn real subprocesses, which exceed the 10 s / 5 s defaults when all workers transform files at once in this container. A suite that is slow in the full run but instant alone is load, not a regression.
+- Live reproduction logs are written to `generated-artifacts/live-logs/` and run state to `.local/state/live-reproduction/`; both are git- and deploy-ignored.
