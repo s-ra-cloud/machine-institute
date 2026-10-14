@@ -24,7 +24,7 @@ export function createSpendingGuard(onStop: (stop: BudgetStop) => void) {
         accountedDollars: accounted, reservationDollars: reservation, capDollars: cap,
       };
       onStop(stopped);
-      throw new Error(stopped.message);
+      throw Object.assign(new Error(stopped.message), { code: stopped.code });
     },
   };
 }

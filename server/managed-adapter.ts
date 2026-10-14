@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { requestFailureCode, requestFailureMessage } from "./request-failure";
 import { observingFetch, retainHttpStructure, type CompletionStructure } from "./completion-structure";
 import { getManagedConnection, resolveByocSelection, resolveManagedSelection } from "./managed-models";
 import { MANAGED_MODELS } from "../shared/model-catalog";
@@ -97,10 +98,11 @@ export function createByocChatClient(config: ModelProviderConfig, options: { max
     } catch (error: any) {
       // Provider SDK exceptions can contain request headers and credential data.
       // Preserve only coarse status/code metadata for safe retry classification.
-      throw Object.assign(new Error("BYOK provider request failed."), {
+      const failureCode = requestFailureCode(error);
+      throw Object.assign(new Error(requestFailureMessage(failureCode) ?? "BYOK provider request failed."), {
         status: Number.isSafeInteger(error?.status) ? error.status : undefined,
         statusCode: Number.isSafeInteger(error?.statusCode) ? error.statusCode : undefined,
-        code: typeof error?.code === "string" && /^[A-Z0-9_-]{1,80}$/i.test(error.code) ? error.code : undefined,
+        code: failureCode ?? (typeof error?.code === "string" && /^[A-Z0-9_-]{1,80}$/i.test(error.code) ? error.code : undefined),
       });
     }
   } } } };

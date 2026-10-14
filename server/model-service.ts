@@ -1,4 +1,5 @@
 import { MANAGED_MODELS } from "../shared/model-catalog";
+import { requestFailureCode, requestFailureMessage } from "./request-failure";
 import { completionStructure, type CompletionStructure } from "./completion-structure";
 import { isDeepSeekV4, reasoningContinuation } from "./reasoning-continuation";
 import { createByocChatClient, createManagedChatClient, type ManagedChatClient } from "./managed-adapter";
@@ -187,6 +188,9 @@ export function sanitizeContextRequestError(
   model: string,
   config?: Pick<ModelProviderConfig, "providerMode">,
 ): Error {
+  const failureCode = requestFailureCode(error);
+  const failureMessage = requestFailureMessage(failureCode);
+  if (failureMessage) return Object.assign(new Error(failureMessage), { code: failureCode });
   const status = error?.status ?? error?.statusCode;
   const paymentReason = providerPaymentReason(error);
   if (paymentReason) {
@@ -213,7 +217,7 @@ export function sanitizeContextRequestError(
     : [502, 503, 504].includes(Number(status))
       ? `Model provider temporarily unavailable (${status}). Retry later; this does not establish a credential problem.`
     : byoc
-      ? `BYOK provider request failed (${status ?? "unknown"}). Check your provider account and key, then retry.`
+      ? `BYOK provider request failed (${status ?? "unknown"}). The cause is unclassified; this does not establish a credential problem.`
       : `LLM request failed (${status ?? "unknown"}). Retry later or ask an administrator to check the managed integration.`;
   const result = new Error(message);
   const constraint = providerContextConstraint(error);

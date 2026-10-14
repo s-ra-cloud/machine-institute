@@ -6,12 +6,17 @@ describe("live-run spending guard (offline)", () => {
     const save = vi.fn();
     const guard = createSpendingGuard(save);
     expect(() => guard.check("DeepSeek", 4.76, 0.3, 5)).toThrow("before dispatch");
+    try {
+      guard.check("DeepSeek", 4.76, 0.3, 5);
+    } catch (error) {
+      expect(error).toMatchObject({ code: "SPENDING_CAP" });
+    }
     const wrapped = new Error("BYOK provider request failed (unknown)");
     expect(guard.failure?.message ?? wrapped.message).toContain("$5 spending guard");
     expect(guard.failure).toMatchObject({
       code: "SPENDING_CAP", accountedDollars: 4.76, reservationDollars: 0.3, capDollars: 5,
     });
-    expect(save).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledTimes(2);
   });
   it("keeps legitimate provider errors distinct when the cap has not fired", () => {
     const save = vi.fn();

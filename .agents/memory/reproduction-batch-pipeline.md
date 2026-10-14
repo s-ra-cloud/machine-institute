@@ -74,6 +74,12 @@ Treat output allowance as a per-request reasoning budget, not merely space for v
 
 **How to apply:** preserve cited evidence and conservative inconclusive outcomes; test both output exhaustion and slow requests with mocked providers before spending on another live run.
 
+Local budget errors must survive SDK wrapping and provider-error sanitization as local errors, not credential advice.
+
+**Why:** a live cycle correctly blocked dispatch at its cap but reported the blocked claims as unknown BYOK failures, hiding why they were ungraded. Separately, DeepSeek V4 exhausted the small response allowance even on single claims.
+
+**How to apply:** retain only allowlisted failure codes across nested SDK causes; stop further judge dispatch on a budget stop while preserving completed verdicts. Allocate reasoning space up front for this model family, still subject to context and spending checks.
+
 **Extraction repair guidance**
 
 Keep rejected-candidate identities explicit when correcting a quotation. Give canonical, packet-local context when an exact shared phrase can locate it, but never automatically accept the suggested passage or clear a rejection because a different valid quotation arrived.

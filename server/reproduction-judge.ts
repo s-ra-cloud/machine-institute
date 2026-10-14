@@ -4,6 +4,8 @@ import {
   type ModelProviderConfig,
   type ToolCallRecord,
 } from "./model-service";
+import { isDeepSeekV4 } from "./reasoning-continuation";
+import { requestFailureCode } from "./request-failure";
 import {
   ContextBudgetError,
   isContextOverflow,
@@ -20,6 +22,11 @@ import {
 // Each request gets its own reasoning allowance, including split children.
 // Never divide a fixed global allowance by the total registered claim count.
 const JUDGE_OUTPUT_TOKENS = 6000;
+function initialOutputTokens(config: ModelProviderConfig): number {
+  // Live V4 runs exhausted 6k even for single claims. Reserve reasoning room
+  // up front; context preflight still splits or rejects rather than losing evidence.
+  return isDeepSeekV4(config.modelName) ? 12_000 : JUDGE_OUTPUT_TOKENS;
+}
 // Reasoning and evidence comparison cost much more than serializing verdict rows.
 const JUDGE_MAX_BATCH_CLAIMS = 3;
 const JUDGE_REQUEST_TIMEOUT_MS = 240_000;
@@ -291,7 +298,7 @@ function partitionClaims(
       }
       return;
     }
-    const maxTokens = JUDGE_OUTPUT_TOKENS;
+    const maxTokens = initialOutputTokens(opts.config);
     const fittingLevel = firstFittingLevel(opts, group, maxTokens);
     if (fittingLevel !== undefined) {
       groups.push({ claims: group, initialLevel: fittingLevel, contextRetries: 0 });
@@ -416,10 +423,10 @@ export async function runBoundedReproductionJudge(
   const summaries: string[] = [];
   let observedInputLimit = Number.POSITIVE_INFINITY;
 
-  for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+  judgeGroups: for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
     const group = groups[groupIndex];
     const claims = group.claims;
-    let maxTokens = JUDGE_OUTPUT_TOKENS;
+    let maxTokens = initialOutputTokens(opts.config);
     const budget = budgetFor(opts.config, maxTokens, observedInputLimit);
     let level: InputReduction = group.initialLevel;
     let parsed: { summary: string; results: ClaimVerdict[] } | undefined;
@@ -447,7 +454,7 @@ export async function runBoundedReproductionJudge(
               initialLevel: firstFittingLevel(
                 opts,
                 child,
-                JUDGE_OUTPUT_TOKENS,
+                initialOutputTokens(opts.config),
                 0,
                 budget,
               ) ?? 0,
@@ -485,6 +492,14 @@ export async function runBoundedReproductionJudge(
         completed = true;
         break;
       } catch (error) {
+        const failureCode = requestFailureCode(error);
+        if (failureCode === "SPENDING_CAP" || failureCode === "INVALID_COST") {
+          const ids = groups.slice(groupIndex).flatMap(group => group.claims.map(claim => claim.id));
+          const message = `Local ${failureCode === "SPENDING_CAP" ? "spending limit reached" : "cost verification failed"}; no further judge requests will be sent. Ungraded claims: ${ids.join(", ")}. These remain inconclusive, not scientifically refuted.`;
+          summaries.push(message);
+          await diagnostic(opts.onDiagnostic, message);
+          break judgeGroups;
+        }
         // A provider refusing payment did not grade the experiment. Do not turn
         // a service failure into an inconclusive scientific verdict.
         if (isProviderPaymentFailure(error)) throw error;
@@ -506,7 +521,7 @@ export async function runBoundedReproductionJudge(
                   initialLevel: firstFittingLevel(
                     opts,
                     child,
-                    JUDGE_OUTPUT_TOKENS,
+                    initialOutputTokens(opts.config),
                     0,
                     budget,
                   ) ?? 0,
@@ -542,7 +557,7 @@ export async function runBoundedReproductionJudge(
             const children = [claims.slice(0, midpoint), claims.slice(midpoint)]
               .map(child => ({
                 claims: child,
-                initialLevel: firstFittingLevel(opts, child, JUDGE_OUTPUT_TOKENS, 0, budget) ?? 0,
+                initialLevel: firstFittingLevel(opts, child, initialOutputTokens(opts.config), 0, budget) ?? 0,
                 contextRetries,
               }));
             groups.splice(groupIndex, 1, ...children);

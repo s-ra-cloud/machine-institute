@@ -80,6 +80,37 @@ beforeEach(() => {
 });
 
 describe("bounded reproduction judge context handling", () => {
+  it("starts DeepSeek V4 with reasoning room instead of retrying the known-small 6k allowance", async () => {
+    generate.mockResolvedValue({ content: JSON.stringify({
+      summary: "Graded", results: [{ id: "R1", claim: "R1", verdict: "verified" }],
+    }) });
+    const result = await runBoundedReproductionJudge({
+      config: { ...config, modelName: "deepseek/deepseek-v4-pro-0813" },
+      prompt: "judge", title: "paper", abstract: "", logbook: "",
+      recordedResults: [claim("R1")], toolCalls: [call(1, "metric=1")],
+    });
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate.mock.calls[0][3].maxTokens).toBe(12000);
+    expect(result.results[0].verdict).toBe("verified");
+  });
+
+  it("stops dispatching on a local budget failure and preserves earlier independent verdicts", async () => {
+    generate.mockResolvedValueOnce({ content: JSON.stringify({
+      summary: "Graded", results: ["R1", "R2", "R3"].map(id => ({ id, claim: id, verdict: "verified" })),
+    }) }).mockRejectedValue(Object.assign(new Error("Local spending limit reached"), { code: "SPENDING_CAP" }));
+    const claims = Array.from({ length: 9 }, (_, i) => claim(`R${i + 1}`, i + 1));
+    const result = await runBoundedReproductionJudge({
+      config, prompt: "judge", title: "paper", abstract: "", logbook: "",
+      recordedResults: claims, toolCalls: claims.map((_, i) => call(i + 1, `metric=${i + 1}`)),
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result.results.slice(0, 3).every(r => r.verdict === "verified")).toBe(true);
+    expect(result.results.slice(3).every(r => r.verdict === "inconclusive")).toBe(true);
+    expect(result.summary).toContain("Local spending limit reached");
+    expect(result.summary).toContain("R4, R5, R6, R7, R8, R9");
+    expect(result.summary).not.toContain("provider request failed");
+  });
+
   it("grades 14 claims in small batches and lets later batches finish after a timed-out request", async () => {
     const claims = Array.from({ length: 14 }, (_, i) => claim(`R${i + 1}`, i + 1));
     let now = 0;

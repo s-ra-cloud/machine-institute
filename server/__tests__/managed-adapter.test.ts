@@ -14,6 +14,19 @@ const configs = [
   { providerMode: "platform" as const, provider: "google", modelName: "google/gemini-2.5-flash" },
 ];
 const completion = (finish_reason: unknown, message: any = { content: "complete" }) => ({ choices: [{ finish_reason, message: { role: "assistant", ...message } }] });
+it.each([
+  [{ cause: { code: "SPENDING_CAP", message: "PRIVATE" } }, "SPENDING_CAP", "Local spending limit"],
+  [{ name: "APIConnectionTimeoutError", message: "PRIVATE" }, "REQUEST_TIMEOUT", "timed out"],
+  [{ name: "APIConnectionError", message: "PRIVATE" }, "NETWORK_ERROR", "connection failed"],
+])("preserves safe failure classification through BYOK generation: %s", async (failure, code, message) => {
+  openaiCreate.mockRejectedValue(failure);
+  const error = await generateWithConfig({
+    providerMode: "byoc", provider: "openrouter", modelName: "deepseek/deepseek-v4-pro-0813", apiKey: "sk-or-offline-test-key-123456",
+  }, "judge", "evidence", { contextRequest: true }).catch(e => e);
+  expect(error).toMatchObject({ code });
+  expect(error.message).toContain(message);
+  expect(JSON.stringify(error)).not.toContain("PRIVATE");
+});
 beforeEach(() => {
   openaiCreate.mockReset(); constructorOptions.mockReset();
   vi.stubEnv("AI_INTEGRATIONS_OPENROUTER_API_KEY", "synthetic");
