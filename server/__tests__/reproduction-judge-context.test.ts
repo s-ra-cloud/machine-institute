@@ -51,6 +51,21 @@ beforeEach(() => {
 });
 
 describe("bounded reproduction judge context handling", () => {
+  it("retains the executed derivation source rather than trusting printed summaries", async () => {
+    const recorded = { ...claim("R1", 3), method: "raw-data-rederived" as const };
+    const source: ToolCallRecord = { index: 2, name: "write_file",
+      args: { path: "/work/derive.py", content: "print(data['precomputed_summary'])" },
+      result: "written", durationMs: 1, error: false };
+    await runBoundedReproductionJudge({
+      config, prompt: "judge", title: "study", abstract: "", logbook: "",
+      recordedResults: [recorded],
+      toolCalls: [source, { ...call(3, "metric=3"), args: { command: "python /work/derive.py" } }],
+    });
+    const user = String(generate.mock.calls[0][2]);
+    expect(user).toContain("Original tool #2: write_file");
+    expect(user).toContain("precomputed_summary");
+  });
+
   it("independently receives suitability, code changes and executed version evidence without promoting adapted success", async () => {
     const q = new QuestioningState();
     q.assessment = { research_question: "Estimate a population mean", question_quote: "Estimate a population mean from the sample",

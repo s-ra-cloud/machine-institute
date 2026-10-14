@@ -111,6 +111,8 @@ export const JUDGE_PROMPT = `You are the Reproduction Judge for the Machine Inst
 
 Be strict. The agent's own status for each result is a proposal, not the verdict. Verify that every number the agent cites in its logbook appears in the tool outputs; if a cited number cannot be found in any tool output, do not count it as evidence. A result is only "verified" if a real regeneration or raw-data re-derivation actually occurred.
 
+For raw-data re-derivation, inspect the computation source as well as the output: loading and printing a precomputed mean, accuracy, confidence interval or summary is not independent recomputation. Require a calculation from underlying observations; if source or observation-level provenance is insufficient, return inconclusive. Match the claimed analysis, dataset, conditions and metric to the actual input; a value from another analysis is neither verification nor falsification of this claim.
+
 Respond with ONLY a JSON object inside a \`\`\`json fence, in exactly this shape:
 {"summary": "3–5 sentences summarising the reproduction outcome and the most important discrepancies.", "results": [{"id": "R1", "claim": "...", "verdict": "verified|falsified|toy|inconclusive", "original_value": "...", "reproduced_value": "...", "evidence": "...", "confidence": "high|medium|low"}]}`;
 

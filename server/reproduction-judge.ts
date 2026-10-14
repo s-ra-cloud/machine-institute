@@ -63,6 +63,18 @@ type JudgeRequest = {
 function citedEvidence(result: RecordedResult, toolCalls: readonly ToolCallRecord[]): string {
   const ids = new Set<number>(result.evidenceToolCallIds ?? []);
   if (result.rawInputToolCallId !== undefined) ids.add(result.rawInputToolCallId);
+  // A printed number is not proof of recomputation. Preserve the last source
+  // write before each cited execution, even if chronological context is compacted.
+  if (result.method === "raw-data-rederived") {
+    for (const execution of toolCalls.filter(call => ids.has(call.index) && call.name === "run_command")) {
+      const command = String(execution.args.command ?? "");
+      const writes = toolCalls.filter(call => call.index < execution.index && call.name === "write_file"
+        && typeof call.args.path === "string" && command.split(/\s+/).includes(call.args.path));
+      const latest = new Map<string, ToolCallRecord>();
+      for (const write of writes) latest.set(String(write.args.path), write);
+      latest.forEach(write => ids.add(write.index));
+    }
+  }
   const calls = toolCalls.filter(call => ids.has(call.index));
   const blocks = calls.map(call => {
     const args = JSON.stringify(call.args ?? {});

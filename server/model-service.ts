@@ -1010,6 +1010,9 @@ export async function runToolLoop(
         stoppedBy = "deadline";
         result = "Deadline exhausted — this call was not executed. Write your final logbook.";
         error = true;
+      } else if (options.isStageComplete?.()) {
+        result = "Not executed: the stage is already complete. Its accepted evidence and results are unchanged.";
+        error = true;
       } else if (nowRequiredTool && call.function.name !== nowRequiredTool) {
         result = `Not executed: this stage now requires ${nowRequiredTool}. Remaining calls are reserved for completing that tool, not further inspection.`;
         error = true;

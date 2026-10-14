@@ -40,3 +40,15 @@ Recheck the stage's required tool between individual tool dispatches, including 
 **Why:** a live planner used its whole allowance in parallel read calls; a required-tool check only at request construction could not protect the final submission slot.
 
 **How to apply:** refuse surplus inspection without consuming the closing reserve, then request the closing tool with its declared schema. Never execute textual pseudo-tool markup as if it were a provider tool call.
+
+**Computation completion and judging**
+
+Do not force a computation's closing submission while it still needs execution repairs. Automatically advance a successful designated computation to assessment, without treating execution success as scientific verification. Check stage completion between parallel tool dispatches.
+
+**Why:** live derivation stages reached the round cap while a forced closing tool prevented further repairs; redundant closing requests and parallel reruns waste the shared allowance.
+
+For raw-data re-derivation, retain the latest computation source preceding each cited execution in the judge's protected evidence, not only chronological context.
+
+**Why:** matching printed metrics can come from stored summary fields instead of independent computation. A raw-looking filename and an exit-zero command cannot establish re-derivation.
+
+**How to apply:** inspect observations, computation, and analysis identity together; summary extraction or insufficient provenance must remain inconclusive, even if every printed value matches.

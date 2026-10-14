@@ -366,13 +366,17 @@ describe("batch reproduction pipeline (website entrypoint, offline)", () => {
         },
         derivation: turn => {
           if (turn.step === 0) return complete(null, [tool("write_file", { path: "/work/results/derive_X2.py", content: "import csv\nrows = [float(r['beta']) for r in csv.DictReader(open('/work/materials/raw.csv'))]\nprint('loaded /work/materials/raw.csv')\nprint('R2 beta_mean=%.2f' % (sum(rows) / len(rows)))\n" })]);
-          if (turn.step === 1) return complete(null, [tool("run_command", { command: DERIVE })]);
+          // Once the first computation succeeds, a parallel duplicate must not run.
+          if (turn.step === 1) return complete(null, [
+            tool("run_command", { command: DERIVE }),
+            tool("run_command", { command: DERIVE }),
+          ]);
           return complete(null, [tool("submit_for_assessment", { evidence_tool_call_id: lastToolCallId(turn) })]);
         },
         judge: judge(checkpoints),
       });
       const result = await start();
-      expect(modelStages(trace)).toEqual(["extraction", "planning", "assessment", "derivation", "derivation", "derivation", "assessment"]);
+      expect(modelStages(trace)).toEqual(["extraction", "planning", "assessment", "derivation", "derivation", "assessment"]);
       expect(sb.commands.map(c => c.command)).toEqual([ANALYZE, DERIVE]);
       expect(sb.files.get("/work/results/derive_X2.py")).toContain("csv.DictReader");
       const derivation = trace.find(t => t.stage === "derivation")!;
@@ -394,6 +398,32 @@ describe("batch reproduction pipeline (website entrypoint, offline)", () => {
       if (mode === "deferred") expect(result.logbook).toContain("Assessment: R1: verified, R2: verified. R1=verified R2=deferred to X2");
       expect(result.logbook).not.toContain("System-finalized");
     });
+  });
+
+  it("allows a last-call computation repair instead of forcing a submission of failed evidence", async () => {
+    setPaper(1, [file("raw.csv", RAW_CSV)]);
+    const command = "python /work/results/derive_X1.py";
+    let executions = 0;
+    sandbox(cmd => cmd === command
+      ? (++executions < 9 ? fail("KeyError: wrong_column") : ok("loaded /work/materials/raw.csv\nR1 alpha_mean=0.50"))
+      : undefined);
+    const { checkpoints, start } = prepare();
+    const trace = respond({
+      extraction: extraction(sentences(1)),
+      planning: () => complete(null, [tool("submit_plan", { experiments: [{
+        method: "raw-data-rederived", material_paths: ["/work/materials/raw.csv"],
+        raw_inputs: ["/work/materials/raw.csv"], rationale: "Recompute the score from observation rows.",
+        claims: [{ claim_id: "R1", measurement: "mean of observation values" }],
+      }] })]),
+      derivation: turn => turn.step === 0
+        ? complete(null, [tool("write_file", { path: "/work/results/derive_X1.py", content: "print('computation fixture')" })])
+        : complete(null, [tool("run_command", { command })]),
+      assessment: recordAll, judge: judge(checkpoints),
+    });
+    const result = await start();
+    expect(executions).toBe(9);
+    expect(result.counts.verified).toBe(1);
+    expect(trace.filter(turn => turn.stage === "derivation")).toHaveLength(10);
   });
 
   it("finalizes an unassessed claim deterministically when the assessor never records, without inventing a verdict", async () => {

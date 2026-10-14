@@ -481,6 +481,7 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
         "1. Identify which shipped script prints each claim's number (README first; read a script only to confirm what it prints and which files it reads).",
         "2. One experiment per command; list every claim its output measures, each with a measurement description. Prefer analysis/evaluation scripts over long training scripts; set timeout_seconds (max 900) for slow runs.",
         "3. Claims whose numbers no shipped script prints but shipped raw data can recompute: method raw-data-rederived with raw_inputs (you will write the computation after the plan is accepted).",
+        "For every claim, establish the matching analysis, dataset, conditions and metric from inspected source or README. A JSON filename is not proof that it contains raw observations. Inspect its structure: precomputed means, accuracies or confidence intervals are summaries, not raw inputs for recomputation. Prefer the matching shipped rerun over extracting stored summary numbers; never substitute results from a different analysis.",
         "4. Claims needing unavailable models, data, GPU-days or external services: method blocked with the missing material named in rationale; use toy only when a reduced-scale run of a shipped script is possible.",
         `Every pending claim must be assigned exactly once. Limits: ${PLAN_LIMITS.maxExperiments} experiments, ${PLAN_LIMITS.maxClaimsPerExperiment} claims per experiment, ${PLAN_LIMITS.maxMaterialPaths} material paths per experiment.`,
       ].join("\n"),
@@ -724,7 +725,7 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
     const script = questioning ? `materials/derive_${x.id}.py` : `/work/results/derive_${x.id}.py`;
     const tools = [...pickTools(["read_file", "list_files", "read_tool_result", "write_file", "run_command", ...(questioning ? ["setup_environment"] : [])]), SUBMIT_FOR_ASSESSMENT_TOOL];
     const packet = [
-      `CURRENT STAGE: computation for experiment ${x.id} (${x.method}). Write and run the claim-specific computation, then call submit_for_assessment citing the successful run_command ID. You have ${allowance} tool calls; the last one must be submit_for_assessment.`,
+      `CURRENT STAGE: computation for experiment ${x.id} (${x.method}). Write and run the claim-specific computation. The application submits a successful execution of the requested script for assessment automatically; no closing tool call is needed. You have ${allowance} tool calls. Use submit_for_assessment to declare an evidenced limitation if computation is impossible.`,
       `Claims and planned measurements:\n${x.claims.map(c => describeClaim(session.recorded.get(c.claimId)!, c.measurement)).join("\n")}\nRationale: ${x.rationale.slice(0, 600)}`,
       x.rawInputs.length ? `Raw inputs (already read by the application; cite these read IDs later as raw_input_tool_call_id):\n${x.rawInputs.map(path => {
         const read = rawReads.get(path)!;
@@ -761,12 +762,28 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
     };
     await runStage({
       name: "derivation", allowance, packet, tools, execute,
-      system: `STAGE CONTRACT (computation): write the claim-specific computation, run it, then submit_for_assessment. Available tools: ${toolList(tools)}.`,
+      system: `STAGE CONTRACT (computation): write the claim-specific computation and run it. Successful execution is submitted automatically for assessment, not automatically verified. Available tools: ${toolList(tools)}.`,
       isComplete: () => done,
-      requiredTool: () => !done && phaseCalls >= allowance - 1 ? "submit_for_assessment" : undefined,
-      prematureStop: "Run the computation with run_command and then call submit_for_assessment; prose does not end the stage.",
+      // Do not force submission before a successful execution: that locks out
+      // write_file/run_command repairs and can repeat refusals until the round cap.
+      prematureStop: "Run the computation with run_command, or submit an evidenced limitation; prose does not end the stage.",
       prematureStopRecoveries: 2,
-      onRecord: record => { if (record.name === "run_command" && !record.result.startsWith("Refused")) x.executionIds.push(record.index); },
+      onRecord: record => {
+        if (record.name !== "run_command" || record.result.startsWith("Refused")) return;
+        x.executionIds.push(record.index);
+        const command = String(record.args.command ?? "").trim();
+        const expected = `python ${script}`;
+        const runsComputation = command === expected || command === `python3 ${script}`
+          || Boolean(x.command && command === x.command);
+        const namesInput = x.method !== "raw-data-rederived"
+          || x.rawInputs.some(path => command.includes(path) || record.result.includes(path));
+        if (runsComputation && succeeded(record) && namesInput) {
+          x.evidenceId = record.index;
+          x.status = "executed";
+          done = true;
+          x.repairs.push(`automatically submitted successful computation #${record.index} for assessment`);
+        }
+      },
       state: () => JSON.stringify({ stage: "derivation", experiment: x.id, claims: x.claims.map(c => c.claimId), executions: x.executionIds.slice(-4), done }),
     });
     if (done) return;
