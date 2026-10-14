@@ -43,12 +43,25 @@ export function extractionRepairPassage(rejected: string, packet: string): strin
 /** Why a valid quotation is not registered as a separate claim, or undefined when it should be. */
 export function extractionSkipReason(claim: string, registered: readonly string[]): "duplicate" | "no-measurement" | "claim-limit" | undefined {
   const normalized = normalizeClaimText(claim);
-  if (!/[0-9]/.test(claim)) return "no-measurement";
+  // Section labels and citation years alone are not measured findings.
+  const measurements = claim
+    .replace(/\b(?:analysis|figure|table|section|experiment)\s+\d+\b/gi, "")
+    .replace(/\([^)]*\b(?:19|20)\d{2}\b[^)]*\)/g, "");
+  if (!/[0-9]/.test(measurements)) return "no-measurement";
   for (const existing of registered) {
     const other = normalizeClaimText(existing);
     if (normalized === other) return "duplicate";
     const [shorter, longer] = normalized.length <= other.length ? [normalized, other] : [other, normalized];
     if (wordCount(shorter) >= 6 && longer.includes(shorter)) return "duplicate";
+    // Packet-edge fragments may end mid-word or omit a final clause.
+    const shortWords = shorter.split(/\s+/);
+    const longWords = longer.split(/\s+/);
+    if (shortWords.length >= 12) {
+      const prefix = shortWords.slice(0, -1).join(" ");
+      const position = longWords.join(" ").indexOf(prefix);
+      const suffix = position < 0 ? "" : longWords.join(" ").slice(position + prefix.length).trimStart();
+      if (position >= 0 && prefix.length >= shorter.length * 0.9 && suffix.startsWith(shortWords.at(-1)!)) return "duplicate";
+    }
   }
   if (registered.length >= EXTRACTION_CLAIM_LIMIT) return "claim-limit";
   return undefined;
@@ -144,7 +157,7 @@ export async function extractReproductionClaims(input: {
             copyErrors.push("copy_source_quote must be a boolean");
           }
           const key = JSON.stringify(candidate.claim ?? candidate);
-          const errors = [...copyErrors, ...validateCandidate(candidate, packet)];
+          const errors = [...copyErrors, ...validateCandidate(candidate, packet, input.paper)];
           const existing = Array.from(unresolved).find(([, entry]) => entry.key === key)?.[0];
           if (replaces !== undefined && (typeof replaces !== "string" || !unresolved.has(replaces))) {
             errors.push("replaces must name an outstanding rejection ID; accepted claims cannot be replaced");

@@ -331,6 +331,20 @@ function resultForClaim(result: RecordedResult): ClaimVerdict {
   };
 }
 
+/** Conservative guard for explicit sample-count mismatches, independent of model obedience. */
+export function comparisonCountMismatch(claim: string, reproduced: string): boolean {
+  const counts = (text: string) => Array.from(text.matchAll(/\b(\d+)[ -]+(?:binary[ -]+)?(?:tasks|samples|participants|observations)\b/gi))
+    .map(match => Number(match[1]));
+  const expected = counts(claim);
+  const actual = counts(reproduced);
+  return expected.length === 1 && actual.length === 1 && expected[0] !== actual[0];
+}
+
+/** A rounding-only rationale does not establish scientific contradiction. */
+export function hasRoundingOnlyRationale(evidence: string): boolean {
+  return /\b(?:beyond|exceeds?|exceeding|outside)\s+(?:the\s+)?rounding(?:\s+(?:tolerance|precision))?\b/i.test(evidence);
+}
+
 function aggregate(
   recordedResults: RecordedResult[],
   judged: Map<string, ClaimVerdict>,
@@ -345,6 +359,23 @@ function aggregate(
   }).map(recorded => {
     const proposed = judged.get(recorded.id);
     if (!proposed) return resultForClaim(recorded);
+    if (proposed.verdict === "falsified" && hasRoundingOnlyRationale(proposed.evidence ?? "")) {
+      return {
+        ...resultForClaim(recorded),
+        verdict: "inconclusive" as const,
+        reproducedValue: proposed.reproducedValue ?? recorded.reproducedValue,
+        evidence: `Comparison rejected: exceeding rounding precision alone does not establish a material scientific contradiction. Assess experimental uncertainty and repeatability. Judge rationale requiring reassessment: ${proposed.evidence}`,
+      };
+    }
+    if ((proposed.verdict === "verified" || proposed.verdict === "falsified")
+      && comparisonCountMismatch(recorded.claim, proposed.reproducedValue ?? recorded.reproducedValue ?? "")) {
+      return {
+        ...resultForClaim(recorded),
+        verdict: "inconclusive" as const,
+        reproducedValue: proposed.reproducedValue ?? recorded.reproducedValue,
+        evidence: `Comparison rejected: the reported and reproduced sample/task counts differ. Establish matching conditions before verification or falsification. ${proposed.evidence ?? recorded.evidence ?? ""}`,
+      };
+    }
     return {
       ...resultForClaim(recorded),
       verdict: proposed.verdict,
@@ -531,9 +562,14 @@ export async function runBoundedReproductionJudge(
     }
   }
 
+  const aggregated = aggregate(recordedResults, judged);
+  const rejectedComparisons = aggregated.filter(result => result.evidence?.startsWith("Comparison rejected:"));
   return {
-    summary: summaries.join("\n\n"),
-    results: opts.questioning ? opts.questioning.constrainOriginalVerdicts(aggregate(recordedResults, judged)) : aggregate(recordedResults, judged),
+    summary: [
+      rejectedComparisons.length ? `Comparison safeguard: ${rejectedComparisons.map(result => result.id).join(", ")} remain inconclusive because comparison validity or scientific tolerance was not established; see the individual evidence explanations. Any contrary verdict in the model narrative below is superseded.` : "",
+      ...summaries,
+    ].filter(Boolean).join("\n\n"),
+    results: opts.questioning ? opts.questioning.constrainOriginalVerdicts(aggregated) : aggregated,
     ...(opts.questioning ? { independentAssessmentAvailable: judged.size > 0 } : {}),
   };
 }

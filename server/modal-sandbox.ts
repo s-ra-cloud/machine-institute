@@ -1,3 +1,4 @@
+import { captureProcessStream } from "./reproduction-stream";
 // Thin wrapper around a Modal GPU Sandbox used by the reproduction agent. Keeps
 // all Modal-specific API surface in one place so the agent loop only sees
 // exec / read / write primitives.
@@ -107,8 +108,8 @@ export class ReproductionSandbox {
     // Read both streams concurrently with the exit wait so large outputs can't
     // deadlock the process on a full pipe.
     const [stdout, stderr, exitCode] = await Promise.all([
-      proc.stdout.readText().catch(() => ""),
-      proc.stderr.readText().catch(() => ""),
+      captureProcessStream(proc.stdout),
+      captureProcessStream(proc.stderr),
       Promise.race([
         proc.wait().catch(() => null),
         new Promise<number | null>((resolve) => setTimeout(() => { timedOut = true; resolve(null); }, opts.timeoutMs + 15_000)),

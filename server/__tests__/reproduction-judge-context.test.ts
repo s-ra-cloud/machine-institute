@@ -13,11 +13,40 @@ import type { ToolCallRecord } from "../model-service";
 import { ContextBudgetError, IncompleteGenerationError, estimateRequestTokens } from "../llm-context";
 import { QuestioningState } from "../reproduction-questioning";
 
+it("overrides a judge's falsified verdict when reproduced task counts are explicitly incompatible", async () => {
+  generate.mockResolvedValueOnce({ content: JSON.stringify({
+    summary: "Different accuracy.",
+    results: [{ id: "R1", claim: "On 72 binary tasks accuracy was 1.000.", verdict: "falsified", reproduced_value: "96 tasks, accuracy 0.969", evidence: "Different accuracy." }],
+  }) });
+  const result = await runBoundedReproductionJudge({
+    config, prompt: "Judge", title: "Test", abstract: "", logbook: "",
+    recordedResults: [{ ...claim("R1"), claim: "On 72 binary tasks accuracy was 1.000." }],
+    toolCalls: [call(1, "96 tasks, accuracy 0.969")],
+  });
+  expect(result.results[0].verdict).toBe("inconclusive");
+  expect(result.results[0].evidence).toContain("counts differ");
+});
+
 const config = {
   providerMode: "platform" as const,
   provider: "openrouter",
   modelName: "test-model",
 };
+
+it("does not finalize a scientific falsification justified by rounding tolerance alone", async () => {
+  generate.mockResolvedValueOnce({ content: JSON.stringify({
+    summary: "Falsified beyond rounding.",
+    results: [{ id: "R1", claim: "Mean gain was 3.632.", verdict: "falsified", reproduced_value: "3.635", evidence: "The point estimate differs beyond rounding tolerance." }],
+  }) });
+  const result = await runBoundedReproductionJudge({
+    config, prompt: "Judge", title: "Test", abstract: "", logbook: "",
+    recordedResults: [{ ...claim("R1"), claim: "Mean gain was 3.632." }],
+    toolCalls: [call(1, "gain 3.635")],
+  });
+  expect(result.results[0].verdict).toBe("inconclusive");
+  expect(result.results[0].evidence).toContain("rounding precision alone");
+  expect(result.summary).toContain("superseded");
+});
 
 function claim(id: string, n = 1): RecordedResult {
   return {

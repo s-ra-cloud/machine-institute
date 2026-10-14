@@ -39,7 +39,7 @@ export interface ExtractedCandidate {
 }
 
 /** Does not infer numbers, paraphrases, source identity, or scientific meaning. */
-export function validateCandidate(candidate: unknown, packet: SourcePacket): string[] {
+export function validateCandidate(candidate: unknown, packet: SourcePacket, source?: string): string[] {
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return ["candidate must be an object"];
   const c = candidate as Record<string, unknown>;
   const errors: string[] = [];
@@ -54,6 +54,15 @@ export function validateCandidate(candidate: unknown, packet: SourcePacket): str
   } else {
     if (!packet.text.includes(c.source_quote)) errors.push("source_quote must occur exactly in this packet");
     if (typeof c.claim === "string" && !c.source_quote.includes(c.claim)) errors.push("claim must occur verbatim in source_quote");
+    if (source && typeof c.claim === "string" && packet.text.includes(c.source_quote) && c.source_quote.includes(c.claim)) {
+      const start = packet.start + packet.text.indexOf(c.source_quote) + c.source_quote.indexOf(c.claim);
+      const end = start + c.claim.length;
+      const word = new RegExp("[\\p{L}\\p{N}]", "u");
+      if ((word.test(source[start - 1] ?? "") && word.test(c.claim.charAt(0)))
+        || (word.test(source[end] ?? "") && word.test(c.claim.slice(-1)))) {
+        errors.push("claim cuts through a source word; quote a complete finding, not a packet-edge fragment");
+      }
+    }
     for (const key of ["original_value", "required_material"]) {
       if (typeof c[key] === "string" && !c.source_quote.includes(c[key])) errors.push(`${key} must occur verbatim in source_quote`);
     }

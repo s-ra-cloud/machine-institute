@@ -23,6 +23,7 @@ description: Why the reproduction run is a host-executed batch pipeline, not a p
 - Test gotcha: context protection appends each stage's `prematureStop` text to *every* request as the active instruction, so a scripted model cannot detect a nudge by that text; detect it by the presence of an assistant message instead. The loop also mutates its `messages` array in place — snapshot it in traces.
 - Reasoning models spend `max_tokens` on thinking: DeepSeek V4 returned `finish_reason=length` with 8000 reasoning tokens and *no* content/tool call (sweep) and the judge's 6000-token batch budget died the same way, turning 23 graded claims into "judge batch failed → all inconclusive". A length-stop with nothing in it is a budget problem, not a prose problem: retry the same request with a larger output reserve (loop and judge both do this now) before spending any recovery nudge, and never swallow the judge error without its message.
 - Assessment tolerance must match the judge's standard ("reasonable tolerance"): with "within rounding/reported precision" the model recorded 3.632 vs 3.635 as falsified. GPU/stochastic reruns differ in the third decimal; the rule now asks whether the paper's statement (sign, magnitude, significance) still holds.
+- The independent judge can repeat the agent's rounding-only rationale despite reasonable-tolerance instructions. Such a rationale needs reassessment, not automatic scientific falsification or automatic verification. Near-zero sign changes with both intervals spanning zero are not evidence of a reversed effect.
 - Run Python in the sandbox with `PYTHONUNBUFFERED=1`: a script killed at the timeout otherwise leaves an empty capture, so the timeout cannot be explained from evidence.
 
 **Provider outage recovery**
@@ -42,6 +43,10 @@ Recheck the stage's required tool between individual tool dispatches, including 
 **How to apply:** refuse surplus inspection without consuming the closing reserve, then request the closing tool with its declared schema. Never execute textual pseudo-tool markup as if it were a provider tool call.
 
 **Computation completion and judging**
+
+For every reproduction method, establish matched samples/subsets and conditions before scientific verification or falsification. A successful shipped script may implement a different experiment. Preserve partial process output on stream errors instead of replacing it with empty text.
+
+**Why:** a completed live report called a 72-task claim falsified using a 96-task rerun, and a killed experiment's output was unavailable. Completion alone does not establish comparison validity; missing capture must remain distinguishable from no progress.
 
 Do not force a computation's closing submission while it still needs execution repairs. Automatically advance a successful designated computation to assessment, without treating execution success as scientific verification. Check stage completion between parallel tool dispatches.
 
