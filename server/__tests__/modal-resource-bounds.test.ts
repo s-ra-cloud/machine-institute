@@ -13,8 +13,17 @@ vi.mock("modal", () => ({
   },
 }));
 import { ReproductionSandbox } from "../modal-sandbox";
+import { REPRODUCTION_RESOURCES } from "../reproduction-resources";
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
 describe("host-owned Modal resource bounds", () => {
+  it("reserves enough host memory for full activation caches without increasing GPU or lifetime", async () => {
+    vi.stubEnv("MODAL_TOKEN_ID", "offline"); vi.stubEnv("MODAL_TOKEN_SECRET", "offline");
+    await ReproductionSandbox.create({ gpu: "A10G", timeoutMs: 8400000, resourceLimits: REPRODUCTION_RESOURCES });
+    expect(create).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+      gpu: "A10G", timeoutMs: 8400000, cpu: 2, cpuLimit: 2, memoryMiB: 32768, memoryLimitMiB: 32768,
+    }));
+    expect(8400 * (0.000306 + 2 * 0.00001314 + 32 * 0.00000222)).toBeLessThan(3.5);
+  });
   it("passes hard CPU and memory limits without changing GPU or lifetime", async () => {
     vi.stubEnv("MODAL_TOKEN_ID", "offline"); vi.stubEnv("MODAL_TOKEN_SECRET", "offline");
     await ReproductionSandbox.create({

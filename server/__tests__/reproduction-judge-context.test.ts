@@ -80,6 +80,19 @@ beforeEach(() => {
 });
 
 describe("bounded reproduction judge context handling", () => {
+  it("retains separate rows of a compound claim beyond the selected excerpt", async () => {
+    const output = "band mean=-0.013 CI=[-0.052,0.027]\n" + "intermediate rows\n".repeat(500)
+      + "layer=12 mean=0.132 CI=[0.085,0.188] improved=76.7%";
+    await runBoundedReproductionJudge({
+      config, prompt: "judge", title: "Study", abstract: "", logbook: "",
+      recordedResults: [{ ...claim("R1"), claim: "Band and layer 12 effects.",
+        evidenceExcerpt: "band mean=-0.013 CI=[-0.052,0.027]" }],
+      toolCalls: [call(1, output)],
+    });
+    const input = String(generate.mock.calls[0][2]);
+    expect(input).toContain("band mean=-0.013");
+    expect(input).toContain("layer=12 mean=0.132 CI=[0.085,0.188] improved=76.7%");
+  });
   it("retains the executed derivation source rather than trusting printed summaries", async () => {
     const recorded = { ...claim("R1", 3), method: "raw-data-rederived" as const };
     const source: ToolCallRecord = { index: 2, name: "write_file",

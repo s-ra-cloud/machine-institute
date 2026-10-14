@@ -12,6 +12,7 @@ import { fetchContributionMaterials, materialSandboxPath, formatMaterialsInvento
 import { preparationIssue, repairedSourceRefusal } from "./reproduction-preparation";
 import { isPlannedEntrypoint } from "./reproduction-entrypoint";
 import { ReproductionSandbox, isModalConfigured, type GpuType } from "./modal-sandbox";
+import { REPRODUCTION_RESOURCES } from "./reproduction-resources";
 import {
   verdictsFromRecordedResults,
   countVerdicts,
@@ -605,7 +606,7 @@ async function runReproductionWithDiagnostics(opts: RunReproductionOptions, diag
     await emitEvent("reproduction-sandbox", "Warning: HF_TOKEN is not configured — gated Hugging Face models (e.g. Llama 3) will not be downloadable.");
   }
   diagnostics.stage("sandbox");
-  const sandbox = await ReproductionSandbox.create({ gpu, timeoutMs: REPRODUCTION_BUDGET.sandboxTimeoutMs, ...(questioning ? { questioning: true } : { env }) });
+  const sandbox = await ReproductionSandbox.create({ gpu, timeoutMs: REPRODUCTION_BUDGET.sandboxTimeoutMs, resourceLimits: REPRODUCTION_RESOURCES, ...(questioning ? { questioning: true } : { env }) });
 
   const recorded = session.recorded;
   const readGuard = new ReproductionReadGuard();

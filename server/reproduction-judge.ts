@@ -81,16 +81,18 @@ function citedEvidence(result: RecordedResult, toolCalls: readonly ToolCallRecor
     const excerpt = result.evidenceExcerpt?.trim();
     const excerptPosition = excerpt ? call.result.indexOf(excerpt) : -1;
     const exactExcerptFound = excerptPosition >= 0;
-    // Keep the exact cited excerpt and a small surrounding window. Large raw
-    // reads are represented by a clearly labelled bounded page.
+    // A compound claim may need several rows, not just the agent's selected
+    // excerpt. Preserve bounded execution captures in full. Large raw reads
+    // still use targeted pages; context pressure is handled by judge batching.
     let output = call.result;
-    if (exactExcerptFound) {
+    const retainedExecution = call.name === "run_command" && call.result.length <= 12_000;
+    if (exactExcerptFound && !retainedExecution) {
       const start = Math.max(0, excerptPosition - 250);
       const end = Math.min(call.result.length, excerptPosition + excerpt!.length + 250);
       output = `${start > 0 ? "[... preceding output omitted ...]\n" : ""}${call.result.slice(start, end)}${end < call.result.length ? "\n[... following output omitted ...]" : ""}`;
     } else if (call.name === "read_file" && call.result.length > 8_000) {
       output = `${call.result.slice(0, 8_000)}\n[... raw read output bounded to the first 8000 characters; cite a retained exact excerpt ...]`;
-    } else if (call.result.length > 12_000) {
+    } else if (!retainedExecution && call.result.length > 12_000) {
       output = `${call.result.slice(0, 12_000)}\n[... uncited command output bounded ...]`;
     }
     const provenance = result.rawInputToolCallId === call.index

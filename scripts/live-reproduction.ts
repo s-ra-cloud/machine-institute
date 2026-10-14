@@ -8,6 +8,7 @@ import { runReproduction } from "../server/reproduce";
 import { getReproducerPrompt, getJudgePrompt } from "../server/prompts/reproduce";
 import { INITIATIVE_DOC_IDS, INITIATIVE_SLUGS, getJournalDisplayName } from "../server/journals";
 import { ReproductionSandbox } from "../server/modal-sandbox";
+import { REPRODUCTION_RESOURCES } from "../server/reproduction-resources";
 import { getReproductionFailureDiagnostics } from "../server/reproduction-diagnostics";
 import { createSpendingGuard } from "./live-reproduction-budget";
 
@@ -73,13 +74,15 @@ const create = ReproductionSandbox.create.bind(ReproductionSandbox);
 ReproductionSandbox.create = async opts => {
   if (opts.gpu !== "A10G" || opts.timeoutMs > 8_400_000)
     throw new Error("Unbudgeted Modal configuration.");
-  // Reserve $5 per allocation, without refunds: A10G + 2 CPU + 8 GiB
-  // at the published per-second rates for the full 2h20m lifetime is < $3.
+  // Reserve $5 per allocation, without refunds: A10G + 2 CPU + 32 GiB.
+  // Standard Modal pricing checked 2026-10-14: $0.000306/GPU-second,
+  // $0.00001314/core-second, $0.00000222/GiB-second.
+  // Full 8400 seconds = $3.39, leaving >$1.60 for build/overhead.
   // Remaining reserve covers image build/overhead. Completed allocations may
   // only be reconciled using verified termination and conservative cost bounds.
   spendingGuard.check("Modal", ledger.modalReserved ?? 0, 5, 10);
   ledger.modalReserved = (ledger.modalReserved ?? 0) + 5; saveLedger();
-  const sandbox = await create({ ...opts, resourceLimits: { cpu: 2, memoryMiB: 8192 } });
+  const sandbox = await create({ ...opts, resourceLimits: REPRODUCTION_RESOURCES });
   try {
     // Remote GPU allocation can outlive this process and its temporary log.
     save("sandbox", { sandboxId: sandbox.sandboxId, allocatedAt: new Date().toISOString() });

@@ -44,6 +44,10 @@ Recheck the stage's required tool between individual tool dispatches, including 
 
 **Computation completion and judging**
 
+Full-token activation caches need substantial host RAM, not just GPU VRAM. Diagnose sudden per-prompt slowdowns with timing, retained output and stack traces before extending execution deadlines or shrinking scientific task sets.
+
+**Why:** an isolated unchanged 72-task analysis ran prompts in ~0.1 seconds, then took 266–299 seconds per prompt as CPU caches grew under an 8-GiB resource bound. With 32 GiB, the same shipped analysis completed in 186 seconds in the live website pipeline without scientific code changes. Sufficient host RAM matters even when GPU VRAM fits the model.
+
 For every reproduction method, establish matched samples/subsets and conditions before scientific verification or falsification. A successful shipped script may implement a different experiment. Preserve partial process output on stream errors instead of replacing it with empty text.
 
 **Why:** a completed live report called a 72-task claim falsified using a 96-task rerun, and a killed experiment's output was unavailable. Completion alone does not establish comparison validity; missing capture must remain distinguishable from no progress.
@@ -53,6 +57,10 @@ Do not force a computation's closing submission while it still needs execution r
 **Why:** live derivation stages reached the round cap while a forced closing tool prevented further repairs; redundant closing requests and parallel reruns waste the shared allowance.
 
 For raw-data re-derivation, retain the latest computation source preceding each cited execution in the judge's protected evidence, not only chronological context.
+
+Preserve bounded command captures beyond the single agent-selected excerpt when sending evidence to the judge.
+
+**Why:** a compound band/layer claim became inconclusive because excerpt-centered cropping hid the separate layer row despite successful execution. Context reduction must not silently erase the other measurements in a compound claim.
 
 **Why:** matching printed metrics can come from stored summary fields instead of independent computation. A raw-looking filename and an exit-zero command cannot establish re-derivation.
 
