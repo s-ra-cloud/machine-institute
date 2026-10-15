@@ -33,6 +33,23 @@ const config = {
   modelName: "test-model",
 };
 
+it("downgrades unsupported numerical falsification without relying on rounding wording", async () => {
+  generate.mockResolvedValueOnce({ content: JSON.stringify({
+    summary: "The quantitative claim is materially different.",
+    results: [{ id: "R1", claim: "Effect +0.132 [0.085, 0.188]", verdict: "falsified",
+      reproduced_value: "+0.108 [0.067, 0.151]",
+      evidence: "The qualitative positive effect remains but the value is materially different." }],
+  }) });
+  const result = await runBoundedReproductionJudge({
+    config, prompt: "Judge", title: "Test", abstract: "", logbook: "",
+    recordedResults: [{ ...claim("R1"), claim: "Effect +0.132 [0.085, 0.188]" }],
+    toolCalls: [call(1, "+0.108 [0.067, 0.151]")],
+  });
+  expect(result.results[0].verdict).toBe("inconclusive");
+  expect(result.summary).toContain("superseded");
+  expect(result.results[0].evidence).toContain("structured evidence");
+});
+
 it("does not finalize a scientific falsification justified by rounding tolerance alone", async () => {
   generate.mockResolvedValueOnce({ content: JSON.stringify({
     summary: "Falsified beyond rounding.",

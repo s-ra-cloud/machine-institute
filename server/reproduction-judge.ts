@@ -6,6 +6,7 @@ import {
 } from "./model-service";
 import { isDeepSeekV4 } from "./reasoning-continuation";
 import { requestFailureCode } from "./request-failure";
+import { falsificationRejection } from "./reproduction-comparison";
 import {
   ContextBudgetError,
   isContextOverflow,
@@ -356,6 +357,7 @@ export function hasRoundingOnlyRationale(evidence: string): boolean {
 function aggregate(
   recordedResults: RecordedResult[],
   judged: Map<string, ClaimVerdict>,
+  toolCalls: readonly ToolCallRecord[],
 ): ClaimVerdict[] {
   // Iterating the registered list makes the result order stable and also
   // guarantees one row per registered ID, regardless of model output order.
@@ -384,9 +386,20 @@ function aggregate(
         evidence: `Comparison rejected: the reported and reproduced sample/task counts differ. Establish matching conditions before verification or falsification. ${proposed.evidence ?? recorded.evidence ?? ""}`,
       };
     }
+    const rejection = proposed.verdict === "falsified" ? falsificationRejection(
+      proposed.falsificationAssessment, recorded,
+      proposed.reproducedValue ?? recorded.reproducedValue ?? "", toolCalls,
+    ) : undefined;
+    if (rejection) return {
+      ...resultForClaim(recorded),
+      verdict: "inconclusive" as const,
+      reproducedValue: proposed.reproducedValue ?? recorded.reproducedValue,
+      evidence: `Comparison rejected: ${rejection} Judge rationale requiring reassessment: ${proposed.evidence ?? ""}`,
+    };
     return {
       ...resultForClaim(recorded),
       verdict: proposed.verdict,
+      falsificationAssessment: proposed.falsificationAssessment,
       // These are descriptive judge fields, never the claim identity.
       reproducedValue: proposed.reproducedValue ?? recorded.reproducedValue,
       evidence: proposed.evidence ?? recorded.evidence,
@@ -582,7 +595,7 @@ export async function runBoundedReproductionJudge(
     }
   }
 
-  const aggregated = aggregate(recordedResults, judged);
+  const aggregated = aggregate(recordedResults, judged, opts.toolCalls);
   const rejectedComparisons = aggregated.filter(result => result.evidence?.startsWith("Comparison rejected:"));
   return {
     summary: [

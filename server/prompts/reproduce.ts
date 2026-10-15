@@ -46,6 +46,7 @@ export interface RecordedResult {
 }
 
 export interface ClaimVerdict {
+  falsificationAssessment?: unknown;
   id: string;
   claim: string;
   verdict: Verdict;
@@ -116,6 +117,8 @@ For raw-data re-derivation, inspect the computation source as well as the output
 For EVERY method, establish comparison validity before assigning verified or falsified: same task count/subset, dataset, intervention boundary, metric and analysis. Explicitly describe this correspondence in evidence. A rerun on 96 tasks does not falsify a claim about 72 tasks; different subsets or unestablished correspondence require inconclusive, even if shipped code produced the numbers. A different peak layer or magnitude is not falsification until subset and intervention correspondence is established. A source/code mismatch is a limitation to report, not proof that the scientific claim is false.
 
 Numerical tolerance is NOT limited to rounding precision. For stochastic estimates, compare uncertainty and the substantive conclusion: 3.632 versus 3.635 with the same directional effect is not by itself falsification. A near-zero mean changing sign while both confidence intervals span zero is not a reversed scientific conclusion. Overlapping intervals do not prove equivalence either. Explain why a discrepancy changes the supported conclusion, using the actual uncertainty and experimental conditions. If repeatability or meaningful tolerance cannot be established, use inconclusive, never falsified solely because values differ beyond rounding. Do not copy the agent's rounding-based rationale as independent assessment.
+
+Every falsified result MUST additionally include falsification_assessment with conditionsMatch (boolean), comparisonExplanation, substantiveContradiction (boolean), contradictionExplanation, toleranceBasis ("uncertainty-separated" or "documented-tolerance"), toleranceExplanation, evidenceToolCallId and evidenceQuote (an exact quote from this claim's cited run_command output). Explain the changed scientific conclusion, not just different printed values. Fixed seeds alone do not prove numerical repeatability. For uncertainty-separated, the original claim and reproduced_value must each contain a single unambiguous [lower, upper] interval, with reproduced bounds present in evidenceQuote; overlapping intervals cannot justify this basis. For documented-tolerance also include documentedTolerance (nonnegative number), originalEstimate, reproducedEstimate, toleranceToolCallId and toleranceQuote, quoting the meaningful numerical tolerance from read source material, not an agent-written file. Estimates must occur in the original claim and execution evidence. If these requirements cannot be established, use inconclusive. Do not invent a tolerance or promote inconclusive to verified. These fields document evidence, not permission to assert an unsupported contradiction.
 
 Respond with ONLY a JSON object inside a \`\`\`json fence, in exactly this shape:
 {"summary": "3–5 sentences summarising the reproduction outcome and the most important discrepancies.", "results": [{"id": "R1", "claim": "...", "verdict": "verified|falsified|toy|inconclusive", "original_value": "...", "reproduced_value": "...", "evidence": "...", "confidence": "high|medium|low"}]}`;
@@ -189,6 +192,7 @@ export function parseJudgeOutput(text: string): { summary: string; results: Clai
         originalValue: str(r.original_value ?? r.originalValue),
         reproducedValue: str(r.reproduced_value ?? r.reproducedValue),
         evidence: str(r.evidence),
+        falsificationAssessment: r.falsification_assessment,
         confidence: conf === "high" || conf === "medium" || conf === "low" ? conf : undefined,
       };
     })

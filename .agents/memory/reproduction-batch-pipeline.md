@@ -74,6 +74,12 @@ Do not treat fixed seeds or overlapping confidence intervals as sufficient proof
 
 **How to apply:** require evidence of comparison validity, meaningful tolerance and substantive contradiction; unresolved quantitative discrepancies should remain inconclusive. Check interval arithmetic independently and do not silently revise historical reports.
 
+Use conservative structured evidence gates for future falsifications, not broader wording filters. Supported numerical bases are separated uncertainty intervals or a source-documented tolerance; ambiguous compound comparisons remain inconclusive until grounded.
+
+**Why:** the same unsupported reasoning passed or failed depending on whether the model happened to say “beyond rounding.” Preventing an unsupported paper-level falsification is preferable to forcing a verdict from incomplete comparison evidence.
+
+**How to apply:** never treat this gate as a proof of scientific validity: it validates citations and arithmetic, while experiment correspondence and interpretation still require judgment. Do not invent tolerances or automatically verify overlapping intervals.
+
 Preserve coarse response diagnostics without retaining raw provider errors or payloads. Do not infer a historical failure's cause from a newly added classifier.
 
 **Why:** a judge batch failed after an output-budget split, but the saved unknown error could not distinguish a malformed response from other failures. Later successful batches do not identify that earlier cause.
