@@ -68,6 +68,12 @@ Preserve bounded command captures beyond the single agent-selected excerpt when 
 
 **Judge reasoning budget lesson**
 
+Do not treat fixed seeds or overlapping confidence intervals as sufficient proof of either falsification or equivalence.
+
+**Why:** independent judging accepted numerical-discrepancy falsifications while admitting preserved qualitative conclusions; one rationale incorrectly described overlapping intervals as wholly separated. Fixed seeds alone do not establish cross-environment numerical repeatability.
+
+**How to apply:** require evidence of comparison validity, meaningful tolerance and substantive contradiction; unresolved quantitative discrepancies should remain inconclusive. Check interval arithmetic independently and do not silently revise historical reports.
+
 Preserve coarse response diagnostics without retaining raw provider errors or payloads. Do not infer a historical failure's cause from a newly added classifier.
 
 **Why:** a judge batch failed after an output-budget split, but the saved unknown error could not distinguish a malformed response from other failures. Later successful batches do not identify that earlier cause.
