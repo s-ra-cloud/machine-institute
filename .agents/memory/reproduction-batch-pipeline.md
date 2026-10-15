@@ -68,6 +68,12 @@ Preserve bounded command captures beyond the single agent-selected excerpt when 
 
 **Judge reasoning budget lesson**
 
+Preserve coarse response diagnostics without retaining raw provider errors or payloads. Do not infer a historical failure's cause from a newly added classifier.
+
+**Why:** a judge batch failed after an output-budget split, but the saved unknown error could not distinguish a malformed response from other failures. Later successful batches do not identify that earlier cause.
+
+**How to apply:** classify at the response-read boundary, allowlist metadata, and test with synthetic HTTP responses offline. Leave historical reports unchanged.
+
 **Remote cleanup after workspace restart:** a lost local reproduction process does not imply that its Modal sandbox stopped.
 
 **Why:** after a workspace restart, the recorded sandbox still returned a running status while the controller was gone.

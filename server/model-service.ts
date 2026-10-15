@@ -1,5 +1,5 @@
 import { MANAGED_MODELS } from "../shared/model-catalog";
-import { requestFailureCode, requestFailureMessage } from "./request-failure";
+import { requestFailureCode, requestFailureMessage, safeResponseMetadata, responseFailureSuffix } from "./request-failure";
 import { completionStructure, type CompletionStructure } from "./completion-structure";
 import { isDeepSeekV4, reasoningContinuation } from "./reasoning-continuation";
 import { createByocChatClient, createManagedChatClient, type ManagedChatClient } from "./managed-adapter";
@@ -190,7 +190,9 @@ export function sanitizeContextRequestError(
 ): Error {
   const failureCode = requestFailureCode(error);
   const failureMessage = requestFailureMessage(failureCode);
-  if (failureMessage) return Object.assign(new Error(failureMessage), { code: failureCode });
+  const responseMetadata = safeResponseMetadata(error?.responseMetadata);
+  const responseSuffix = responseFailureSuffix(responseMetadata);
+  if (failureMessage) return Object.assign(new Error(failureMessage + responseSuffix), { code: failureCode, responseMetadata });
   const status = error?.status ?? error?.statusCode;
   const paymentReason = providerPaymentReason(error);
   if (paymentReason) {
@@ -219,11 +221,12 @@ export function sanitizeContextRequestError(
     : byoc
       ? `BYOK provider request failed (${status ?? "unknown"}). The cause is unclassified; this does not establish a credential problem.`
       : `LLM request failed (${status ?? "unknown"}). Retry later or ask an administrator to check the managed integration.`;
-  const result = new Error(message);
+  const result = new Error(message + responseSuffix);
   const constraint = providerContextConstraint(error);
   const reportedLimit = constraint?.limit ?? reportedContextLimit(error);
   Object.assign(result, {
     code: contextLike ? "context_length_exceeded" : code,
+    responseMetadata,
     status,
     statusCode: status,
     model,

@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { requestFailureCode, requestFailureMessage } from "./request-failure";
+import { requestFailureCode, requestFailureMessage, safeResponseMetadata, type ResponseFailureMetadata } from "./request-failure";
 import { observingFetch, retainHttpStructure, type CompletionStructure } from "./completion-structure";
 import { getManagedConnection, resolveByocSelection, resolveManagedSelection } from "./managed-models";
 import { MANAGED_MODELS } from "../shared/model-catalog";
@@ -64,9 +64,10 @@ export function createByocChatClient(config: ModelProviderConfig, options: { max
   return { chat: { completions: { create: async (request, requestOptions) => {
     // Per-request capture prevents concurrent completions from sharing metadata.
     let httpStructure: CompletionStructure | undefined;
+    let responseMetadata: ResponseFailureMetadata | undefined;
     const client = new OpenAI({
       baseURL: endpoint, apiKey: selected.apiKey!, maxRetries: options.maxRetries ?? 0,
-      fetch: observingFetch(structure => { httpStructure = structure; }),
+      fetch: observingFetch(structure => { httpStructure = structure; }, metadata => { responseMetadata = metadata; }),
     });
     try {
       // OpenRouter otherwise treats parameter support as best-effort.
@@ -103,6 +104,7 @@ export function createByocChatClient(config: ModelProviderConfig, options: { max
         status: Number.isSafeInteger(error?.status) ? error.status : undefined,
         statusCode: Number.isSafeInteger(error?.statusCode) ? error.statusCode : undefined,
         code: failureCode ?? (typeof error?.code === "string" && /^[A-Z0-9_-]{1,80}$/i.test(error.code) ? error.code : undefined),
+        responseMetadata: safeResponseMetadata(responseMetadata),
       });
     }
   } } } };

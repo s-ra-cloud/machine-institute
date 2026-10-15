@@ -1,3 +1,5 @@
+import { requestFailureCode, type ResponseFailureMetadata } from "./request-failure";
+
 /** Structural metadata only: never retain content, arguments, refusal or reasoning text. */
 export interface CompletionStructure {
   httpResponse?: CompletionStructure;
@@ -28,12 +30,38 @@ export function retainHttpStructure(completion: object, structure: CompletionStr
 }
 
 /** Observe only the SDK's normal JSON read; no extra body copy or network request. */
-export function observingFetch(observe: (structure: CompletionStructure) => void): typeof fetch {
+export function observingFetch(
+  observe: (structure: CompletionStructure) => void,
+  observeResponse?: (metadata: ResponseFailureMetadata) => void,
+): typeof fetch {
   return async (input, init) => {
     const response = await globalThis.fetch(input, init);
+    const mime = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+    const metadata: ResponseFailureMetadata = {
+      httpStatus: response.status,
+      mediaType: !mime ? "missing" : mime === "application/json" || mime.endsWith("+json")
+        ? "json" : mime === "text/html" ? "html" : mime.startsWith("text/") ? "text" : "other",
+      jsonRead: "not-read",
+    };
+    const notify = () => { try { observeResponse?.({ ...metadata }); } catch { /* Diagnostic only. */ } };
+    notify();
     const readJson = response.json.bind(response);
     response.json = async () => {
-      const body = await readJson();
+      let body: unknown;
+      try {
+        body = await readJson();
+        metadata.jsonRead = "parsed";
+      } catch (error) {
+        metadata.jsonRead = error instanceof SyntaxError ? "invalid" : "read-failed";
+        notify();
+        // Do not retain raw parser messages: they can include response contents.
+        throw Object.assign(new Error("Provider response JSON read failed."), {
+          code: requestFailureCode(error) ?? (error instanceof SyntaxError
+            ? "INVALID_PROVIDER_JSON" : "PROVIDER_BODY_READ_FAILED"),
+          responseMetadata: { ...metadata },
+        });
+      }
+      notify();
       try { observe(completionStructure(body)); } catch { /* Diagnostics never block parsing. */ }
       return body;
     };

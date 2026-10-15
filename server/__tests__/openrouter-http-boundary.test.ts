@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createByocChatClient } from "../managed-adapter";
 import { extractReproductionClaims } from "../reproduction-extraction";
 import { completionStructure } from "../completion-structure";
-import { runToolLoop, generateWithConfig } from "../model-service";
+import { runToolLoop, generateWithConfig, sanitizeContextRequestError } from "../model-service";
 
 // Do not mock OpenAI: exercise its real HTTP JSON parser, then our adapter.
 // Only fetch is replaced, so these tests cannot make billable requests.
@@ -150,8 +150,48 @@ describe("OpenRouter HTTP → real SDK → BYOK adapter → extraction", () => {
     }));
     vi.stubGlobal("fetch", fetch);
     await expect(createByocChatClient(config).chat.completions.create({ messages: [] }))
-      .rejects.toThrow("BYOK provider request failed.");
+      .rejects.toMatchObject({
+        code: "INVALID_PROVIDER_JSON",
+        message: "Model provider returned invalid JSON.",
+        responseMetadata: { httpStatus: 200, mediaType: "json", jsonRead: "invalid" },
+      });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains safe parsing diagnostics through generation without exposing response contents", async () => {
+    const fetch = vi.fn(async () => new Response("PRIVATE_INVALID_JSON", {
+      headers: { "content-type": "application/json; private=PRIVATE_HEADER", "x-request-id": "PRIVATE_ID" },
+    }));
+    vi.stubGlobal("fetch", fetch);
+    const error = await generateWithConfig(config, "rules", "evidence", { contextRequest: true }).catch(e => e);
+    expect(error.code).toBe("INVALID_PROVIDER_JSON");
+    expect(error.message).toContain("httpStatus=200, mediaType=json, jsonRead=invalid");
+    expect(JSON.stringify(error) + error.message).not.toContain("PRIVATE");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("distinguishes unreadable bodies from invalid JSON without retaining raw exceptions", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const response = new Response("{}", { headers: { "content-type": "application/json" } });
+      response.json = async () => { throw new TypeError("PRIVATE_BODY_FAILURE"); };
+      return response;
+    }));
+    const error = await generateWithConfig(config, "rules", "evidence", { contextRequest: true }).catch(e => e);
+    expect(error.code).toBe("PROVIDER_BODY_READ_FAILED");
+    expect(error.responseMetadata.jsonRead).toBe("read-failed");
+    expect(JSON.stringify(error) + error.message).not.toContain("PRIVATE");
+  });
+
+  it("records a coarse media type for non-JSON responses without retaining HTML", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>PRIVATE_BODY</html>", {
+      headers: { "content-type": "text/html; private=PRIVATE_HEADER" },
+    })));
+    // Exercise sanitization directly: generation intentionally retries HTTP 502s.
+    const failure = await createByocChatClient(config).chat.completions.create({ messages: [] }).catch(e => e);
+    const error = sanitizeContextRequestError(failure, config.modelName, config) as any;
+    expect(error.responseMetadata).toEqual({ httpStatus: 200, mediaType: "html", jsonRead: "not-read" });
+    expect(error.message).toContain("mediaType=html");
+    expect(JSON.stringify(error) + error.message).not.toContain("PRIVATE");
   });
 
   it.each([
