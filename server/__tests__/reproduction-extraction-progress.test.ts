@@ -114,6 +114,14 @@ it.each(["duplicate", "invalid", "productive"])("bounds additional batches witho
   expect(calls).toBe(kind === "productive" ? 18 : kind === "duplicate" ? 4 : 3);
   expect(progress.mock.calls.at(-1)?.[0]).toMatchObject({ termination: "failed" });
 });
+it("accepts a quote that only drops LaTeX delimiters, storing the exact source text, without spending repairs", async () => {
+  const latex = "Semantic minus negated is +0.233 with a 95% bootstrap confidence interval of [0.181, 0.290] and permutation \\(p = 0.00025\\).";
+  const plain = "Semantic minus negated is +0.233 with a 95% bootstrap confidence interval of [0.181, 0.290] and permutation p = 0.00025.";
+  respond(() => [candidate(plain)]);
+  const result = await extractReproductionClaims({ ...input(), paper: `## Results\n${latex}\n` });
+  expect(result.claims.map(c => c.claim)).toEqual([latex]);
+  expect(result.calls).toBe(1);
+});
 it("deduplicates claims in overlapping packets", async () => {
   const overlap = " ".repeat(5500) + sentence(0) + " ".repeat(5000);
   expect(prepareSourcePackets(overlap).filter(p => p.text.includes(sentence(0))).length).toBe(2);

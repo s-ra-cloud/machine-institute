@@ -135,3 +135,9 @@ Extraction packet edges must fall on line/sentence (else word) boundaries.
 **Why:** a fixed 6000/600 layout started a packet mid-word inside a finding; validation correctly rejected the fragment, it could not be repaired within that packet, and the whole run failed before GPU allocation.
 
 Test gotcha: the request budget estimates tokens by bytes and trusts a large window only for verified or known models, so a judge test that needs the uncompacted levels must use a trusted config (e.g. BYOC OpenAI gpt-4o) plus a large mocked window.
+
+Restore source formatting deterministically instead of spending repairs on it: a quote that matches exactly one passage once formatting characters are ignored (LaTeX \( \) \[ \] delimiters and escapes, $, Markdown markers, whitespace runs) is replaced by that exact source span before validation. This is not accepting a suggested passage: words, numbers and their order must already be identical.
+
+**Why:** DeepSeek V4 resubmitted plain "p = 0.00025" for a source "\(p = 0.00025\)" three times while saying it would add the LaTeX; the no-progress stop left one packet unresolved and failed the whole run before GPU allocation (the same sentence had extracted fine a cycle earlier, so the failure is intermittent).
+
+**How to apply:** require uniqueness within the packet; never widen the projection to paraphrases, value changes or ambiguous spans; validation (including the mid-word check) still runs on the restored text.

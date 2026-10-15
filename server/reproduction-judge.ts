@@ -187,8 +187,16 @@ function buildJudgeInput(
   claims: RecordedResult[],
   toolCalls: readonly ToolCallRecord[],
   level: InputReduction,
+  allIds: readonly string[] = claims.map(claim => claim.id),
 ): string {
   const blocks = transcriptBlocks(toolCalls);
+  // Batches see the whole logbook; without this, a batch reports the other
+  // results as missing from the record in the published judge summary.
+  const batchIds = new Set(claims.map(claim => claim.id));
+  const elsewhere = Array.from(new Set(allIds)).filter(id => !batchIds.has(id));
+  const scope = elsewhere.length && claims.length
+    ? `Scope: this request grades only ${Array.from(batchIds).join(", ")}. The other recorded results (${elsewhere.join(", ")}) are graded in separate requests with their own evidence; they are not missing. Return verdicts only for the results below, and write the summary about these results only.`
+    : "";
   const paperAbstract = level >= 3 ? compact(abstract, level >= 4 ? 500 : 2_000, "abstract") : abstract || "(none)";
   const paperLogbook = level >= 2
     ? compact(logbook, level >= 4 ? 1_000 : level >= 3 ? 4_000 : 8_000, "logbook")
@@ -203,6 +211,7 @@ function buildJudgeInput(
     `**Title:** ${title}`,
     `**Abstract:** ${paperAbstract}`,
     "",
+    ...(scope ? ["# SCOPE OF THIS REQUEST", scope, ""] : []),
     "# AGENT'S RECORDED RESULTS (proposals, not verdicts)",
     claims.length ? JSON.stringify(claims, null, 2) : "(the agent registered no results)",
     "",
@@ -287,6 +296,8 @@ function describeError(error: unknown): string {
   return text.replace(/\s+/g, " ").slice(0, 300);
 }
 
+const allResultIds = (opts: RunBoundedReproductionJudgeOptions) => opts.recordedResults.map(result => result.id);
+
 function firstFittingLevel(
   opts: RunBoundedReproductionJudgeOptions,
   claims: RecordedResult[],
@@ -295,7 +306,7 @@ function firstFittingLevel(
   budget?: RequestContextBudget,
 ): InputReduction | undefined {
   for (let level = minimumLevel; level <= 4; level++) {
-    const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, claims, opts.toolCalls, level as InputReduction);
+    const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, claims, opts.toolCalls, level as InputReduction, allResultIds(opts));
     const request = requestFor(opts.config, opts.prompt, input, maxTokens);
     if (budget ? budget.fits(request) : fitsAt(opts.config, opts.prompt, input, maxTokens)) {
       return level as InputReduction;
@@ -338,7 +349,7 @@ function partitionClaims(
       visit(group.slice(midpoint));
       return;
     }
-    const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, group, opts.toolCalls, 4);
+    const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, group, opts.toolCalls, 4, allResultIds(opts));
     const budget = budgetFor(opts.config, maxTokens);
     const request = requestFor(opts.config, opts.prompt, input, maxTokens);
     try {
@@ -479,7 +490,7 @@ export async function runBoundedReproductionJudge(
     let contextRetries = group.contextRetries;
 
     while (true) {
-      const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, claims, opts.toolCalls, level);
+      const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, claims, opts.toolCalls, level, allResultIds(opts));
       const request = requestFor(opts.config, opts.prompt, input, maxTokens);
       try {
         budget.assertFits(request);

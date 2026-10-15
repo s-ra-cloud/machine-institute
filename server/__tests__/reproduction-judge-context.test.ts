@@ -157,6 +157,28 @@ describe("bounded reproduction judge context handling", () => {
     } finally { clock.mockRestore(); }
   });
 
+  it("tells each batch which results it grades so its summary does not call the others missing", async () => {
+    const claims = Array.from({ length: 4 }, (_, i) => claim(`R${i + 1}`, i + 1));
+    const inputs: string[] = [];
+    generate.mockImplementation(async (_config, _prompt, input) => {
+      inputs.push(input);
+      const ids = [...input.matchAll(/"id":\s*"(R\d+)"/g)].map(match => match[1]);
+      return { content: JSON.stringify({ summary: "Graded", results: ids.map(id => ({ id, claim: id, verdict: "verified" })) }) };
+    });
+    const judge = (recordedResults: RecordedResult[]) => runBoundedReproductionJudge({
+      config, prompt: "judge", title: "paper", abstract: "", logbook: "",
+      recordedResults, toolCalls: recordedResults.map((_, i) => call(i + 1, `metric=${i + 1}`)),
+    });
+    await judge(claims);
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0]).toContain("Scope: this request grades only R1, R2, R3. The other recorded results (R4) are graded in separate requests");
+    expect(inputs[1]).toContain("grades only R4. The other recorded results (R1, R2, R3)");
+    inputs.length = 0;
+    await judge(claims.slice(0, 2));
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).not.toContain("Scope:");
+  });
+
   it("splits on output exhaustion without shrinking child allowances or losing cited evidence", async () => {
     generate.mockRejectedValueOnce(new IncompleteGenerationError("length", "length"));
     generate.mockImplementation(async (_config, _prompt, input, opts) => {

@@ -1,5 +1,5 @@
 import { runToolLoop, type ModelProviderConfig, type ToolSpec, type ToolLoopOutcome } from "./model-service";
-import { prepareSourcePackets, validateCandidate, type ExtractedCandidate, type SourcePacket } from "./reproduction-packets";
+import { prepareSourcePackets, restoreSourceFormatting, validateCandidate, type ExtractedCandidate, type SourcePacket } from "./reproduction-packets";
 
 export interface ExtractedClaim extends ExtractedCandidate { packet: SourcePacket }
 export interface ExtractionCoverage {
@@ -143,9 +143,11 @@ export async function extractReproductionClaims(input: {
         const candidates = args.claims as unknown[];
         if (candidates.length > 5) return "Refused: at most five claims per submission; use has_more=true to continue.";
         const issues: string[] = [];
+        const restoredNotes: string[] = [];
         for (let i = 0; i < candidates.length; i++) {
           const raw = candidates[i] as Record<string, unknown>;
-          const { replaces, copy_source_quote, ...candidate } = raw ?? {};
+          const { replaces, copy_source_quote, ...submitted } = raw ?? {};
+          let candidate = submitted;
           const copyErrors: string[] = [];
           if (copy_source_quote === true) {
             if (candidate.claim !== undefined && candidate.claim !== candidate.source_quote) {
@@ -155,6 +157,13 @@ export async function extractReproductionClaims(input: {
             }
           } else if (copy_source_quote !== undefined && typeof copy_source_quote !== "boolean") {
             copyErrors.push("copy_source_quote must be a boolean");
+          }
+          // Models drop LaTeX delimiters such as "\(p = 0.01\)" that JSON makes awkward to
+          // reproduce; restore the unique exact source text rather than exhausting repairs.
+          const formatting = restoreSourceFormatting(candidate, packet);
+          if (formatting.restored) {
+            candidate = formatting.candidate;
+            restoredNotes.push(`Candidate ${i + 1} matched the packet once formatting characters were ignored; the exact source text (with its LaTeX/Markdown formatting) was stored.`);
           }
           const key = JSON.stringify(candidate.claim ?? candidate);
           const errors = [...copyErrors, ...validateCandidate(candidate, packet, input.paper)];
@@ -188,7 +197,8 @@ export async function extractReproductionClaims(input: {
           consecutiveUnproductiveCalls = 0;
         }
         accepted = !issues.length && !unresolved.size && !remainingBatches;
-        return accepted ? "Extraction accepted." : `Extraction incomplete. ${issues.join("; ")}\n${recoveryState()}`;
+        const notes = restoredNotes.length ? `\n${restoredNotes.join("\n")}` : "";
+        return accepted ? `Extraction accepted.${notes}` : `Extraction incomplete. ${issues.join("; ")}${notes}\n${recoveryState()}`;
       }, {
         // Reasoning-model output budgets include hidden reasoning as well as the
         // structured claims. A 2k ceiling repeatedly truncated real Results
