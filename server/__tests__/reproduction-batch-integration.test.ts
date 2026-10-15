@@ -400,6 +400,80 @@ describe("batch reproduction pipeline (website entrypoint, offline)", () => {
     });
   });
 
+  describe("claims planned against the wrong script", () => {
+    const BETA = "python /work/materials/beta.py";
+    const plan = (x1: string[], x2: string[]): Script["planning"] => turn => {
+      const measurement = (id: string) => `the ${greekOf(turn.packet.claims.find(c => c.id === id)!.claim)}_score line`;
+      return complete(null, [tool("submit_plan", { experiments: [
+        { method: "rerun", command: ANALYZE, material_paths: ["/work/materials/analyze.py"], rationale: "analyze.py prints scores.", claims: x1.map(id => ({ claim_id: id, measurement: measurement(id) })) },
+        { method: "rerun", command: BETA, material_paths: ["/work/materials/beta.py"], rationale: "beta.py prints scores.", claims: x2.map(id => ({ claim_id: id, measurement: measurement(id) })) },
+      ] })]);
+    };
+    const record = (c: PacketClaim, evidenceId: number) => ({
+      id: c.id, status: "verified", method: "rerun", reproduced_value: c.value, evidence_tool_call_ids: [evidenceId],
+      evidence_excerpt: excerptFor(c), evidence: `The captured line ${excerptFor(c)} matches the reported value.`,
+    });
+
+    it("cites an earlier experiment's output instead of recording 'not in this output' as inconclusive", async () => {
+      setPaper(3, [file("beta.py", "print('beta_score=0.53')\n")]);
+      sandbox(command => command === ANALYZE ? ok("alpha_score=0.50\ngamma_score=0.56") : command === BETA ? ok("beta_score=0.53") : undefined);
+      const { checkpoints, start, last } = prepare();
+      const trace = respond({
+        extraction: extraction(sentences(3)), planning: plan(["R1"], ["R2", "R3"]), judge: judge(checkpoints),
+        assessment: turn => {
+          if (turn.packet.experiment === "X1") return recordAll!(turn);
+          const x1 = Number(/- X1 \(rerun, ran\) → successful execution #(\d+)/.exec(turn.packet.text)?.[1]);
+          const [r2, r3] = ["R2", "R3"].map(id => turn.packet.claims.find(c => c.id === id)!);
+          // The excerpt is validated against the cited experiment's own output.
+          if (turn.step === 0) return complete(null, [tool("record_results", { results: [record(r2, turn.packet.evidenceId!), { ...record(r3, x1), evidence_excerpt: "beta_score=0.53", reproduced_value: "0.53" }] })]);
+          expect(turn.toolMessages[0]).toMatch(/R3: Refused: evidence_excerpt must be copied exactly/);
+          return complete(null, [tool("record_results", { results: [record(r3, x1)] })]);
+        },
+      });
+      const result = await start();
+      const second = trace.filter(t => t.stage === "assessment" && t.packet.experiment === "X2");
+      expect(second[0].packet.text).toContain("## Other experiments");
+      expect(second[0].packet.text).toContain("cite that execution ID with that experiment's method");
+      expect(second[0].toolNames).not.toContain("reassign_claims");
+      expect(result.counts).toMatchObject({ total: 3, verified: 3 });
+      const [x1] = last().controller.experiments;
+      expect(last().claims.find(c => c.id === "R3")).toMatchObject({ status: "verified", evidenceIds: [x1.evidenceId] });
+      expect(result.logbook).toContain(`R3=verified (cited X1 #${x1.evidenceId})`);
+    });
+
+    it("reassigns a claim to the later experiment whose script prints it", async () => {
+      setPaper(3, [file("beta.py", "print('beta_score=0.53')\nprint('gamma_score=0.56')\n")]);
+      const sb = sandbox(command => command === ANALYZE ? ok("alpha_score=0.50") : command === BETA ? ok("beta_score=0.53\ngamma_score=0.56") : undefined);
+      const { checkpoints, start, last } = prepare();
+      const trace = respond({
+        extraction: extraction(sentences(3)), planning: plan(["R1", "R2"], ["R3"]), judge: judge(checkpoints),
+        assessment: turn => {
+          if (turn.packet.experiment !== "X1") return recordAll!(turn);
+          if (turn.step === 0) return complete(null, [tool("reassign_claims", { claim_ids: ["R2"], experiment_id: "X9", reason: "beta.py prints beta." })]);
+          expect(turn.toolMessages[0]).toContain("Refused: experiment_id must name a later planned experiment (X2)");
+          const r1 = turn.packet.claims.find(c => c.id === "R1")!;
+          return complete(null, [
+            tool("reassign_claims", { claim_ids: ["R2"], experiment_id: "X2", reason: "beta.py prints the beta_score line; analyze.py prints only alpha." }),
+            tool("record_results", { results: [record(r1, turn.packet.evidenceId!)] }),
+          ]);
+        },
+      });
+      const result = await start();
+      const first = trace.find(t => t.stage === "assessment" && t.packet.experiment === "X1")!;
+      expect(first.toolNames).toContain("reassign_claims");
+      expect(first.packet.text).toContain("- X2 (rerun, planned, runs later)");
+      const later = trace.find(t => t.stage === "assessment" && t.packet.experiment === "X2")!;
+      expect(later.packet.claims.map(c => c.id)).toEqual(["R3", "R2"]);
+      expect(later.packet.text).toContain("planned measurement: beta.py prints the beta_score line; analyze.py prints only alpha. (reassigned from X1)");
+      expect(sb.commands.map(c => c.command)).toEqual([ANALYZE, BETA]);
+      expect(result.counts).toMatchObject({ total: 3, verified: 3 });
+      const [, x2] = last().controller.experiments;
+      expect(x2.claimIds).toEqual(["R3", "R2"]);
+      expect(last().claims.find(c => c.id === "R2")).toMatchObject({ status: "verified", evidenceIds: [x2.evidenceId] });
+      expect(result.logbook).toContain("R2=reassigned to X2");
+    });
+  });
+
   it("allows a last-call computation repair instead of forcing a submission of failed evidence", async () => {
     setPaper(1, [file("raw.csv", RAW_CSV)]);
     const command = "python /work/results/derive_X1.py";

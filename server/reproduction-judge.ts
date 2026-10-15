@@ -36,9 +36,15 @@ const JUDGE_OUTPUT_CAP = 24_000;
 const JUDGE_TIMEOUT_MS = 1_200_000;
 const MAX_CONTEXT_RETRIES = 2;
 const TRANSCRIPT_RESULT_CHARS = 3_000;
+/** Cited executions up to this size are shown whole at reduction levels 0-2. */
+const FULL_EXECUTION_CHARS = 40_000;
+/** Compact levels 3-4 keep the earlier whole-capture bound. */
+const COMPACT_EXECUTION_CHARS = 12_000;
+/** Context kept on each side of the cited excerpt when an execution is too long to show whole. */
+const EXECUTION_WINDOW_CHARS = 4_000;
 
 import type { QuestioningState } from "./reproduction-questioning";
-import { QUESTIONING_JUDGE_PROMPT } from "./prompts/reproduce";
+import { JUDGE_VERIFICATION_STANDARD, QUESTIONING_JUDGE_PROMPT } from "./prompts/reproduce";
 
 export interface RunBoundedReproductionJudgeOptions {
   questioning?: QuestioningState;
@@ -71,7 +77,12 @@ type JudgeRequest = {
  * transcript.  The latter is useful context, but it is not authoritative:
  * cited tool output is the evidence a judge must be able to inspect.
  */
-function citedEvidence(result: RecordedResult, toolCalls: readonly ToolCallRecord[]): string {
+function citedEvidence(
+  result: RecordedResult,
+  toolCalls: readonly ToolCallRecord[],
+  level: InputReduction = 0,
+  shown: Map<number, string> = new Map(),
+): string {
   const ids = new Set<number>(result.evidenceToolCallIds ?? []);
   if (result.rawInputToolCallId !== undefined) ids.add(result.rawInputToolCallId);
   // A printed number is not proof of recomputation. Preserve the last source
@@ -87,28 +98,43 @@ function citedEvidence(result: RecordedResult, toolCalls: readonly ToolCallRecor
     }
   }
   const calls = toolCalls.filter(call => ids.has(call.index));
+  // A compound claim may need several rows, not just the agent's selected
+  // excerpt, so execution captures are shown whole while context allows.
+  // Only the compact reduction levels fall back to excerpt-centred windows.
+  const wholeExecutionChars = level >= 3 ? COMPACT_EXECUTION_CHARS : FULL_EXECUTION_CHARS;
   const blocks = calls.map(call => {
     const args = JSON.stringify(call.args ?? {});
     const excerpt = result.evidenceExcerpt?.trim();
     const excerptPosition = excerpt ? call.result.indexOf(excerpt) : -1;
     const exactExcerptFound = excerptPosition >= 0;
-    // A compound claim may need several rows, not just the agent's selected
-    // excerpt. Preserve bounded execution captures in full. Large raw reads
-    // still use targeted pages; context pressure is handled by judge batching.
-    let output = call.result;
-    const retainedExecution = call.name === "run_command" && call.result.length <= 12_000;
-    if (exactExcerptFound && !retainedExecution) {
-      const start = Math.max(0, excerptPosition - 250);
-      const end = Math.min(call.result.length, excerptPosition + excerpt!.length + 250);
-      output = `${start > 0 ? "[... preceding output omitted ...]\n" : ""}${call.result.slice(start, end)}${end < call.result.length ? "\n[... following output omitted ...]" : ""}`;
-    } else if (call.name === "read_file" && call.result.length > 8_000) {
-      output = `${call.result.slice(0, 8_000)}\n[... raw read output bounded to the first 8000 characters; cite a retained exact excerpt ...]`;
-    } else if (!retainedExecution && call.result.length > 12_000) {
-      output = `${call.result.slice(0, 12_000)}\n[... uncited command output bounded ...]`;
-    }
+    const isExecution = call.name === "run_command";
+    const retainedExecution = isExecution && call.result.length <= wholeExecutionChars;
     const provenance = result.rawInputToolCallId === call.index
       ? `\nRaw-input provenance: ${result.rawInputPath || "(path not recorded)"} (original tool #${call.index})`
       : "";
+    // Claims in one batch often cite the same long execution: show it once.
+    const shownUnder = retainedExecution ? shown.get(call.index) : undefined;
+    if (shownUnder) {
+      return [
+        `Original tool #${call.index}: ${call.name} ${args}`,
+        `Output: the complete output of tool #${call.index} is shown above under ${shownUnder}.`,
+        exactExcerptFound ? `Exact cited excerpt: ${excerpt}` : "",
+        provenance,
+      ].filter(Boolean).join("\n");
+    }
+    if (retainedExecution) shown.set(call.index, result.id);
+    let output = call.result;
+    if (exactExcerptFound && !retainedExecution) {
+      const pad = isExecution && level < 3 ? EXECUTION_WINDOW_CHARS : 250;
+      const start = Math.max(0, excerptPosition - pad);
+      const end = Math.min(call.result.length, excerptPosition + excerpt!.length + pad);
+      output = `${start > 0 ? "[... preceding output omitted ...]\n" : ""}${call.result.slice(start, end)}${end < call.result.length ? "\n[... following output omitted ...]" : ""}`;
+    } else if (call.name === "read_file" && call.result.length > 8_000) {
+      output = `${call.result.slice(0, 8_000)}\n[... raw read output bounded to the first 8000 characters; cite a retained exact excerpt ...]`;
+    } else if (!retainedExecution) {
+      const bound = isExecution ? wholeExecutionChars : COMPACT_EXECUTION_CHARS;
+      if (call.result.length > bound) output = `${call.result.slice(0, bound)}\n[... uncited command output bounded ...]`;
+    }
     return [
       `Original tool #${call.index}: ${call.name} ${args}`,
       `Output status: ${call.result.split("\n", 1)[0]}`,
@@ -167,9 +193,10 @@ function buildJudgeInput(
   const paperLogbook = level >= 2
     ? compact(logbook, level >= 4 ? 1_000 : level >= 3 ? 4_000 : 8_000, "logbook")
     : logbook || "(no logbook produced)";
+  const shown = new Map<number, string>();
   const evidence = claims.map(result => [
     `### ${result.id} — original cited evidence`,
-    citedEvidence(result, toolCalls),
+    citedEvidence(result, toolCalls, level, shown),
   ].join("\n")).join("\n\n");
   return [
     "# PAPER",
@@ -419,6 +446,11 @@ export async function runBoundedReproductionJudge(
       prompt: `${opts.prompt}\n\n${QUESTIONING_JUDGE_PROMPT}\nqP decision: ${q.assessment?.decision ?? "not assessed"}. ${q.changes.length} changes; ${q.executions.length} executions. Evidence omitted by context reduction is NOT endorsement of adaptation.`,
       logbook: `# qP suitability and bounded provenance excerpts\n${q.judgeContext()}\n# Agent logbook\n${opts.logbook}`,
     };
+  }
+  // Saved retry prompts and custom prompts may predate the current standard;
+  // every judged run applies the same verification rule.
+  if (!opts.prompt.includes(JUDGE_VERIFICATION_STANDARD)) {
+    opts = { ...opts, prompt: `${opts.prompt}\n\n${JUDGE_VERIFICATION_STANDARD}` };
   }
   const started = Date.now();
   const seenIds = new Set<string>();

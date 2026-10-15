@@ -176,6 +176,19 @@ const DEFER_CLAIMS_TOOL: ToolSpec = {
   },
 };
 
+const REASSIGN_CLAIMS_TOOL: ToolSpec = {
+  name: "reassign_claims",
+  description: "Move listed claims whose measurement this output does not contain to a LATER planned experiment from the packet whose script prints it; that experiment assesses them after it runs. Allowed once per claim. For an experiment that already ran, cite its successful execution in record_results instead.",
+  parameters: {
+    type: "object", additionalProperties: false, required: ["claim_ids", "experiment_id", "reason"],
+    properties: {
+      claim_ids: { type: "array", items: { type: "string" } },
+      experiment_id: { type: "string", description: "A later planned experiment listed in the packet, e.g. X7." },
+      reason: { type: "string", minLength: 1, maxLength: 2000, description: "Which printed quantity of that experiment measures the claim." },
+    },
+  },
+};
+
 const SUBMIT_FOR_ASSESSMENT_TOOL: ToolSpec = {
   name: "submit_for_assessment",
   description: "Finish this computation stage by citing the successful run_command that printed the measurements. If the computation is impossible with the shipped data, give a limitation instead and omit the ID.",
@@ -281,8 +294,10 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
   const started = session.toolCalls.length;
   const hostRunIds = new Set<number>();
   const experiments: BatchExperiment[] = [];
-  /** claim id → id of the deferred experiment that now owns it (the original experiment no longer assesses it). */
+  /** claim id → id of the experiment that now owns it (the original experiment no longer assesses it). */
   const deferredTo = new Map<string, string>();
+  /** A claim moves at most once: deferred to a new experiment or reassigned to a later planned one. */
+  const moveKind = new Map<string, "deferred" | "reassigned">();
   const budgetFinalized: string[] = [];
   const installed = new Set<string>();
   const rawReads = new Map<string, ToolCallRecord>();
@@ -824,13 +839,17 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
     materialPathsFor: (item: Record<string, unknown>) => string[];
     packet: string;
     allowDefer: boolean;
+    /** Later planned experiments a claim may be reassigned to (assessment of a planned experiment only). */
+    reassignTargets?: () => BatchExperiment[];
   }): Promise<void> => {
     const claimIds = new Set(spec.claims.map(c => c.claimId));
-    // A deferred claim is assessed by the experiment it moved to; the sweep (no experiment) sees every pending claim.
+    // A moved claim is assessed by the experiment it moved to; the sweep (no experiment) sees every pending claim.
     const movedAway = (id: string) => spec.experiment !== undefined && deferredTo.has(id) && deferredTo.get(id) !== spec.experiment.id;
     const isPending = (id: string) => session.recorded.get(id)?.status === "pending" && !movedAway(id);
     const outstanding = () => spec.claims.map(c => c.claimId).filter(isPending);
-    const tools = [RECORD_RESULTS_TOOL, ...pickTools(["read_tool_result", "read_file", "list_files"]), ...(spec.allowDefer ? [DEFER_CLAIMS_TOOL] : [])];
+    const canReassign = spec.reassignTargets !== undefined && spec.reassignTargets().length > 0;
+    const tools = [RECORD_RESULTS_TOOL, ...pickTools(["read_tool_result", "read_file", "list_files"]),
+      ...(spec.allowDefer ? [DEFER_CLAIMS_TOOL] : []), ...(canReassign ? [REASSIGN_CLAIMS_TOOL] : [])];
     const execute = async (name: string, args: Record<string, unknown>): Promise<string> => {
       if (name === "record_results") {
         const items = Array.isArray(args.results) ? args.results as Record<string, unknown>[] : [];
@@ -863,8 +882,8 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       if (name === "defer_claims" && spec.experiment) {
         const x = spec.experiment;
         const ids = Array.isArray(args.claim_ids) ? args.claim_ids.filter((id): id is string => typeof id === "string") : [];
-        const invalid = ids.filter(id => !claimIds.has(id) || !isPending(id));
-        if (!ids.length || invalid.length) return `Refused: claim_ids must name pending claims of this experiment${invalid.length ? ` (invalid: ${invalid.join(", ")})` : ""}.`;
+        const invalid = ids.filter(id => !claimIds.has(id) || !isPending(id) || moveKind.has(id));
+        if (!ids.length || invalid.length) return `Refused: claim_ids must name pending claims of this experiment that were not moved before${invalid.length ? ` (invalid: ${invalid.join(", ")})` : ""}.`;
         if (experiments.length >= PLAN_LIMITS.maxExperiments) return "Refused: the experiment limit is reached; record these claims with the available evidence.";
         const method = args.method as ExperimentMethod;
         const rawInputs = Array.isArray(args.raw_inputs) ? args.raw_inputs.filter((p): p is string => typeof p === "string").map(normalizeShippedPath) : [];
@@ -879,10 +898,36 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
           status: "planned", origin: "deferred", executionIds: [], repairs: [],
         };
         experiments.push(deferred);
-        for (const id of ids) deferredTo.set(id, deferred.id);
+        for (const id of ids) { deferredTo.set(id, deferred.id); moveKind.set(id, "deferred"); }
         await save();
         const left = outstanding();
         return `Deferred ${ids.join(", ")} to experiment ${deferred.id} (${method}); it runs after the current assessments. ${left.length ? `Record the remaining claims now: ${left.join(", ")}.` : "No claims remain in this stage."}`;
+      }
+      if (name === "reassign_claims" && spec.experiment && spec.reassignTargets) {
+        const x = spec.experiment;
+        const ids = Array.isArray(args.claim_ids) ? args.claim_ids.filter((id): id is string => typeof id === "string") : [];
+        const invalid = ids.filter(id => !claimIds.has(id) || !isPending(id) || moveKind.has(id));
+        if (!ids.length || invalid.length) return `Refused: claim_ids must name pending claims of this experiment that were not moved before${invalid.length ? ` (invalid: ${invalid.join(", ")})` : ""}.`;
+        const requested = typeof args.experiment_id === "string" ? args.experiment_id.trim() : "";
+        const target = spec.reassignTargets().find(other => other.id === requested);
+        if (!target) {
+          const ran = experiments.find(other => other.id === requested && other !== x);
+          if (ran?.evidenceId !== undefined) return `Refused: ${ran.id} already ran. If its output measures the claim, cite its successful execution #${ran.evidenceId} in record_results with method ${ran.method}.`;
+          const later = spec.reassignTargets().map(other => other.id);
+          return `Refused: experiment_id must name a later planned experiment${later.length ? ` (${later.join(", ")})` : ""}.`;
+        }
+        if (target.claims.length + ids.length > PLAN_LIMITS.maxClaimsPerExperiment) return `Refused: ${target.id} would exceed ${PLAN_LIMITS.maxClaimsPerExperiment} claims; record these claims with the available evidence.`;
+        const reason = typeof args.reason === "string" ? args.reason.trim().slice(0, 300) : "";
+        for (const id of ids) {
+          const planned = x.claims.find(c => c.claimId === id)!;
+          // The original planned measurement names the wrong script; carry the assessor's reason instead.
+          target.claims.push(reason ? { ...planned, measurement: `${reason} (reassigned from ${x.id})` } : planned);
+          deferredTo.set(id, target.id);
+          moveKind.set(id, "reassigned");
+        }
+        await save();
+        const left = outstanding();
+        return `Reassigned ${ids.join(", ")} to experiment ${target.id}; it assesses them after its command runs. ${left.length ? `Record the remaining claims now: ${left.join(", ")}.` : "No claims remain in this stage."}`;
       }
       return input.execute(name, args);
     };
@@ -926,6 +971,22 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
     const readmeRead = session.toolCalls.find(c => c.name === "read_file" && readmePaths.includes(String(c.args.path)) && !c.error);
     const suggestedBlocker = failed ? (/^TIMED OUT/.test(failed.result) ? "timeout" : /\b(?:out of memory|oom)\b/i.test(failed.result) ? "oom" : "command-error") : undefined;
     const provenanceIds = inventoryRead || readmeRead ? ` (${[inventoryRead, readmeRead].filter(Boolean).map(c => `#${c!.index}`).join(", ")})` : "";
+    // Planning can map a claim to the wrong script. The assessor may cite another experiment's
+    // successful execution (validated against that experiment's method and entrypoint) or move the
+    // claim to a later planned experiment, instead of recording "not in this output" as inconclusive.
+    const position = experiments.indexOf(x);
+    const ranBefore = experiments.filter(other => other !== x && other.evidenceId !== undefined);
+    const reassignTargets = () => experiments.filter((other, i) => i > position && other.status === "planned" && other.method !== "blocked");
+    const citedOther = (item: Record<string, unknown>): BatchExperiment | undefined => {
+      const ids: unknown[] = Array.isArray(item.evidence_tool_call_ids) ? item.evidence_tool_call_ids : [];
+      if (x.evidenceId !== undefined && ids.includes(x.evidenceId)) return undefined;
+      return ranBefore.find(other => ids.includes(other.evidenceId));
+    };
+    const describeOther = (other: BatchExperiment) => `${other.command ? `\`${other.command}\`` : "model-written computation"}. Claims: ${other.claims.map(c => c.claimId).join(", ")}. Rationale: ${other.rationale.slice(0, 300)}`;
+    const otherLines = [
+      ...ranBefore.map(other => `- ${other.id} (${other.method}, ran) → successful execution #${other.evidenceId} (${session.toolCalls.find(c => c.index === other.evidenceId)?.result.length ?? 0} characters): ${describeOther(other)}`),
+      ...(x.origin === "plan" ? reassignTargets().map(other => `- ${other.id} (${other.method}, planned, runs later): ${describeOther(other)}`) : []),
+    ];
     const packet = [
       `CURRENT STAGE: assessment of experiment ${x.id} (${x.method}${x.origin === "deferred" ? ", deferred" : ""}). Record every claim listed below with record_results (one call can carry all of them). You have ${allowance} tool calls; the last one must be record_results. Page beyond the inline output with read_tool_result(tool_call_id, offset).`,
       [
@@ -939,6 +1000,7 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
       ].filter(Boolean).join("\n"),
       evidence ? inlineOutput(evidence) : failed ? `## Captured output of failing #${failed.index} (last 4000 characters)\n${failed.result.slice(-4000)}` : "",
       `## Claims to record\n${claims.map(c => describeClaim(session.recorded.get(c.claimId)!, c.measurement)).join("\n")}`,
+      otherLines.length ? `## Other experiments\n${otherLines.join("\n")}` : "",
       [
         "## Recording rules",
         evidence
@@ -947,19 +1009,26 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
             ? `- The experiment failed: record each claim as status inconclusive, method blocked, blocker_kind ${suggestedBlocker}, evidence_tool_call_ids [${failed.index}], evidence_excerpt an exact error line from that output, and evidence explaining the ${suggestedBlocker === "oom" ? "memory" : suggestedBlocker === "timeout" ? "timeout" : "error"}.`
             : `- Nothing executed: record each claim as inconclusive with method blocked and blocker_kind missing-material, citing read_file of ${inventoryPath}${inventoryRead ? ` (#${inventoryRead.index})` : ""}${readmeRead ? ` and the README (#${readmeRead.index})` : ""} plus a list_files/read_file output showing the absence; required_material must use the claim's own wording from its source quote.`,
         x.method === "raw-data-rederived" && x.rawInputs.length ? `- raw-data-rederived items need raw_input_path and raw_input_tool_call_id: ${x.rawInputs.map(path => `${path} → #${rawReads.get(path)?.index ?? "?"}`).join(", ")}.` : "",
-        x.origin === "plan" ? `- If this output does not contain a claim's measurement, do not guess: defer_claims to raw-data-rederived (naming shipped raw files) or toy. If it can never be measured with shipped materials, record it inconclusive with method blocked and blocker_kind missing-material citing the inventory/README reads${provenanceIds} plus proof of absence: a read_file of the path where the material would live (its 'File not found' line is the excerpt) or a list_files of a directory that does not exist. A successful execution or a listing of an existing directory cannot support a blocked result.` : "- Deferred claims cannot be deferred again; record them with the available evidence.",
-        "- For stochastic estimates, exceeding rounding precision alone is not falsification. Compare uncertainty and the substantive conclusion. A near-zero mean switching sign while both intervals span zero is not a contradiction. If meaningful tolerance is unknown, record inconclusive rather than inventing an exact-equality requirement.",
+        otherLines.length ? `- Planning may have mapped a claim to the wrong script. If this output lacks a claim's measurement (same metric, subset, boundary and condition), do not record it inconclusive while an experiment under "Other experiments" may measure it: page a ran experiment's execution with read_tool_result and, if it measures the claim, cite that execution ID with that experiment's method${x.origin === "plan" && reassignTargets().length ? ", or reassign_claims to the later planned experiment whose command prints it" : ""}.` : "",
+        x.origin === "plan" ? `- If no listed experiment measures it, do not guess: defer_claims to raw-data-rederived (naming shipped raw files) or toy. If it can never be measured with shipped materials, record it inconclusive with method blocked and blocker_kind missing-material citing the inventory/README reads${provenanceIds} plus proof of absence: a read_file of the path where the material would live (its 'File not found' line is the excerpt) or a list_files of a directory that does not exist. A successful execution or a listing of an existing directory cannot support a blocked result.` : "- Deferred claims cannot be moved again; record them with the available evidence.",
+        "- For stochastic estimates, exceeding rounding precision alone is not falsification. Compare uncertainty and the substantive conclusion. A near-zero mean switching sign while both intervals span zero is not a contradiction. A small difference that leaves sign, ordering, peak location and significance unchanged is verified (state both values); if a difference would change the paper's statement and meaningful tolerance is unknown, record inconclusive rather than inventing an exact-equality requirement.",
         "- Never cite read_tool_result IDs as evidence; cite the original execution ID.",
       ].filter(Boolean).join("\n"),
     ].filter(Boolean).join("\n\n");
     await assessClaims({
       name: "assessment", experiment: x, claims, allowance, packet,
-      methodFor: () => x.method,
-      materialPathsFor: () => x.materialPaths,
+      methodFor: item => (citedOther(item) ?? x).method,
+      materialPathsFor: item => (citedOther(item) ?? x).materialPaths,
       allowDefer: x.origin === "plan" && experiments.length < PLAN_LIMITS.maxExperiments,
+      reassignTargets: x.origin === "plan" ? reassignTargets : undefined,
     });
     x.status = "assessed";
-    x.assessment = x.claims.map(c => `${c.claimId}=${owner(c.claimId) !== x.id ? `deferred to ${owner(c.claimId)}` : session.recorded.get(c.claimId)?.status}`).join(" ");
+    x.assessment = x.claims.map(c => {
+      if (owner(c.claimId) !== x.id) return `${c.claimId}=${moveKind.get(c.claimId) ?? "deferred"} to ${owner(c.claimId)}`;
+      const recorded = session.recorded.get(c.claimId);
+      const via = ranBefore.find(other => recorded?.evidenceToolCallIds?.includes(other.evidenceId!));
+      return `${c.claimId}=${recorded?.status}${via ? ` (cited ${via.id} #${via.evidenceId})` : ""}`;
+    }).join(" ");
   };
 
   const sweep = async (): Promise<void> => {

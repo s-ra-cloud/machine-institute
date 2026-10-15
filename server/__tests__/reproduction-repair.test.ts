@@ -365,7 +365,8 @@ describe("runReproduction orchestration repair", () => {
     expect(createCompletion.mock.calls.some((entry: any[]) =>
       entry[0]?.messages?.some((message: any) => String(message.content).includes("Accepted state remains pending")),
     )).toBe(true);
-    expect(createCompletion.mock.calls.at(-1)?.[0].messages[0].content).toBe("Judge this reproduction.");
+    // The saved judge prompt is preserved; the current verification standard is appended.
+    expect(createCompletion.mock.calls.at(-1)?.[0].messages[0].content).toMatch(/^Judge this reproduction\.\n\nVerification standard/);
   });
 
   it("fails a no-progress repair without judging and terminates exactly once", async () => {
@@ -587,7 +588,7 @@ describe("runReproduction enforced resource stops", () => {
     let forcedFinalAttempted = false;
     let judgeRequest: any;
     createCompletion.mockImplementation(async (request: any) => {
-      if (request.messages[0]?.content === "Judge this reproduction.") {
+      if (String(request.messages[0]?.content).startsWith("Judge this reproduction.")) {
         judgeRequest = JSON.parse(JSON.stringify(request));
         return judgeCompletion(["R1"], "inconclusive");
       }

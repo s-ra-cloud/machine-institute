@@ -111,3 +111,27 @@ Keep rejected-candidate identities explicit when correcting a quotation. Give ca
 **Why:** a live extractor submitted shorter valid quotations without identifying the original rejection they replaced. The old rejection remained unresolved and correctly prevented GPU allocation, but generic exact-match errors did not help the model recover.
 
 **How to apply:** corrections must still pass exact-source validation and explicitly replace the rejection; contextual hints are guidance, not evidence or automatic repairs.
+
+**Partial-verification cycle lessons (2026-10-15)**
+
+Planning can attach a claim to the wrong script. Assessment must be able to cite another experiment's successful execution (validated against that experiment's method and entrypoint) or move the claim once to a later planned experiment; "this output does not contain it" is a pipeline artifact, not a scientific inconclusive.
+
+**Why:** a 12-verified/6-inconclusive cycle lost two claims only because planning put analysis5/analysis3 claims under the analysis6 experiment and assessment could cite only the current experiment.
+
+**How to apply:** a claim moves at most once (defer or reassign); reassigning to an experiment that already ran is refused in favour of citing it.
+
+Show cited executions whole to the judge whenever context allows and print a shared execution once per batch; excerpt-centred cropping is the last-resort reduction only.
+
+**Why:** a compound claim's second row sat outside a ±250-character crop of a >12k-character output, so the judge could not see a value the agent had reproduced.
+
+Apply one verification standard to every claim and append it at judge time to saved or custom prompts. Small run-to-run differences that leave every stated property (sign, ordering, peak/threshold location, significance) unchanged verify; falsification still needs separated uncertainty or a documented tolerance.
+
+**Why:** the judge prompt also said "if meaningful tolerance cannot be established, use inconclusive", contradicting the assessment rule; the same evidence (0.361 vs reported 0.375) flipped verdicts between cycles.
+
+**How to apply:** no invented numeric thresholds; when a verified value differs beyond rounding the judge states both values, the difference and the properties checked.
+
+Extraction packet edges must fall on line/sentence (else word) boundaries.
+
+**Why:** a fixed 6000/600 layout started a packet mid-word inside a finding; validation correctly rejected the fragment, it could not be repaired within that packet, and the whole run failed before GPU allocation.
+
+Test gotcha: the request budget estimates tokens by bytes and trusts a large window only for verified or known models, so a judge test that needs the uncompacted levels must use a trusted config (e.g. BYOC OpenAI gpt-4o) plus a large mocked window.

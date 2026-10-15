@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const generate = vi.fn();
+const contextWindow = vi.hoisted(() => ({ tokens: 32_768 }));
 
 vi.mock("../model-service", () => ({
-  getContextWindow: () => 32_768,
+  getContextWindow: () => contextWindow.tokens,
   generateWithConfig: (...args: unknown[]) => generate(...args),
 }));
 
@@ -90,6 +91,7 @@ function call(index: number, output: string): ToolCallRecord {
 }
 
 beforeEach(() => {
+  contextWindow.tokens = 32_768;
   generate.mockReset();
   generate.mockResolvedValue({
     content: "```json\n{\"summary\":\"judged\",\"results\":[]}\n```",
@@ -185,6 +187,35 @@ describe("bounded reproduction judge context handling", () => {
     expect(input).toContain("band mean=-0.013");
     expect(input).toContain("layer=12 mean=0.132 CI=[0.085,0.188] improved=76.7%");
   });
+  it("shows a long shared execution whole, once per batch, so every component of a compound claim is visible", async () => {
+    // A provider whose large window is trusted (production verifies BYOK OpenRouter windows from the catalogue).
+    contextWindow.tokens = 200_000;
+    const trusted = { providerMode: "byoc" as const, provider: "openai", modelName: "gpt-4o" };
+    // Both rows of a compound claim, separated by more than the excerpt window.
+    const output = "negated-control uptake difference=0.306\n" + "patch row\n".repeat(2_000)
+      + "uncertainty-control uptake difference=0.236";
+    expect(output.length).toBeGreaterThan(12_000);
+    await runBoundedReproductionJudge({
+      config: trusted, prompt: "judge", title: "Study", abstract: "", logbook: "",
+      recordedResults: [
+        { ...claim("R1"), claim: "Semantic uptake exceeds negated control by 0.306 and uncertainty control by 0.236.",
+          evidenceExcerpt: "negated-control uptake difference=0.306" },
+        { ...claim("R2"), claim: "Uncertainty uptake gap.", evidenceToolCallIds: [1],
+          evidenceExcerpt: "uncertainty-control uptake difference=0.236" },
+      ],
+      toolCalls: [call(1, output)],
+    });
+    expect(generate).toHaveBeenCalledOnce();
+    const input = String(generate.mock.calls[0][2]);
+    const evidence = input.slice(input.indexOf("# ORIGINAL CITED TOOL OUTPUTS"), input.indexOf("# TOOL TRANSCRIPT"));
+    expect(evidence).not.toContain("output omitted");
+    // R1's block carries the far row its excerpt does not include; the long output appears only once.
+    expect(evidence.indexOf("uncertainty-control uptake difference=0.236")).toBeLessThan(evidence.indexOf("### R2"));
+    expect(evidence.split("patch row\n".repeat(2_000)).length).toBe(2);
+    expect(evidence).toContain("the complete output of tool #1 is shown above under R1");
+    expect(String(generate.mock.calls[0][1])).toContain("Verification standard");
+  });
+
   it("retains the executed derivation source rather than trusting printed summaries", async () => {
     const recorded = { ...claim("R1", 3), method: "raw-data-rederived" as const };
     const source: ToolCallRecord = { index: 2, name: "write_file",
