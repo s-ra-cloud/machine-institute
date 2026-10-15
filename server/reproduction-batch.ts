@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { captureReproductionEvidence } from "./reproduction-evidence";
 import { runToolLoop, type ModelProviderConfig, type ToolCallRecord, type ToolLoopOptions, type ToolLoopResult, type ToolSpec } from "./model-service";
 import type { ReproductionSession } from "./reproduction-session";
 import type { RecordedResult } from "./prompts/reproduce";
@@ -69,6 +70,7 @@ export interface BatchControllerSnapshot {
 }
 
 export interface PipelineCheckpoint {
+  evidence?: ReturnType<typeof import("./reproduction-evidence").captureReproductionEvidence>;
   extraction?: ExtractionCoverage;
   failure?: { phase: string; phaseCalls: number; aggregateCalls: number; reason: string };
   controller: BatchControllerSnapshot;
@@ -346,6 +348,7 @@ export async function runBatchReproduction(input: BatchReproductionInput): Promi
         origin: c.index <= started ? "pre-pipeline" as const : hostRunIds.has(c.index) ? "host-run" as const : "agent-tool" as const,
         sha256: createHash("sha256").update(c.result).digest("hex"), error: c.error,
       })),
+      evidence: captureReproductionEvidence(session.toolCalls),
       logbook: logbook(),
     });
   };

@@ -46,6 +46,7 @@ export interface RecordedResult {
 }
 
 export interface ClaimVerdict {
+  verificationAssessment?: unknown;
   falsificationAssessment?: unknown;
   id: string;
   claim: string;
@@ -201,6 +202,7 @@ export function parseJudgeOutput(text: string): { summary: string; results: Clai
         reproducedValue: str(r.reproduced_value ?? r.reproducedValue),
         evidence: str(r.evidence),
         falsificationAssessment: r.falsification_assessment,
+        verificationAssessment: r.verification_assessment,
         confidence: conf === "high" || conf === "medium" || conf === "low" ? conf : undefined,
       };
     })

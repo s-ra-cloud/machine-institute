@@ -177,7 +177,7 @@ function FailureDiagnostics({ id, adminId }: { id: string; adminId: string }) {
         className="text-xs font-mono text-muted-foreground hover:text-foreground"
         data-testid="button-toggle-failure-diagnostics"
       >
-        {expanded ? "Hide" : "Show"} failure diagnostics (admin only)
+        {expanded ? "Hide" : "Show"} run diagnostics and evidence (admin only)
       </button>
       {expanded && (
         <div id="failure-diagnostics-content" className="mt-4 text-xs text-muted-foreground">
@@ -186,6 +186,14 @@ function FailureDiagnostics({ id, adminId }: { id: string; adminId: string }) {
             : error ? <p role="alert">Could not load private diagnostics. Close and reopen to retry.</p>
             : data?.diagnostics == null ? <p>No diagnostics were saved for this run.</p>
             : <>
+                <button type="button" className="mb-3 underline" onClick={() => {
+                  const url = URL.createObjectURL(new Blob([JSON.stringify(data.diagnostics, null, 2)], { type: "application/json" }));
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = `reproduction-${id}-evidence.json`;
+                  link.click();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                }}>Download private diagnostics and evidence</button>
                 {providerPaymentGuidance(data.diagnostics) && (
                   <p className="mb-3 border border-amber-500/30 bg-amber-500/5 p-3 text-amber-200" data-testid="text-provider-payment-guidance">
                     {providerPaymentGuidance(data.diagnostics)}
@@ -545,7 +553,7 @@ export default function ReproductionDetail() {
             ) : null}
           </FadeIn>
 
-          {isAdmin && user && run.status === "failed" && (
+          {isAdmin && user && (
             <FailureDiagnostics key={`${run.id}:${user.id}`} id={run.id} adminId={user.id} />
           )}
 

@@ -99,6 +99,34 @@ beforeEach(() => {
 });
 
 describe("bounded reproduction judge context handling", () => {
+  it("rechecks inconsistent reasoning once and never forces verification", async () => {
+    const verdict = { id: "R1", claim: "R1", verdict: "inconclusive",
+      verification_assessment: { conditionsMatch: true, allQuantitativeStatementsChecked: true,
+        differences: "small", propertiesPreserved: true, explanation: "Same result, small variation." } };
+    generate.mockResolvedValue({ content: JSON.stringify({ summary: "Uncertain.", results: [verdict] }) });
+    const result = await runBoundedReproductionJudge({
+      config, prompt: "judge", title: "paper", abstract: "", logbook: "",
+      recordedResults: [claim("R1")], toolCalls: [call(1, "metric=1")],
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls[1][2]).toContain("CONSISTENCY RECHECK");
+    expect(result.results[0].verdict).toBe("inconclusive");
+  });
+
+  it("does not accept verification that still contradicts its comparison checklist", async () => {
+    generate.mockResolvedValue({ content: JSON.stringify({ summary: "Verified.", results: [{
+      id: "R1", claim: "R1", verdict: "verified",
+      verification_assessment: { conditionsMatch: false, allQuantitativeStatementsChecked: false,
+        differences: "unknown", propertiesPreserved: false, explanation: "Different subset." },
+    }] }) });
+    const result = await runBoundedReproductionJudge({
+      config, prompt: "judge", title: "paper", abstract: "", logbook: "",
+      recordedResults: [claim("R1")], toolCalls: [call(1, "metric=1")],
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result.results[0].verdict).toBe("inconclusive");
+    expect(result.results[0].evidence).toContain("inconsistent");
+  });
   it("starts DeepSeek V4 with reasoning room instead of retrying the known-small 6k allowance", async () => {
     generate.mockResolvedValue({ content: JSON.stringify({
       summary: "Graded", results: [{ id: "R1", claim: "R1", verdict: "verified" }],

@@ -45,6 +45,7 @@ const EXECUTION_WINDOW_CHARS = 4_000;
 
 import type { QuestioningState } from "./reproduction-questioning";
 import { JUDGE_VERIFICATION_STANDARD, QUESTIONING_JUDGE_PROMPT } from "./prompts/reproduce";
+import { VERIFICATION_CHECK, verificationConflict } from "./reproduction-verification";
 
 export interface RunBoundedReproductionJudgeOptions {
   questioning?: QuestioningState;
@@ -463,6 +464,7 @@ export async function runBoundedReproductionJudge(
   if (!opts.prompt.includes(JUDGE_VERIFICATION_STANDARD)) {
     opts = { ...opts, prompt: `${opts.prompt}\n\n${JUDGE_VERIFICATION_STANDARD}` };
   }
+  opts = { ...opts, prompt: `${opts.prompt}\n\n${VERIFICATION_CHECK}` };
   const started = Date.now();
   const seenIds = new Set<string>();
   const recordedResults = opts.recordedResults.filter(result => {
@@ -488,9 +490,11 @@ export async function runBoundedReproductionJudge(
     let parsed: { summary: string; results: ClaimVerdict[] } | undefined;
     let completed = false;
     let contextRetries = group.contextRetries;
+    let consistencyRetry = "";
 
     while (true) {
-      const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, claims, opts.toolCalls, level, allResultIds(opts));
+      const input = buildJudgeInput(opts.title, opts.abstract, opts.logbook, claims, opts.toolCalls, level, allResultIds(opts))
+        + (consistencyRetry ? `\n# CONSISTENCY RECHECK (one attempt only)\n${consistencyRetry}\nReturn all verdicts for this batch again. Do not assume the earlier verdict is correct.` : "");
       const request = requestFor(opts.config, opts.prompt, input, maxTokens);
       try {
         budget.assertFits(request);
@@ -541,6 +545,21 @@ export async function runBoundedReproductionJudge(
             Math.floor(remaining / (groups.length - groupIndex)))),
         });
         parsed = parseJudgeOutput(response.content);
+        const conflicts = parsed.results.map(verificationConflict).filter(Boolean);
+        if (conflicts.length && !consistencyRetry) {
+          consistencyRetry = conflicts.join("\n");
+          await diagnostic(opts.onDiagnostic, "Judge comparison checks conflict with verdicts; performing one evidence-grounded recheck.");
+          continue;
+        }
+        for (const result of parsed.results) {
+          if (result.verdict === "verified" && verificationConflict(result)) {
+            result.verdict = "inconclusive";
+            result.evidence = `Verification checks remained inconsistent after one recheck. ${result.evidence ?? ""}`;
+          }
+        }
+        if (conflicts.length) {
+          parsed.summary = `Consistency warning: ${conflicts.join(" ")} Unresolved checks do not establish verification; individual final verdicts take precedence.\n\n${parsed.summary}`;
+        }
         if (parsed.results.length === 0) {
           await diagnostic(opts.onDiagnostic, "Judge returned no parseable claim verdicts; claims remain inconclusive.");
           summaries.push(`The judge returned no parseable verdicts for ${claims.map(claim => claim.id).join(", ")}; claims remain inconclusive.`);

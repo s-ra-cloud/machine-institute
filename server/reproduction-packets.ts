@@ -60,7 +60,7 @@ export function prepareSourcePackets(source: string): SourcePacket[] {
 
 /**
  * Projection of text without formatting characters: LaTeX inline delimiters (\( \) \[ \]),
- * other backslash escapes, $, Markdown emphasis/code markers, and whitespace runs (collapsed).
+ * and whitespace runs (collapsed). Mathematical operators and escapes are preserved.
  * `map[i]` is the source offset of projected character i.
  */
 function withoutFormatting(text: string): { text: string; map: number[] } {
@@ -68,11 +68,10 @@ function withoutFormatting(text: string): { text: string; map: number[] } {
   const map: number[] = [];
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
-    if (ch === "\\") {
-      if ("()[]".includes(text[i + 1] ?? "")) i++;
+    if (ch === "\\" && /[()[\]]/.test(text[i + 1] ?? "")) {
+      i++;
       continue;
     }
-    if ("$*_`".includes(ch)) continue;
     if (/\s/.test(ch)) {
       if (out && !out.endsWith(" ")) { out += " "; map.push(i); }
       continue;
@@ -96,12 +95,10 @@ function locateIgnoringFormatting(needle: string, haystack: string, includeDelim
     // Keep math/emphasis delimiters that open or close the matched text, e.g. "\(p = 0.01\)".
     for (;;) {
       if (/^\\[([]$/.test(haystack.slice(start - 2, start))) start -= 2;
-      else if (start > 0 && "$*`".includes(haystack[start - 1])) start--;
       else break;
     }
     for (;;) {
       if (/^\\[)\]]$/.test(haystack.slice(end, end + 2))) end += 2;
-      else if (end < haystack.length && "$*`".includes(haystack[end])) end++;
       else break;
     }
   }
@@ -111,7 +108,7 @@ function locateIgnoringFormatting(needle: string, haystack: string, includeDelim
 /**
  * Exact quotation stays the rule; this only restores source formatting. A quote that is
  * absent verbatim but matches exactly one passage once formatting characters are ignored
- * (LaTeX delimiters and escapes, Markdown markers, whitespace runs) is replaced by that exact
+ * (LaTeX inline delimiters and whitespace runs only) is replaced by that exact
  * source text. Words, numbers and their order must already be identical, so a paraphrase or
  * a changed value is never accepted, and validation still runs on the restored text.
  */

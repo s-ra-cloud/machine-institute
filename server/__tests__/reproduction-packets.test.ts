@@ -30,6 +30,16 @@ it("starts and ends packets on sentence boundaries so every finding is quotable 
 });
 
 describe("restoring source formatting in quotations", () => {
+  it("does not erase multiplication, subscripts or mathematical command escapes", () => {
+    for (const [source, quote] of [
+      ["The measured x_1 value was 0.91.", "The measured x1 value was 0.91."],
+      ["The measured x*y value was 0.91.", "The measured xy value was 0.91."],
+      ["The measured \\alpha value was 0.91.", "The measured alpha value was 0.91."],
+    ]) {
+      expect(restoreSourceFormatting({ claim: quote, source_quote: quote },
+        { id: "p", start: 0, end: source.length, text: source }).restored).toBe(false);
+    }
+  });
   // The live paper writes statistics as LaTeX; DeepSeek resubmitted the plain text three times.
   const latex = "Crucially, the paired late-layer gaps are reliable with task-level uncertainty: semantic minus negated is +0.233 with a 95% bootstrap confidence interval of [0.181, 0.290] and permutation \\(p = 0.00025\\), while semantic minus placeholder is +0.159 with a 95% confidence interval of [0.108, 0.213] and the same permutation \\(p\\)-value.";
   const text = `For the placeholder control the scores are 0.302, 0.069, and 0.143.\n${latex}\n\n## Next`;

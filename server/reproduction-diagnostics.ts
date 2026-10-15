@@ -21,8 +21,10 @@ export function diagnosticExcerpt(value: string, maxBytes = 700): string {
     .replace(/[A-Za-z0-9_+/=-]{32,}/g, "[REDACTED opaque value]")
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
   let result = "";
+  let bytes = 2;
   for (const char of sanitized) {
-    if (Buffer.byteLength(JSON.stringify(result + char), "utf8") > maxBytes - 30) {
+    bytes += Buffer.byteLength(JSON.stringify(char), "utf8") - 2;
+    if (bytes > maxBytes - 30) {
       return `${result}[TRUNCATED]`;
     }
     result += char;

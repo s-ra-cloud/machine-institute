@@ -136,8 +136,20 @@ Extraction packet edges must fall on line/sentence (else word) boundaries.
 
 Test gotcha: the request budget estimates tokens by bytes and trusts a large window only for verified or known models, so a judge test that needs the uncompacted levels must use a trusted config (e.g. BYOC OpenAI gpt-4o) plus a large mocked window.
 
-Restore source formatting deterministically instead of spending repairs on it: a quote that matches exactly one passage once formatting characters are ignored (LaTeX \( \) \[ \] delimiters and escapes, $, Markdown markers, whitespace runs) is replaced by that exact source span before validation. This is not accepting a suggested passage: words, numbers and their order must already be identical.
+Restore source formatting deterministically instead of spending repairs on it: a quote that matches exactly one passage after ignoring LaTeX \( \) \[ \] delimiters and whitespace runs is replaced by that exact source span before validation. Preserve other escapes, multiplication symbols, subscripts and dollar signs: stripping them can change scientific meaning. Words, numbers and their order must already be identical.
 
 **Why:** DeepSeek V4 resubmitted plain "p = 0.00025" for a source "\(p = 0.00025\)" three times while saying it would add the LaTeX; the no-progress stop left one packet unresolved and failed the whole run before GPU allocation (the same sentence had extracted fine a cycle earlier, so the failure is intermittent).
 
 **How to apply:** require uniqueness within the packet; never widen the projection to paraphrases, value changes or ambiguous spans; validation (including the mid-word check) still runs on the restored text.
+
+Retain redacted execution evidence privately for new batch runs, with explicit truncation/omission reporting, not merely output hashes.
+
+**Why:** after sandbox termination, hashes could establish integrity but could not resolve whether the judge compared the same metric and intervention.
+
+**How to apply:** keep evidence behind administrator authorization, never in public run responses. Preserve historical reports; absent historical evidence cannot be reconstructed.
+
+Use a bounded consistency recheck when a judge's structured comparison checks contradict its verdict; never automatically promote an inconclusive result.
+
+**Why:** the live judge demanded exact matching for one small discrepancy while accepting comparable variation elsewhere. Compound claims also need all quantitative clauses checked.
+
+**How to apply:** at most one recheck per batch under existing time and spending guards; unresolved contradictions cannot establish verification. Batch summaries must not call other batches' claims missing.

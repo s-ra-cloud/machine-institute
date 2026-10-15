@@ -72,7 +72,7 @@ afterEach(async () => {
 describe("admin-only reproduction diagnostic disclosure", () => {
   it("starts collapsed without fetching and handles legacy runs with no snapshot", async () => {
     await render();
-    expect(container.textContent).toContain("Show failure diagnostics");
+    expect(container.textContent).toContain("Show run diagnostics and evidence");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(container.querySelector('[aria-expanded="false"]')).not.toBeNull();
     await toggle();

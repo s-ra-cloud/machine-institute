@@ -3095,11 +3095,14 @@ I will now provide the papers.`;
         emitEvent: emit,
         onDiagnostics: snapshot => { diagnosticCapture.latest = snapshot; },
         onCheckpoint: async checkpoint => {
-          // Metadata only: never persist command text, credentials, or raw output.
-          const safe = JSON.parse(JSON.stringify(checkpoint, (key, value) =>
+          // Evidence has its own redaction and size bounds; never pass it through
+          // the small metadata excerpt limit or expose it in public run responses.
+          const { evidence, ...metadata } = checkpoint;
+          const safe = JSON.parse(JSON.stringify(metadata, (key, value) =>
             typeof value === "string" && key !== "sha256"
               ? diagnosticExcerpt(value, key === "logbook" ? 20000 : 2400) : value)) as PipelineCheckpoint;
           if (Buffer.byteLength(JSON.stringify(safe), "utf8") > 96000) throw new Error("Pipeline checkpoint exceeded its bounded metadata capacity.");
+          if (evidence) safe.evidence = evidence;
           await storage.saveReproductionFailureDiagnostics(reproductionId, JSON.stringify({
             ...(diagnosticCapture.latest ?? createFallbackReproductionDiagnostics()), pipeline: safe,
           }));
