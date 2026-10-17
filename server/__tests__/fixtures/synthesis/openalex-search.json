@@ -1,0 +1,71 @@
+{
+  "meta": { "count": 2, "per_page": 25, "page": 1 },
+  "results": [
+    {
+      "id": "https://openalex.org/W2741809807",
+      "doi": "https://doi.org/10.1177/0018720815581247",
+      "title": "Trust in Automation: Integrating Empirical Evidence on Factors That Influence Trust",
+      "display_name": "Trust in Automation: Integrating Empirical Evidence on Factors That Influence Trust",
+      "publication_year": 2015,
+      "publication_date": "2015-05-01",
+      "type": "article",
+      "language": "en",
+      "cited_by_count": 2410,
+      "authorships": [
+        { "author": { "id": "https://openalex.org/A1", "display_name": "Kevin Anthony Hoff" } },
+        { "author": { "id": "https://openalex.org/A2", "display_name": "Masooda Bashir" } }
+      ],
+      "primary_location": {
+        "landing_page_url": "https://journals.sagepub.com/doi/10.1177/0018720815581247",
+        "source": { "display_name": "Human Factors" }
+      },
+      "best_oa_location": null,
+      "abstract_inverted_index": {
+        "We": [0],
+        "review": [1],
+        "trust": [3, 5],
+        "in": [4],
+        "the": [2],
+        "automation.": [6]
+      },
+      "primary_topic": {
+        "display_name": "Human-Automation Interaction and Safety",
+        "field": { "id": "https://openalex.org/fields/32", "display_name": "Psychology" }
+      },
+      "topics": [
+        {
+          "display_name": "Human-Automation Interaction and Safety",
+          "field": { "id": "https://openalex.org/fields/32", "display_name": "Psychology" }
+        },
+        {
+          "display_name": "Explainable Artificial Intelligence (XAI)",
+          "field": { "id": "https://openalex.org/fields/17", "display_name": "Computer Science" }
+        }
+      ],
+      "referenced_works": ["https://openalex.org/W100", "https://openalex.org/W200"]
+    },
+    {
+      "id": "https://openalex.org/W3000000001",
+      "doi": "https://doi.org/10.48550/arXiv.2104.01234",
+      "title": "Calibrated Trust in Language Models",
+      "publication_year": 2021,
+      "publication_date": "2021-04-02",
+      "type": "preprint",
+      "cited_by_count": 12,
+      "authorships": [{ "author": { "display_name": "Ana Lopez" } }],
+      "primary_location": {
+        "landing_page_url": "https://arxiv.org/abs/2104.01234",
+        "source": { "display_name": "arXiv (Cornell University)" }
+      },
+      "best_oa_location": {
+        "landing_page_url": "https://arxiv.org/abs/2104.01234",
+        "pdf_url": "https://arxiv.org/pdf/2104.01234"
+      },
+      "abstract_inverted_index": null,
+      "primary_topic": null,
+      "topics": [],
+      "referenced_works": []
+    },
+    { "id": "https://openalex.org/W999", "title": null }
+  ]
+}
