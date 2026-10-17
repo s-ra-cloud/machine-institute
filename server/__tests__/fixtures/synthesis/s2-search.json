@@ -1,0 +1,40 @@
+{
+  "total": 1532,
+  "offset": 0,
+  "next": 2,
+  "data": [
+    {
+      "paperId": "a1b2c3d4e5",
+      "externalIds": { "DOI": "10.1177/0018720815581247", "CorpusId": 1234 },
+      "title": "Trust in Automation: Integrating Empirical Evidence on Factors That Influence Trust",
+      "abstract": "We systematically review recent empirical research on factors that influence trust in automation to present a three-layered trust model.",
+      "year": 2015,
+      "publicationDate": "2015-05-01",
+      "venue": "Human Factors",
+      "authors": [{ "authorId": "1", "name": "Kevin Anthony Hoff" }, { "authorId": "2", "name": "Masooda Bashir" }],
+      "citationCount": 2398,
+      "fieldsOfStudy": ["Psychology", "Medicine"],
+      "s2FieldsOfStudy": [
+        { "category": "Psychology", "source": "external" },
+        { "category": "Engineering", "source": "s2-fos-model" }
+      ],
+      "openAccessPdf": null,
+      "url": "https://www.semanticscholar.org/paper/a1b2c3d4e5"
+    },
+    {
+      "paperId": "f6g7h8",
+      "externalIds": { "ArXiv": "2104.01234" },
+      "title": "Calibrated Trust in Language Models",
+      "abstract": null,
+      "year": 2021,
+      "venue": "",
+      "authors": [{ "name": "Ana Lopez" }],
+      "citationCount": 15,
+      "fieldsOfStudy": null,
+      "s2FieldsOfStudy": [{ "category": "Computer Science", "source": "s2-fos-model" }],
+      "openAccessPdf": { "url": "https://arxiv.org/pdf/2104.01234", "status": "GREEN" },
+      "url": "https://www.semanticscholar.org/paper/f6g7h8"
+    },
+    { "paperId": "broken", "title": "" }
+  ]
+}
